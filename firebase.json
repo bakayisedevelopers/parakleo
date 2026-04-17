@@ -4,7 +4,7 @@
   },
   "hosting": {
     "site": "claxi",
-    "public": "dist",
+    "public": "web/dist",
     "ignore": [
       "firebase.json",
       "**/.*",

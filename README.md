@@ -1,68 +1,47 @@
-# Claxi MVP Foundation
+# Claxi Monorepo Structure
 
-Claxi is an online-first tutoring marketplace where students request classes and tutors accept/manage them in real time.
+This repository is organized with top-level folders for web, mobile, shared code, and Firebase functions:
 
-## Stack
-- React + Vite + Tailwind + React Router
-- Firebase Auth + Firestore (modular SDK usage)
-- Firebase Hosting + Functions-ready project config
-- Resend email delivery through Firebase Functions (server-side only)
+- `web/` — React + Vite web app (current production app)
+- `mobile/` — Expo-based React Native starter app
+- `shared/` — shared code placeholder for cross-platform modules
+- `functions/` — Firebase Cloud Functions (kept at root intentionally)
 
-## Environment Variables
-Create a `.env` file for web app:
+## Directory Layout
 
-```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-VITE_FIREBASE_DATABASE_ID=claxi
+```txt
+.
+├── web/
+├── mobile/
+├── shared/
+├── functions/
+├── firebase.json
+└── docs/
 ```
 
-Set Firebase Functions environment variables/secrets separately:
+## Quick Start
 
+### Web app
 ```bash
-RESEND_API_KEY=
-EMAIL_FROM=noreply@yourdomain.com
-PAYSTACK_SECRET_KEY=
+cd web
+npm install
+npm run dev
 ```
 
-This project is configured to use Hosting/Vite route mapping for backend payment endpoints (`/verify-paystack`, `/finalize-session-billing`).
-
-## Firestore Collections
-- `users`
-- `classRequests`
-- `sessions`
-- `notifications`
-- `emailEvents` (queue consumed by Cloud Function)
-
-## Real-time subscriptions
-- `subscribeToStudentRequests`
-- `subscribeToTutorAvailableRequests`
-- `subscribeToTutorAcceptedRequests`
-- `subscribeToStudentSessions`
-- `subscribeToTutorSessions`
-- `subscribeToNotifications`
-
-## Key Product Flows
-1. Signup/login with role (`student` or `tutor`) and user profile document creation.
-2. Student creates request -> stored in `classRequests` and visible live to tutors.
-3. Tutor accepts request -> request status updates + `sessions` document created.
-4. Tutor accepts request and starts in-app WebRTC call setup -> students see session-ready state instantly.
-5. Critical email events are queued in `emailEvents` and dispatched via Firebase Function + Resend.
-
-## Firebase Functions
-Functions source is in `functions/index.js`.
-
-Deploy flow example:
-
+### Firebase Functions
 ```bash
 cd functions
 npm install
-cd ..
-firebase deploy --only functions,hosting
+npm test
 ```
 
-> Do not expose `RESEND_API_KEY` in frontend code.
+### Mobile starter (Expo)
+```bash
+cd mobile
+npm install
+npm run start
+```
+
+## Firebase deployment note
+
+`firebase.json` stays at the repo root and keeps `functions/` as the functions source. Hosting now serves from `web/dist`.
