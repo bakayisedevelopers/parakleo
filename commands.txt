@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after restructure - 17.04.2026 - 2."
+git commit -m "Commit after restructure changes locally - 17.04.2026 - 4."
 git push origin main
 git push origin main --force
 
