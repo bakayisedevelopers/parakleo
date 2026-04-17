@@ -7,9 +7,11 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after restructure changes locally - 17.04.2026 - 4."
+git commit -m "Commit after restructuring and running successfully - 17.04.2026 - 5."
 git push origin main
 git push origin main --force
+
+firebase use claxi-bakayise
 
 ---
 
