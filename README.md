@@ -1,68 +1,111 @@
-# Claxi MVP Foundation
+# Claxi Monorepo Structure
 
-Claxi is an online-first tutoring marketplace where students request classes and tutors accept/manage them in real time.
+This repository is organized with top-level folders for web, mobile, shared code, and Firebase functions:
 
-## Stack
-- React + Vite + Tailwind + React Router
-- Firebase Auth + Firestore (modular SDK usage)
-- Firebase Hosting + Functions-ready project config
-- Resend email delivery through Firebase Functions (server-side only)
+- `web/` — React + Vite web app (current production app)
+- `mobile/` — Expo-based React Native starter app
+- `shared/` — shared code placeholder for cross-platform modules
+- `functions/` — Firebase Cloud Functions (kept at root intentionally)
 
-## Environment Variables
-Create a `.env` file for web app:
+## Directory Layout
 
-```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-VITE_FIREBASE_DATABASE_ID=claxi
+```txt
+.
+├── web/
+├── mobile/
+├── shared/
+├── functions/
+├── firebase.json
+├── .firebaserc
+└── docs/
 ```
 
-Set Firebase Functions environment variables/secrets separately:
+## Firebase CLI setup (important)
+
+You run Firebase deploy commands from the **repo root** because `firebase.json` is in the root.
+
+### Option A (recommended): local CLI in this repo
 
 ```bash
-RESEND_API_KEY=
-EMAIL_FROM=noreply@yourdomain.com
-PAYSTACK_SECRET_KEY=
+cd /workspace/claxi
+npm install
+npx firebase --version
 ```
 
-This project is configured to use Hosting/Vite route mapping for backend payment endpoints (`/verify-paystack`, `/finalize-session-billing`).
+This installs `firebase-tools` in the root and avoids global setup issues.
 
-## Firestore Collections
-- `users`
-- `classRequests`
-- `sessions`
-- `notifications`
-- `emailEvents` (queue consumed by Cloud Function)
+### Option B: global CLI
 
-## Real-time subscriptions
-- `subscribeToStudentRequests`
-- `subscribeToTutorAvailableRequests`
-- `subscribeToTutorAcceptedRequests`
-- `subscribeToStudentSessions`
-- `subscribeToTutorSessions`
-- `subscribeToNotifications`
+```bash
+npm install -g firebase-tools
+firebase --version
+```
 
-## Key Product Flows
-1. Signup/login with role (`student` or `tutor`) and user profile document creation.
-2. Student creates request -> stored in `classRequests` and visible live to tutors.
-3. Tutor accepts request -> request status updates + `sessions` document created.
-4. Tutor accepts request and starts in-app WebRTC call setup -> students see session-ready state instantly.
-5. Critical email events are queued in `emailEvents` and dispatched via Firebase Function + Resend.
+## Do you need `firebase init`?
 
-## Firebase Functions
-Functions source is in `functions/index.js`.
+**No**, not for this restructure.
 
-Deploy flow example:
+This repo already has:
+- `firebase.json`
+- `.firebaserc`
+- `functions/` at root
 
+So you only need to login/select project if needed:
+
+```bash
+npx firebase login
+npx firebase use default
+```
+
+## Quick Start
+
+### Web app
+```bash
+cd web
+npm install
+npm run dev
+```
+
+### Firebase Functions
 ```bash
 cd functions
 npm install
-cd ..
-firebase deploy --only functions,hosting
+npm test
 ```
 
-> Do not expose `RESEND_API_KEY` in frontend code.
+### Mobile starter (Expo)
+```bash
+cd mobile
+npm install
+npm run start
+```
+
+## Deploying Hosting after moving web into `web/`
+
+Your deploy flow is still run from root, and `firebase deploy --only hosting:claxi` still works.
+
+```bash
+cd /workspace/claxi
+npm install
+npm run deploy:hosting
+```
+
+What happens:
+1. `npm run build:web` builds the web app inside `web/`.
+2. Firebase Hosting deploys from `web/dist` (configured in `firebase.json`).
+
+If you want to run the command manually:
+
+```bash
+cd /workspace/claxi
+npm --prefix web run build
+npx firebase deploy --only hosting:claxi
+```
+
+## Firebase dependency placement
+
+- **Firebase CLI (`firebase-tools`)**: install at **repo root** (recommended) or globally.
+- **Web Firebase SDK (`firebase`)**: stays in **`web/package.json`**.
+- **Functions Firebase deps (`firebase-admin`, `firebase-functions`)**: stay in **`functions/package.json`**.
+
+Do not duplicate the Firebase SDK into every folder unless that folder actually needs it.
