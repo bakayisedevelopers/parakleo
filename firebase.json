@@ -1,0 +1,40 @@
+{
+  "functions": {
+    "source": "functions"
+  },
+  "hosting": {
+    "site": "claxi",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/ice-config",
+        "function": "getIceConfig"
+      },
+      {
+        "source": "/verify-paystack",
+        "function": "verifyPaystack"
+      },
+      {
+        "source": "/finalize-session-billing",
+        "function": "finalizeSessionBilling"
+      },
+      {
+        "source": "/pricing-quote",
+        "function": "getPricingQuote"
+      },
+      {
+        "source": "/sync-student-growth",
+        "function": "syncStudentGrowth"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

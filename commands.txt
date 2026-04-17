@@ -1,0 +1,95 @@
+
+1. BEFORE SWITCHING TO CODEX (VERY IMPORTANT)
+
+---
+
+Run:
+
+git status
+git add .
+git commit -m "Commit after UI redesign - 16.04.2026 - 2."
+git push origin main
+git push origin main --force
+
+---
+
+2. AFTER CODEX HAS MADE CHANGES (BACK TO CODESPACES)
+
+---
+
+Run:
+
+git status
+git fetch origin
+git pull --rebase origin main
+
+
+Publishing to hosting
+
+npm run build
+firebase deploy --only hosting:claxi
+firebase deploy --only functions
+
+
+firebase use default
+
+firebase functions:secrets:set PAYSTACK_SECRET_KEY
+sk_test_78e53b2599674e902b109d905c72190c0c4bb7ea
+
+firebase functions:secrets:set RESEND_API_KEY
+re_5534FX3a_781uRpgzn2a3ijU2s3bEvHTk
+
+firebase functions:secrets:set EMAIL_FROM
+no-reply@examify-mail.bakayise.com
+
+FINALIZE_SESSION_BILLING_ENDPOINT
+https://us-central1-claxi-bakayise.cloudfunctions.net/finalizeSessionBilling
+
+VITE_FIREBASE_API_KEY
+AIzaSyDM-UOQ8EZfT54OUlo6JadwDXm2gIIyvHI
+
+VITE_FIREBASE_AUTH_DOMAIN
+claxi-bakayise.firebaseapp.com
+
+VITE_FIREBASE_PROJECT_ID
+claxi-bakayise
+
+VITE_FIREBASE_STORAGE_BUCKET
+claxi-bakayise.firebasestorage.app
+
+VITE_FIREBASE_MESSAGING_SENDER_ID
+1061720623518
+
+VITE_FIREBASE_APP_ID
+1:1061720623518:web:dec7d086af76a24aab6e8f
+
+VITE_FIREBASE_MEASUREMENT_ID
+G-H3F69HET20
+
+VITE_FIREBASE_DATABASE_ID
+'(default)'
+
+VITE_PAYSTACK_PUBLIC_KEY
+pk_test_7aa2f7b8fa38b82d92ff0522329d8e014a541e54
+
+VITE_TLDRAW_LICENSE_KEY
+tldraw-2026-07-11/WyJTRDBGY2RKbyIsWyIqIl0sMTYsIjIwMjYtMDctMTEiXQ.WkJSY+NfQF8pJPY1yJ+Cr25jLcJQam1E8yMFm4a/dNY4RiUdDqQ8gafS+SnNXyIXRFgfqDHG0j1uoH3qdh3zZA
+
+VITE_DEBUG_LOGS
+true
+
+Cloudflare:
+
+API Token
+firebase functions:secrets:set CLOUDFLARE_TURN_API_TOKEN
+65bf4bbcc8f9b42180d8c5600869ff215f9388e8ef0506adae6d88f0ffe0a3e2
+
+Turn Token ID
+firebase functions:secrets:set CLOUDFLARE_TURN_KEY_ID
+6154c9e492e8c63d329d5f30a99ed3ce
+
+firebase functions:secrets:set CLOUDFLARE_TURN_URLS
+turn:turn.cloudflare.com:3478?transport=udp,turn:turn.cloudflare.com:3478?transport=tcp
+
+firebase functions:secrets:set CLOUDFLARE_TURN_TTL_SECONDS
+600

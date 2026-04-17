@@ -1,0 +1,17 @@
+{
+  "name": "claxi-functions",
+  "private": true,
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.1.1",
+    "firebase-functions": "^5.1.0",
+    "resend": "^4.1.2"
+  }
+}
