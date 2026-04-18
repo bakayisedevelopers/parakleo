@@ -84,6 +84,16 @@ export default function ProfilePage() {
     setIsSaving(false);
   };
 
+  const isTutorRole = (user?.activeRole || user?.role) === 'tutor';
+  const tutorProfileData = user?.tutorProfile || {};
+  const formatPercent = (value) => `${(Math.max(0, Number(value || 0) <= 1 ? Number(value || 0) * 100 : Number(value || 0))).toFixed(1)}%`;
+  const formatDateTime = (value) => {
+    if (!value) return 'Not available yet';
+    const millis = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
+    if (!Number.isFinite(millis) || millis <= 0) return 'Not available yet';
+    return new Date(millis).toLocaleString();
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader title="Profile & Settings" description="Manage your account, profile details, and onboarding progress in one place." />
@@ -112,7 +122,7 @@ export default function ProfilePage() {
             onChange={(subjects) => setForm((prev) => ({ ...prev, subjects }))}
             helperText="Currently only Mathematics is available."
           />
-          {(user?.activeRole || user?.role) === 'tutor' ? (
+          {isTutorRole ? (
             <>
               <FormField label="Availability" name="availability" value={form.availability} onChange={(event) => setForm((prev) => ({ ...prev, availability: event.target.value }))} placeholder="Weekdays after 5pm" />
             </>
@@ -132,6 +142,59 @@ export default function ProfilePage() {
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? 'Complete' : tutorStatus.message}</dd></div>
         </dl>
       </SectionCard>
+
+      {isTutorRole ? (
+        <SectionCard title="Dispatch metrics" subtitle="These values are used when ranking tutors for incoming requests.">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Acceptance rate</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.acceptanceRate ?? user?.acceptanceRate)}</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Completion rate</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.completionRate ?? user?.completionRate)}</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Tutor rating</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">
+                {Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average ?? 0) > 0
+                  ? `${Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average).toFixed(2)} / 5`
+                  : 'Not rated yet'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Avg response speed</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">
+                {Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds ?? 0) > 0
+                  ? `${Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds).toFixed(0)}s`
+                  : 'Not available yet'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cancellation rate</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.cancellationRate ?? user?.cancellationRate)}</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Recent assignments</p>
+              <p className="mt-1 text-lg font-bold text-zinc-900">
+                {Math.max(
+                  0,
+                  Number(
+                    tutorProfileData.recentAssignmentsCount
+                    ?? user?.recentAssignmentsCount
+                    ?? tutorProfileData.completedSessionsLast24Hours
+                    ?? 0,
+                  ),
+                ).toFixed(0)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 sm:col-span-2 xl:col-span-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last offer received</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">{formatDateTime(tutorProfileData.lastOfferAt || user?.lastOfferAt)}</p>
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
 
       {(user?.activeRole || user?.role) === 'student' ? (
         <SectionCard title="Free minutes & referrals" subtitle="Share your code to earn +30 free minutes when a referred student completes signup and verifies email.">

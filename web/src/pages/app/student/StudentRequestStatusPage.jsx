@@ -8,6 +8,7 @@ import { useStudentSessions } from '../../../hooks/useSessions';
 import { useAuth } from '../../../hooks/useAuth';
 import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { cancelClassRequest } from '../../../services/classRequestService';
+import { getUserProfile } from '../../../services/userService';
 
 function getStatusCopy(status) {
   if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING, REQUEST_STATUSES.OFFERED].includes(status)) return 'Searching for a tutor';
@@ -118,6 +119,7 @@ export default function StudentRequestStatusPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+  const [offeredTutorProfile, setOfferedTutorProfile] = useState(null);
 
   if (!requestId) {
     return <Navigate to="/app/student" replace />;
@@ -141,11 +143,37 @@ export default function StudentRequestStatusPage() {
     [requestId, sessions],
   );
   const shouldAutoOpenSession = canJoin && Boolean(matchingSession?.id);
+  const isWaitingTutorAcceptance = currentStatus === REQUEST_STATUSES.OFFERED;
+  const offeredTutorId = request?.currentOfferTutorId || request?.tutorId || null;
 
   useEffect(() => {
     if (!shouldAutoOpenSession) return;
     navigate(`/app/session/${matchingSession.id}`, { replace: true });
   }, [matchingSession?.id, navigate, shouldAutoOpenSession]);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    if (!offeredTutorId) {
+      setOfferedTutorProfile(null);
+      return () => {
+        isSubscribed = false;
+      };
+    }
+
+    getUserProfile(offeredTutorId)
+      .then((profile) => {
+        if (!isSubscribed) return;
+        setOfferedTutorProfile(profile || null);
+      })
+      .catch(() => {
+        if (!isSubscribed) return;
+        setOfferedTutorProfile(null);
+      });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [offeredTutorId]);
 
   const canCancel = ![
     REQUEST_STATUSES.CANCELED,
@@ -227,6 +255,21 @@ export default function StudentRequestStatusPage() {
               <div className="rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-sm font-semibold text-emerald-800">
                   Your class is ready. Join now from the button on the right.
+                </p>
+              </div>
+            ) : null}
+
+            {isWaitingTutorAcceptance ? (
+              <div className="rounded-[1.5rem] border border-violet-200 bg-violet-50 p-4">
+                <p className="text-sm font-semibold text-violet-800">Waiting for tutor to accept</p>
+                <p className="mt-1 text-sm text-violet-700">
+                  Tutor: {request?.tutorName || offeredTutorProfile?.fullName || offeredTutorProfile?.displayName || 'Tutor'}
+                </p>
+                <p className="text-xs text-violet-700">
+                  Rating:{' '}
+                  {Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average ?? 0) > 0
+                    ? `${Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average).toFixed(2)} / 5`
+                    : 'Not rated yet'}
                 </p>
               </div>
             ) : null}
