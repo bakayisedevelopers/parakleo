@@ -9,6 +9,7 @@ import { findSessionIdByRequestAndTutor } from '../../services/sessionService';
 import { getTutorOnboardingStatus } from '../../utils/onboarding';
 import { debugError, debugLog } from '../../utils/devLogger';
 import { formatRand, normalizePricingSnapshot } from '../../utils/pricing';
+import { getUserProfile } from '../../services/userService';
 
 function getDemandLabel(pricingBand) {
   const normalized = String(pricingBand || 'normal').toLowerCase();
@@ -28,6 +29,7 @@ export default function TutorOfferOverlay() {
   const [displayRequest, setDisplayRequest] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [studentProfile, setStudentProfile] = useState(null);
 
   const audioCtxRef = useRef(null);
   const latestRequestIdRef = useRef(null);
@@ -42,6 +44,30 @@ export default function TutorOfferOverlay() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [displayRequest?.id]);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    if (!displayRequest?.studentId) {
+      setStudentProfile(null);
+      return () => {
+        isSubscribed = false;
+      };
+    }
+
+    getUserProfile(displayRequest.studentId)
+      .then((profile) => {
+        if (!isSubscribed) return;
+        setStudentProfile(profile || null);
+      })
+      .catch(() => {
+        if (!isSubscribed) return;
+        setStudentProfile(null);
+      });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [displayRequest?.studentId]);
 
   useEffect(() => {
     if (processingRef.current) return;
@@ -174,6 +200,8 @@ export default function TutorOfferOverlay() {
   const baseAmount = Number(pricing.adjustedBaseAmount ?? pricing.baseAmount ?? 0);
   const estimatedTotal = Number(pricing.finalPrice ?? pricing.totalAmount ?? 0);
   const dynamicPortion = Math.max(0, estimatedTotal - baseAmount);
+  const studentName = displayRequest.studentName || studentProfile?.fullName || studentProfile?.displayName || 'Student';
+  const studentRating = Number(studentProfile?.ratings?.asStudent?.average ?? 0);
   const attachments = displayRequest.attachments?.length
     ? displayRequest.attachments
     : displayRequest.attachment?.downloadUrl
@@ -224,6 +252,14 @@ export default function TutorOfferOverlay() {
           <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-semibold text-zinc-700">
             Duration: {requestedDurationMinutes || 'N/A'} min
           </span>
+        </div>
+
+        <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Requesting student</p>
+          <p className="mt-1 text-sm font-bold text-zinc-900">{studentName}</p>
+          <p className="text-xs text-zinc-600">
+            Rating: {studentRating > 0 ? `${studentRating.toFixed(2)} / 5` : 'Not rated yet'}
+          </p>
         </div>
 
         <p className="mb-3 text-sm text-zinc-700">

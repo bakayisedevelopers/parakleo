@@ -6,7 +6,7 @@ import SectionCard from '../../../components/ui/SectionCard';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTutorAvailableRequests } from '../../../hooks/useClassRequests';
 import { getTutorOnboardingStatus } from '../../../utils/onboarding';
-import { updateUserProfile } from '../../../services/userService';
+import { getUserProfile, updateUserProfile } from '../../../services/userService';
 import { acceptClassRequest, declineClassRequest } from '../../../services/classRequestService';
 import { findSessionIdByRequestAndTutor } from '../../../services/sessionService';
 import { debugError, debugLog } from '../../../utils/devLogger';
@@ -23,11 +23,38 @@ export default function TutorDashboardPage() {
   const [now, setNow] = useState(Date.now());
   const [activeRequestId, setActiveRequestId] = useState('');
   const [requestError, setRequestError] = useState('');
+  const [profileSnapshot, setProfileSnapshot] = useState(user || null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    getUserProfile(user.uid).then((profile) => {
+      setProfileSnapshot(profile || user);
+    });
+  }, [user]);
+
+  const tutorProfile = profileSnapshot?.tutorProfile || user?.tutorProfile || {};
+  const dispatchMetrics = {
+    acceptanceRate: Number(tutorProfile.acceptanceRate ?? profileSnapshot?.acceptanceRate ?? 0),
+    completionRate: Number(tutorProfile.completionRate ?? profileSnapshot?.completionRate ?? 0),
+    overallRating: Number(tutorProfile.overallRating ?? profileSnapshot?.overallRating ?? profileSnapshot?.ratings?.asTutor?.average ?? 0),
+    avgResponseSeconds: Number(tutorProfile.avgResponseSeconds ?? profileSnapshot?.avgResponseSeconds ?? 0),
+    cancellationRate: Number(tutorProfile.cancellationRate ?? profileSnapshot?.cancellationRate ?? 0),
+    recentAssignmentsCount: Number(tutorProfile.recentAssignmentsCount ?? profileSnapshot?.recentAssignmentsCount ?? tutorProfile.completedSessionsLast24Hours ?? 0),
+    lastOfferAt: tutorProfile.lastOfferAt || profileSnapshot?.lastOfferAt || null,
+  };
+
+  const formatPercent = (value) => `${(Math.max(0, value <= 1 ? value * 100 : value)).toFixed(1)}%`;
+  const formatDateTime = (value) => {
+    if (!value) return 'Not available yet';
+    const millis = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
+    if (!Number.isFinite(millis) || millis <= 0) return 'Not available yet';
+    return new Date(millis).toLocaleString();
+  };
 
   const toggleOnlineStatus = async () => {
     if (isTutorRestrictedMobile) return;
@@ -98,6 +125,39 @@ export default function TutorDashboardPage() {
                 Open full request list
               </Link>
             ) : null}
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Dispatch metrics" subtitle="These values are used in backend tutor dispatch ranking.">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Acceptance rate</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.acceptanceRate)}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Completion rate</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.completionRate)}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Tutor rating</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{dispatchMetrics.overallRating > 0 ? `${dispatchMetrics.overallRating.toFixed(2)} / 5` : 'Not rated yet'}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Avg response speed</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{dispatchMetrics.avgResponseSeconds > 0 ? `${dispatchMetrics.avgResponseSeconds.toFixed(0)}s` : 'Not available yet'}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cancellation rate</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.cancellationRate)}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Recent assignments</p>
+            <p className="mt-1 text-lg font-bold text-zinc-900">{Math.max(0, dispatchMetrics.recentAssignmentsCount).toFixed(0)}</p>
+          </div>
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 sm:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last offer received</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-900">{formatDateTime(dispatchMetrics.lastOfferAt)}</p>
           </div>
         </div>
       </SectionCard>
