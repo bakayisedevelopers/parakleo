@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after restructuring and running successfully - 17.04.2026 - 8."
+git commit -m "Commit before AI tutor logic change - 18.04.2026 - 1."
 git push origin main
 git push origin main --force
 
@@ -29,7 +29,7 @@ git pull --rebase origin main
 Publishing to hosting
 
 npm run build
-firebase deploy --only hosting:claxi
+firebase deploy --only hosting
 firebase deploy --only functions
 
 
