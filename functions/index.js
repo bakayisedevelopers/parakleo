@@ -28,6 +28,21 @@ const DEFAULT_STUN_URLS = ['stun:stun.l.google.com:19302'];
 const DEFAULT_TURN_TTL_SECONDS = 600;
 const MATCHING_TIMEOUT_MS = 3 * 60 * 1000;
 const OFFER_TIMEOUT_MS = 30 * 1000;
+const DISPATCH_SCORE_WEIGHTS = {
+  acceptanceRate: 0.20,
+  completionRate: 0.20,
+  rating: 0.20,
+  responseSpeed: 0.15,
+  reliability: 0.15,
+  fairness: 0.10,
+};
+const DISPATCH_NEAR_EQUAL_THRESHOLD = 2;
+const DEFAULT_ACCEPTANCE_RATE = 0.75;
+const DEFAULT_COMPLETION_RATE = 0.9;
+const DEFAULT_RATING = 4.5;
+const DEFAULT_AVG_RESPONSE_SECONDS = 30;
+const DEFAULT_CANCELLATION_RATE = 0.08;
+const FAIRNESS_WORKLOAD_CAP = 10;
 const DEFAULT_STUDENT_FREE_MINUTES = 90;
 const REFERRAL_REWARD_MINUTES = 30;
 const REQUEST_STATUS = {
@@ -70,10 +85,174 @@ function isRequestExpired(request) {
 }
 
 function getTutorScore(tutor = {}) {
-  const rating = Number(tutor?.tutorProfile?.overallRating ?? 0) || 0;
-  const recent24h = Number(tutor?.tutorProfile?.completedSessionsLast24Hours ?? 0) || 0;
-  const totalSessions = Number(tutor?.tutorProfile?.completedSessionsTotal ?? 0) || 0;
-  return (rating * 10000) + (recent24h * 100) + totalSessions;
+  const acceptanceRate = normalizeRate(
+    tutor?.tutorProfile?.acceptanceRate
+      ?? tutor?.acceptanceRate
+      ?? tutor?.stats?.acceptanceRate,
+    DEFAULT_ACCEPTANCE_RATE,
+  );
+  const completionRate = normalizeRate(
+    tutor?.tutorProfile?.completionRate
+      ?? tutor?.completionRate
+      ?? tutor?.stats?.completionRate,
+    DEFAULT_COMPLETION_RATE,
+  );
+  const rating = normalizeRating(
+    tutor?.tutorProfile?.overallRating
+      ?? tutor?.overallRating
+      ?? tutor?.rating
+      ?? tutor?.stats?.overallRating,
+    DEFAULT_RATING,
+  );
+  const avgResponseSeconds = normalizePositiveNumber(
+    tutor?.tutorProfile?.avgResponseSeconds
+      ?? tutor?.avgResponseSeconds
+      ?? tutor?.stats?.avgResponseSeconds,
+    DEFAULT_AVG_RESPONSE_SECONDS,
+  );
+  const cancellationRate = normalizeRate(
+    tutor?.tutorProfile?.cancellationRate
+      ?? tutor?.cancellationRate
+      ?? tutor?.stats?.cancellationRate,
+    DEFAULT_CANCELLATION_RATE,
+  );
+  const recentAssignmentsCount = normalizePositiveNumber(
+    tutor?.tutorProfile?.recentAssignmentsCount
+      ?? tutor?.recentAssignmentsCount
+      ?? tutor?.tutorProfile?.completedSessionsLast24Hours
+      ?? tutor?.stats?.recentAssignmentsCount,
+    0,
+  );
+
+  const responseSpeedScore = 1 - clamp01(avgResponseSeconds / 120);
+  const reliabilityScore = 1 - clamp01(cancellationRate);
+  const fairnessScore = 1 - clamp01(recentAssignmentsCount / FAIRNESS_WORKLOAD_CAP);
+
+  return (
+    (acceptanceRate * DISPATCH_SCORE_WEIGHTS.acceptanceRate)
+    + (completionRate * DISPATCH_SCORE_WEIGHTS.completionRate)
+    + ((rating / 5) * DISPATCH_SCORE_WEIGHTS.rating)
+    + (responseSpeedScore * DISPATCH_SCORE_WEIGHTS.responseSpeed)
+    + (reliabilityScore * DISPATCH_SCORE_WEIGHTS.reliability)
+    + (fairnessScore * DISPATCH_SCORE_WEIGHTS.fairness)
+  ) * 100;
+}
+
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeRate(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  if (numeric > 1) return clamp01(numeric / 100);
+  return clamp01(numeric);
+}
+
+function normalizeRating(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(5, numeric));
+}
+
+function normalizePositiveNumber(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return numeric;
+}
+
+function isTruthyFlag(value) {
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'paused', 'blocked', 'suspended', 'disabled'].includes(normalized);
+}
+
+function isTutorDispatchEligible(tutor = {}, subjectKey) {
+  const normalizedSubjects = (tutor.subjects || []).map((entry) => String(entry || '').trim().toLowerCase());
+  const isDispatchPaused = isTruthyFlag(
+    tutor.dispatchPaused
+      ?? tutor.isDispatchPaused
+      ?? tutor?.tutorProfile?.dispatchPaused
+      ?? tutor?.tutorProfile?.isDispatchPaused
+      ?? tutor?.tutorProfile?.pausedFromDispatch,
+  );
+  const isSuspendedOrBlocked = isTruthyFlag(
+    tutor.suspended
+      ?? tutor.isSuspended
+      ?? tutor.blocked
+      ?? tutor.isBlocked
+      ?? tutor?.tutorProfile?.suspended
+      ?? tutor?.tutorProfile?.blocked,
+  );
+
+  return tutor?.tutorProfile?.verificationStatus === 'verified'
+    && !tutor.activeSessionId
+    && normalizedSubjects.includes(subjectKey)
+    && !isDispatchPaused
+    && !isSuspendedOrBlocked;
+}
+
+function getLastOfferAtMillis(tutor = {}) {
+  return normalizeMillis(tutor?.tutorProfile?.lastOfferAt ?? tutor?.lastOfferAt);
+}
+
+function getRecentAssignmentsCount(tutor = {}) {
+  return normalizePositiveNumber(
+    tutor?.tutorProfile?.recentAssignmentsCount
+      ?? tutor?.recentAssignmentsCount
+      ?? tutor?.tutorProfile?.completedSessionsLast24Hours
+      ?? 0,
+    0,
+  );
+}
+
+function randomIndex(max) {
+  return Math.floor(Math.random() * Math.max(1, max));
+}
+
+function rankTutorsWithFairness(candidates = []) {
+  const remaining = [...candidates]
+    .map((tutor) => ({
+      tutor,
+      score: getTutorScore(tutor),
+      lastOfferAtMs: getLastOfferAtMillis(tutor),
+      recentAssignmentsCount: getRecentAssignmentsCount(tutor),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const ordered = [];
+
+  while (remaining.length) {
+    const highestScore = remaining[0].score;
+    const bucket = remaining.filter((entry) => (highestScore - entry.score) <= DISPATCH_NEAR_EQUAL_THRESHOLD);
+
+    const oldestLastOfferAt = bucket.reduce(
+      (min, entry) => Math.min(min, entry.lastOfferAtMs || 0),
+      Number.POSITIVE_INFINITY,
+    );
+    const leastRecentlyOffered = bucket.filter((entry) => (entry.lastOfferAtMs || 0) === oldestLastOfferAt);
+
+    const smallestRecentAssignments = leastRecentlyOffered.reduce(
+      (min, entry) => Math.min(min, entry.recentAssignmentsCount),
+      Number.POSITIVE_INFINITY,
+    );
+    const leastAssigned = leastRecentlyOffered.filter(
+      (entry) => entry.recentAssignmentsCount === smallestRecentAssignments,
+    );
+
+    const picked = leastAssigned[randomIndex(leastAssigned.length)];
+    ordered.push(picked.tutor.uid);
+
+    const removeIndex = remaining.findIndex((entry) => entry.tutor.uid === picked.tutor.uid);
+    if (removeIndex >= 0) {
+      remaining.splice(removeIndex, 1);
+    } else {
+      break;
+    }
+  }
+
+  return ordered;
 }
 
 async function getTutorQueueForSubject(subject) {
@@ -84,16 +263,11 @@ async function getTutorQueueForSubject(subject) {
     .where('onlineStatus', '==', 'online')
     .get();
 
-  return snapshot.docs
+  const eligibleTutors = snapshot.docs
     .map((item) => ({ uid: item.id, ...item.data() }))
-    .filter((tutor) => {
-      const normalizedSubjects = (tutor.subjects || []).map((entry) => String(entry || '').trim().toLowerCase());
-      return tutor?.tutorProfile?.verificationStatus === 'verified'
-        && !tutor.activeSessionId
-        && normalizedSubjects.includes(subjectKey);
-    })
-    .sort((a, b) => getTutorScore(b) - getTutorScore(a))
-    .map((item) => item.uid);
+    .filter((tutor) => isTutorDispatchEligible(tutor, subjectKey));
+
+  return rankTutorsWithFairness(eligibleTutors);
 }
 
 exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}', async (event) => {
@@ -158,17 +332,27 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
     }
 
     const offerRevision = nextOfferRevision(request);
+    const selectedTutorId = queue[0];
+    const selectedTutorRef = db.collection('users').doc(selectedTutorId);
     transaction.update(requestRef, {
       status: REQUEST_STATUS.OFFERED,
       statusDetail: 'Tutor notified. Waiting for acceptance.',
       tutorQueue: queue,
-      currentOfferTutorId: queue[0],
+      currentOfferTutorId: selectedTutorId,
       offerExpiresAt: Date.now() + OFFER_TIMEOUT_MS,
+      lastOfferAt: Date.now(),
       offerRevision,
       offerToken: randomUUID(),
       retryOfferGranted: false,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    transaction.set(selectedTutorRef, {
+      lastOfferAt: admin.firestore.FieldValue.serverTimestamp(),
+      tutorProfile: {
+        lastOfferAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
   });
 });
 
