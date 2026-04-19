@@ -61,6 +61,8 @@ export default function StudentDashboardPage() {
 
   const onboardingStatus = getStudentOnboardingStatus(user);
   const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
+  const detectedSubject = resolveSubjectFromText(topic, SUBJECT_OPTIONS);
+  const resolvedSubject = detectedSubject || manualSubject;
   const canSend = onboardingStatus.complete && hasRequestContent && Boolean(cardId);
   const activeOrOngoingRequest = requests.find((request) => [
     REQUEST_STATUSES.PENDING,
