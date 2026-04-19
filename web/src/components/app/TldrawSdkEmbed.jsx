@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import 'tldraw/tldraw.css';
 import { debugError, debugLog } from '../../utils/devLogger';
 
-export default function TldrawSdkEmbed({ roomId, licenseKey }) {
+export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
   const [TldrawComponent, setTldrawComponent] = useState(null);
   const [loadError, setLoadError] = useState('');
 
@@ -72,6 +72,7 @@ export default function TldrawSdkEmbed({ roomId, licenseKey }) {
     <TldrawComponent
       persistenceKey={persistenceKey}
       licenseKey={licenseKey || undefined}
+      onMount={onMount}
     />
   );
 }

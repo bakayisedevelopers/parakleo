@@ -26,6 +26,8 @@ import {
 import { createWebRtcSessionController } from '../../services/webrtcService';
 import { fetchIceServers } from '../../services/iceServerService';
 import { debugLog } from '../../utils/devLogger';
+import { parseQuestionsFromExtraction } from '../../services/questionParsingService';
+import { prepareWhiteboardLayout } from '../../services/whiteboardPreparationService';
 
 const HANDLED_KEY = 'claxi_handled_session_room_ratings';
 const RATABLE_STATUSES = new Set([
@@ -161,6 +163,7 @@ export default function SessionRoomPage() {
   const hadSessionRef = useRef(false);
   const studentControlsTimeoutRef = useRef(null);
   const autoEndingRef = useRef(false);
+  const boardContentLoadedRef = useRef(false);
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
   const billedSeconds = useLiveSeconds(session?.billingStartedAt);
@@ -206,7 +209,106 @@ export default function SessionRoomPage() {
     setGraceEndsAtMs(null);
     extensionPromptShownRef.current = false;
     autoEndingRef.current = false;
+    boardContentLoadedRef.current = false;
   }, [session?.id, role]);
+
+  const getSessionBoardSeedContent = useCallback(() => {
+    const attachments = session?.attachments || (session?.requestAttachment ? [session.requestAttachment] : []);
+    const extractedText = session?.extractedText
+      || session?.requestExtractedText
+      || session?.requestDescription
+      || session?.topic
+      || '';
+    const ocrImageReferences = session?.ocrImageReferences || session?.selectedPageImages || [];
+
+    return {
+      extractedText,
+      attachments,
+      ocrImageReferences,
+    };
+  }, [session]);
+
+  const injectPreparedBoardContent = useCallback((editor) => {
+    if (!editor || boardContentLoadedRef.current || role !== 'tutor') return;
+
+    const { extractedText, attachments, ocrImageReferences } = getSessionBoardSeedContent();
+    if (!String(extractedText || '').trim() && !(attachments || []).length) {
+      return;
+    }
+
+    try {
+      const parsedQuestions = parseQuestionsFromExtraction({
+        extractedText,
+        attachments,
+        ocrImageReferences,
+      });
+      const layout = prepareWhiteboardLayout(parsedQuestions);
+
+      const assets = [];
+      const shapes = [];
+
+      layout.forEach((item, index) => {
+        if (item.type === 'text') {
+          shapes.push({
+            id: `shape:text:${session?.id || 'session'}:${index}`,
+            type: 'text',
+            x: item.position.x,
+            y: item.position.y,
+            props: {
+              text: item.content,
+            },
+          });
+          return;
+        }
+
+        if (item.type === 'image' && item.src) {
+          const assetId = `asset:image:${session?.id || 'session'}:${index}`;
+          assets.push({
+            id: assetId,
+            type: 'image',
+            typeName: 'asset',
+            props: {
+              name: `Question image ${index + 1}`,
+              src: item.src,
+              mimeType: 'image/*',
+              w: 800,
+              h: 600,
+              isAnimated: false,
+            },
+            meta: {},
+          });
+
+          shapes.push({
+            id: `shape:image:${session?.id || 'session'}:${index}`,
+            type: 'image',
+            x: item.position.x,
+            y: item.position.y,
+            props: {
+              assetId,
+              w: 420,
+              h: 320,
+            },
+          });
+        }
+      });
+
+      if (assets.length) {
+        editor.createAssets(assets);
+      }
+      if (shapes.length) {
+        editor.createShapes(shapes);
+      }
+
+      boardContentLoadedRef.current = true;
+      console.debug('[whiteboardPreparation] number of elements placed on board', {
+        count: shapes.length,
+      });
+    } catch (error) {
+      console.debug('[whiteboardPreparation] board injection failed', {
+        message: error?.message,
+      });
+    }
+  }, [getSessionBoardSeedContent, role, session?.id]);
 
   useEffect(() => {
     try {
@@ -743,7 +845,11 @@ export default function SessionRoomPage() {
     <div className="relative h-full w-full overflow-hidden bg-[#0f141d]">
       {renderTutorStageHeader()}
       <div className="absolute inset-0">
-        <TldrawSdkEmbed roomId={whiteboardRoom} licenseKey={tldrawLicenseKey} />
+        <TldrawSdkEmbed
+          roomId={whiteboardRoom}
+          licenseKey={tldrawLicenseKey}
+          onMount={injectPreparedBoardContent}
+        />
       </div>
     </div>
   );
