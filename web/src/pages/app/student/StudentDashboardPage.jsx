@@ -18,6 +18,10 @@ import {
   MAX_SCANNED_PDF_OCR_PAGES,
   runScannedPdfSelectedPageOcr,
 } from '../../../services/attachmentExtractionService';
+import {
+  buildSubjectClassificationInput,
+  classifySubjectFromText,
+} from '../../../services/subjectClassificationService';
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -74,6 +78,8 @@ export default function StudentDashboardPage() {
   const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
   const [scannedPdfSelectionByKey, setScannedPdfSelectionByKey] = useState({});
   const [selectedSubject, setSelectedSubject] = useState('');
+  const [classifiedTopic, setClassifiedTopic] = useState('');
+  const [classificationStatus, setClassificationStatus] = useState('');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [quote, setQuote] = useState(null);
@@ -82,6 +88,7 @@ export default function StudentDashboardPage() {
   const attachmentsRef = useRef([]);
   const extractionRunCounterRef = useRef(0);
   const activeExtractionTokenByKeyRef = useRef({});
+  const classificationRunCounterRef = useRef(0);
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
 
@@ -131,6 +138,7 @@ export default function StudentDashboardPage() {
     setTopic(nextTopic);
     if (!isManualSubjectRef.current) {
       setSelectedSubject(resolveSubjectFromText(nextTopic, SUBJECT_OPTIONS));
+      setClassificationStatus('');
     }
     resizeTextarea();
   };
@@ -139,6 +147,7 @@ export default function StudentDashboardPage() {
     setTopic(value);
     if (!isManualSubjectRef.current) {
       setSelectedSubject(resolveSubjectFromText(value, SUBJECT_OPTIONS));
+      setClassificationStatus('');
     }
     setTimeout(() => resizeTextarea(), 0);
   };
@@ -439,6 +448,7 @@ export default function StudentDashboardPage() {
       const requestId = await createClassRequest({
         subject: selectedSubject,
         topic: requestText,
+        classifiedTopic: classifiedTopic || '',
         description: topic.trim(),
         preferredDate: '',
         preferredTime: '',
@@ -480,6 +490,74 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  useEffect(() => {
+    if (isManualSubjectRef.current) return;
+
+    const extractionResults = Object.values(attachmentExtractionByKey || {});
+    const { combinedText, sourceLabels, hasUsableText } = buildSubjectClassificationInput({
+      typedText: topic,
+      attachmentExtractions: extractionResults,
+    });
+
+    if (!hasUsableText) {
+      setClassifiedTopic('');
+      setClassificationStatus('');
+      return;
+    }
+
+    const runId = classificationRunCounterRef.current + 1;
+    classificationRunCounterRef.current = runId;
+    let isCancelled = false;
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        console.debug('[subjectClassification] running classification', {
+          sourceLabels,
+          typedTextLength: String(topic || '').trim().length,
+          attachmentTextCount: extractionResults.filter((item) => String(item?.extractedText || '').trim()).length,
+        });
+
+        const result = await classifySubjectFromText({
+          inputText: combinedText,
+          supportedSubjects: SUBJECT_OPTIONS,
+        });
+
+        if (isCancelled || classificationRunCounterRef.current !== runId) return;
+
+        console.debug('[subjectClassification] classification complete', {
+          hasSupportedSubject: Boolean(result.subject),
+          needsManualSubjectSelection: result.needsManualSubjectSelection,
+          subjectConfidence: result.subjectConfidence,
+          hasTopic: Boolean(result.topic),
+        });
+
+        setClassifiedTopic(result.topic || '');
+
+        if (result.subject) {
+          setSelectedSubject(result.subject);
+          setClassificationStatus(
+            result.needsManualSubjectSelection || result.subjectConfidence === 'low'
+              ? 'Subject detected — please confirm.'
+              : 'Subject detected from request text.'
+          );
+        } else {
+          setClassificationStatus('Subject could not be detected. Please select manually.');
+        }
+      } catch (error) {
+        if (isCancelled || classificationRunCounterRef.current !== runId) return;
+        console.debug('[subjectClassification] classification failed', {
+          message: error?.message,
+        });
+        setClassificationStatus('');
+      }
+    }, 500);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [topic, attachmentExtractionByKey]);
 
   const handleDurationChange = async (event) => {
     const minutes = Number(event.target.value || DEFAULT_LESSON_DURATION);
@@ -693,6 +771,9 @@ export default function StudentDashboardPage() {
                     Change
                   </button>
                 </div>
+                {classificationStatus ? (
+                  <p className="mt-1 text-[11px] text-zinc-400">{classificationStatus}</p>
+                ) : null}
               </div>
 
               <div className="mt-3 flex flex-col gap-3">
