@@ -13,6 +13,7 @@ import { fetchPricingQuote } from '../../../services/pricingService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
+import { extractAttachments } from '../../../services/attachmentExtractionService';
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -40,6 +41,10 @@ function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
   return matched?.value || '';
 }
 
+function getAttachmentKey(file) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
 export default function StudentDashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -50,6 +55,8 @@ export default function StudentDashboardPage() {
     user?.paymentMethods?.find((card) => card.isDefault)?.id || user?.paymentMethods?.[0]?.id || ''
   );
   const [attachments, setAttachments] = useState([]);
+  const [attachmentExtractionByKey, setAttachmentExtractionByKey] = useState({});
+  const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
   const [selectedSubject, setSelectedSubject] = useState('');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
@@ -124,18 +131,66 @@ export default function StudentDashboardPage() {
 
     if (!validFiles.length) return;
 
+    let newFilesForExtraction = [];
+
     setAttachments((prev) => {
-      const existingKeys = new Set(prev.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
-      const newFiles = validFiles.filter(
-        (file) => !existingKeys.has(`${file.name}-${file.size}-${file.lastModified}`)
-      );
+      const existingKeys = new Set(prev.map((file) => getAttachmentKey(file)));
+      const newFiles = validFiles.filter((file) => !existingKeys.has(getAttachmentKey(file)));
+      newFilesForExtraction = newFiles;
       return [...prev, ...newFiles];
     });
+
+    if (newFilesForExtraction.length) {
+      setAttachmentExtractionStatusByKey((prev) => {
+        const next = { ...prev };
+        newFilesForExtraction.forEach((file) => {
+          next[getAttachmentKey(file)] = 'extracting';
+        });
+        return next;
+      });
+
+      extractAttachments(newFilesForExtraction, (result, index) => {
+        const file = newFilesForExtraction[index];
+        const fileKey = getAttachmentKey(file);
+        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
+        setAttachmentExtractionStatusByKey((prev) => ({
+          ...prev,
+          [fileKey]: result.success
+            ? 'text extracted'
+            : result.extractionMethod === 'fallback'
+              ? 'fallback needed'
+              : 'extraction weak',
+        }));
+      }).catch((extractionError) => {
+        console.debug('[attachmentExtraction] batch extraction failed', { error: extractionError?.message });
+        setAttachmentExtractionStatusByKey((prev) => {
+          const next = { ...prev };
+          newFilesForExtraction.forEach((file) => {
+            next[getAttachmentKey(file)] = 'fallback needed';
+          });
+          return next;
+        });
+      });
+    }
 
     event.target.value = '';
   };
 
   const removeAttachment = (indexToRemove) => {
+    const removed = attachments[indexToRemove];
+    if (removed) {
+      const removedKey = getAttachmentKey(removed);
+      setAttachmentExtractionByKey((current) => {
+        const updated = { ...current };
+        delete updated[removedKey];
+        return updated;
+      });
+      setAttachmentExtractionStatusByKey((current) => {
+        const updated = { ...current };
+        delete updated[removedKey];
+        return updated;
+      });
+    }
     setAttachments((prev) => prev.filter((_, index) => index !== indexToRemove));
   };
 
@@ -342,6 +397,8 @@ export default function StudentDashboardPage() {
                   <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((file, index) => {
                       const isImage = file.type.startsWith('image/');
+                      const fileKey = getAttachmentKey(file);
+                      const extractionStatus = attachmentExtractionStatusByKey[fileKey];
                       return (
                         <div
                           key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
@@ -349,6 +406,11 @@ export default function StudentDashboardPage() {
                         >
                           {isImage ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
                           <span className="max-w-[180px] truncate font-medium md:max-w-[260px]">{file.name}</span>
+                          {extractionStatus ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                              {extractionStatus}
+                            </span>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => removeAttachment(index)}
