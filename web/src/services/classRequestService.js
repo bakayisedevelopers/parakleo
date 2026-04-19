@@ -341,7 +341,7 @@ export async function createClassRequest(payload) {
   const clients = await getFirebaseClients();
   const requestBody = {
     ...payload,
-    subject: 'Mathematics',
+    subject: payload.subject || 'Mathematics',
     durationMinutes: Number(payload.durationMinutes || 10),
     pricingSnapshot: payload.pricingSnapshot || null,
     pricingQuoteId: payload.pricingSnapshot?.quoteId || null,
@@ -432,7 +432,7 @@ export async function createClassRequest(payload) {
     studentId: payload.studentId,
     studentName: payload.studentName,
     studentEmail: payload.studentEmail,
-    subject: 'Mathematics',
+    subject: requestBody.subject,
     topic: payload.topic,
   });
 

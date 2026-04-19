@@ -12,6 +12,33 @@ import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '..
 import { fetchPricingQuote } from '../../../services/pricingService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { useStudentSessions } from '../../../hooks/useSessions';
+import { SUBJECT_OPTIONS } from '../../../constants/subjects';
+
+const QUICK_REQUEST_SUGGESTIONS = [
+  { label: 'I need help with homework', value: 'I need help with homework.' },
+  { label: 'I need help preparing for an exam', value: 'I need help preparing for an exam.' },
+  { label: 'I need help with an assignment', value: 'I need help with an assignment.' },
+  { label: 'I need a normal lesson', value: 'I need a normal lesson.' },
+];
+
+const SUBJECT_ALIASES = {
+  Mathematics: ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'trigonometry', 'statistics', 'stats'],
+};
+
+function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
+  const normalizedText = String(text || '').toLowerCase();
+  if (!normalizedText.trim()) return '';
+
+  const matched = supportedSubjects.find((subject) => {
+    const aliases = SUBJECT_ALIASES[subject.value] || [];
+    const normalizedLabel = subject.label.toLowerCase();
+    const normalizedValue = subject.value.toLowerCase();
+    const checks = [normalizedLabel, normalizedValue, ...aliases];
+    return checks.some((term) => normalizedText.includes(term));
+  });
+
+  return matched?.value || '';
+}
 
 export default function StudentDashboardPage() {
   const { user } = useAuth();
@@ -22,6 +49,8 @@ export default function StudentDashboardPage() {
     user?.paymentMethods?.find((card) => card.isDefault)?.id || user?.paymentMethods?.[0]?.id || ''
   );
   const [attachments, setAttachments] = useState([]);
+  const [manualSubject, setManualSubject] = useState('');
+  const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -31,6 +60,8 @@ export default function StudentDashboardPage() {
 
   const onboardingStatus = getStudentOnboardingStatus(user);
   const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
+  const detectedSubject = resolveSubjectFromText(topic, SUBJECT_OPTIONS);
+  const resolvedSubject = detectedSubject || manualSubject;
   const canSend = onboardingStatus.complete && hasRequestContent && Boolean(cardId);
   const activeOrOngoingRequest = requests.find((request) => [
     REQUEST_STATUSES.PENDING,
@@ -58,7 +89,14 @@ export default function StudentDashboardPage() {
 
   const onTopicChange = (event) => {
     setTopic(event.target.value);
+    setManualSubject('');
     resizeTextarea();
+  };
+
+  const applySuggestion = (value) => {
+    setTopic(value);
+    setManualSubject('');
+    setTimeout(() => resizeTextarea(), 0);
   };
 
   const refreshQuote = async (minutes) => {
@@ -99,6 +137,10 @@ export default function StudentDashboardPage() {
 
   const goToRequestStatus = async () => {
     if (!canSend || isSubmitting) return;
+    if (!resolvedSubject) {
+      setShowSubjectFallback(true);
+      return;
+    }
 
     setError('');
     setIsSubmitting(true);
@@ -145,6 +187,7 @@ export default function StudentDashboardPage() {
       }
 
       const requestId = await createClassRequest({
+        subject: resolvedSubject,
         topic: requestText,
         description: topic.trim(),
         preferredDate: '',
@@ -229,7 +272,7 @@ export default function StudentDashboardPage() {
               </h1>
 
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-                Describe or upload the question you need help with.
+                Upload a picture or document first, then add any extra details if needed.
               </p>
             </div>
           </div>
@@ -266,6 +309,31 @@ export default function StudentDashboardPage() {
 
             <div className="relative rounded-[2rem] bg-transparent p-1 md:p-1">
               <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900 px-4 py-3 shadow-inner md:px-5 md:py-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  {QUICK_REQUEST_SUGGESTIONS.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      onClick={() => applySuggestion(option.value)}
+                      className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="mb-3 flex cursor-pointer flex-col rounded-2xl border border-dashed border-emerald-300 bg-emerald-500/10 p-4 transition hover:border-emerald-200 hover:bg-emerald-500/15">
+                  <span className="text-sm font-semibold text-emerald-100">Upload image or PDF (recommended)</span>
+                  <span className="mt-1 text-xs text-emerald-200">Tap to add homework photos, assignment sheets, or exam prep docs.</span>
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    multiple
+                    onChange={onFileChange}
+                    className="hidden"
+                  />
+                </label>
+
                 {attachments.length > 0 ? (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((file, index) => {
@@ -294,10 +362,14 @@ export default function StudentDashboardPage() {
                   ref={textareaRef}
                   value={topic}
                   onChange={onTopicChange}
-                  placeholder="Ask for a class, explain the topic, or upload files..."
+                  placeholder="Optional: describe what you need help with..."
                   rows={1}
                   className="max-h-[220px] min-h-[28px] w-full resize-none overflow-y-auto bg-transparent py-1 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none md:text-[15px]"
                 />
+
+                <div className="mt-2 text-xs text-zinc-400">
+                  Subject: {resolvedSubject ? <span className="font-semibold text-emerald-300">{resolvedSubject}</span> : <span className="font-semibold text-amber-300">Selection required before submit</span>}
+                </div>
               </div>
 
               <div className="mt-3 flex flex-col gap-3">
@@ -317,7 +389,7 @@ export default function StudentDashboardPage() {
 
                   <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50">
                     <Paperclip className="h-4 w-4 shrink-0" />
-                    <span className="hidden text-xs font-semibold sm:inline">Add files</span>
+                    <span className="hidden text-xs font-semibold sm:inline">Add more files</span>
                     <input
                       type="file"
                       accept="application/pdf,image/*"
@@ -382,6 +454,48 @@ export default function StudentDashboardPage() {
           </div>
         </div>
       </div>
+
+      {showSubjectFallback ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/70 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-5">
+            <p className="text-lg font-semibold text-zinc-100">Choose subject before submitting</p>
+            <p className="mt-1 text-sm text-zinc-400">
+              We couldn&apos;t detect a supported subject from your request details.
+            </p>
+
+            <select
+              value={manualSubject}
+              onChange={(event) => setManualSubject(event.target.value)}
+              className="mt-4 w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none"
+            >
+              <option value="">Select subject</option>
+              {SUBJECT_OPTIONS.map((subject) => (
+                <option key={subject.value} value={subject.value}>
+                  {subject.label}
+                </option>
+              ))}
+            </select>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSubjectFallback(false)}
+                className="rounded-xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!manualSubject}
+                onClick={() => setShowSubjectFallback(false)}
+                className={`rounded-xl px-3 py-2 text-xs font-semibold text-white ${manualSubject ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-zinc-600'}`}
+              >
+                Confirm subject
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
