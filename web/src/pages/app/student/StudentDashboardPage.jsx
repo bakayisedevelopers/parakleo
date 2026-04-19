@@ -13,7 +13,11 @@ import { fetchPricingQuote } from '../../../services/pricingService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
-import { extractAttachments } from '../../../services/attachmentExtractionService';
+import {
+  extractAttachments,
+  MAX_SCANNED_PDF_OCR_PAGES,
+  runScannedPdfSelectedPageOcr,
+} from '../../../services/attachmentExtractionService';
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -45,6 +49,17 @@ function getAttachmentKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
+function parseSelectedPagesInput(rawInput = '') {
+  return Array.from(
+    new Set(
+      String(rawInput)
+        .split(',')
+        .map((value) => Number.parseInt(value.trim(), 10))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  ).sort((a, b) => a - b);
+}
+
 export default function StudentDashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -57,6 +72,7 @@ export default function StudentDashboardPage() {
   const [attachments, setAttachments] = useState([]);
   const [attachmentExtractionByKey, setAttachmentExtractionByKey] = useState({});
   const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
+  const [scannedPdfSelectionByKey, setScannedPdfSelectionByKey] = useState({});
   const [selectedSubject, setSelectedSubject] = useState('');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
@@ -71,7 +87,21 @@ export default function StudentDashboardPage() {
 
   const onboardingStatus = getStudentOnboardingStatus(user);
   const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
-  const canSend = onboardingStatus.complete && hasRequestContent && Boolean(cardId);
+  const hasPendingScannedPdfSelection = attachments.some((file) => {
+    const fileKey = getAttachmentKey(file);
+    const extraction = attachmentExtractionByKey[fileKey];
+    return extraction?.scannedPdfDetected && extraction?.requiresPageSelection;
+  });
+  const hasRunningExtraction = attachments.some((file) => {
+    const fileKey = getAttachmentKey(file);
+    const status = attachmentExtractionStatusByKey[fileKey];
+    return status === 'extracting' || status === 'ocr processing';
+  });
+  const canSend = onboardingStatus.complete
+    && hasRequestContent
+    && Boolean(cardId)
+    && !hasPendingScannedPdfSelection
+    && !hasRunningExtraction;
   const activeOrOngoingRequest = requests.find((request) => [
     REQUEST_STATUSES.PENDING,
     REQUEST_STATUSES.MATCHING,
@@ -205,10 +235,23 @@ export default function StudentDashboardPage() {
         ...prev,
         [fileKey]: result.success
           ? 'text extracted'
+          : result.requiresPageSelection
+            ? 'choose up to 3 pages'
           : result.extractionMethod === 'fallback'
             ? 'fallback needed'
             : 'extraction weak',
       }));
+      if (result.requiresPageSelection) {
+        setScannedPdfSelectionByKey((prev) => ({
+          ...prev,
+          [fileKey]: {
+            input: '',
+            selectedPages: [],
+            error: '',
+            isSubmitting: false,
+          },
+        }));
+      }
     }).finally(() => {
       setAttachmentExtractionStatusByKey((prev) => {
         const next = { ...prev };
@@ -245,6 +288,11 @@ export default function StudentDashboardPage() {
         delete updated[removedKey];
         return updated;
       });
+      setScannedPdfSelectionByKey((current) => {
+        const updated = { ...current };
+        delete updated[removedKey];
+        return updated;
+      });
       console.debug('[attachmentExtraction] extraction state cleaned on removal', {
         fileName: removed.name,
         fileKey: removedKey,
@@ -253,6 +301,88 @@ export default function StudentDashboardPage() {
     const nextAttachments = attachmentsRef.current.filter((_, index) => index !== indexToRemove);
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
+  };
+
+  const submitScannedPdfPageSelection = async (file, fileKey) => {
+    const selectionState = scannedPdfSelectionByKey[fileKey] || {};
+    const selectedPages = parseSelectedPagesInput(selectionState.input || '');
+    if (!selectedPages.length) {
+      setScannedPdfSelectionByKey((prev) => ({
+        ...prev,
+        [fileKey]: {
+          ...selectionState,
+          selectedPages,
+          error: 'Enter at least one page number.',
+        },
+      }));
+      return;
+    }
+    if (selectedPages.length > MAX_SCANNED_PDF_OCR_PAGES) {
+      setScannedPdfSelectionByKey((prev) => ({
+        ...prev,
+        [fileKey]: {
+          ...selectionState,
+          selectedPages,
+          error: `You can select up to ${MAX_SCANNED_PDF_OCR_PAGES} pages only.`,
+        },
+      }));
+      return;
+    }
+
+    setScannedPdfSelectionByKey((prev) => ({
+      ...prev,
+      [fileKey]: {
+        ...selectionState,
+        selectedPages,
+        error: '',
+        isSubmitting: true,
+      },
+    }));
+    setAttachmentExtractionStatusByKey((prev) => ({
+      ...prev,
+      [fileKey]: 'ocr processing',
+    }));
+
+    try {
+      const result = await runScannedPdfSelectedPageOcr({ file, selectedPages });
+      setAttachmentExtractionByKey((prev) => ({
+        ...prev,
+        [fileKey]: result,
+      }));
+      setAttachmentExtractionStatusByKey((prev) => ({
+        ...prev,
+        [fileKey]: result.success ? 'ocr complete' : 'fallback needed',
+      }));
+      setScannedPdfSelectionByKey((prev) => ({
+        ...prev,
+        [fileKey]: {
+          ...prev[fileKey],
+          selectedPages,
+          error: result.success ? '' : 'OCR failed for selected pages. Fallback may be needed.',
+          isSubmitting: false,
+        },
+      }));
+    } catch (error) {
+      console.debug('[attachmentExtraction] selected-page OCR failed', {
+        fileName: file?.name,
+        fileKey,
+        selectedPages,
+        error: error?.message,
+      });
+      setAttachmentExtractionStatusByKey((prev) => ({
+        ...prev,
+        [fileKey]: 'choose up to 3 pages',
+      }));
+      setScannedPdfSelectionByKey((prev) => ({
+        ...prev,
+        [fileKey]: {
+          ...prev[fileKey],
+          selectedPages,
+          error: error?.message || 'Unable to process selected pages.',
+          isSubmitting: false,
+        },
+      }));
+    }
   };
 
   const goToRequestStatus = async () => {
@@ -459,30 +589,80 @@ export default function StudentDashboardPage() {
                 </label>
 
                 {attachments.length > 0 ? (
-                  <div className="mb-3 flex flex-wrap gap-2">
+                  <div className="mb-3 space-y-2">
                     {attachments.map((file, index) => {
                       const isImage = file.type.startsWith('image/');
                       const fileKey = getAttachmentKey(file);
                       const extractionStatus = attachmentExtractionStatusByKey[fileKey];
+                      const extractionResult = attachmentExtractionByKey[fileKey];
+                      const scannedSelectionState = scannedPdfSelectionByKey[fileKey] || {};
+                      const hasScannedSelectionPrompt = extractionResult?.scannedPdfDetected && extractionResult?.requiresPageSelection;
                       return (
-                        <div
-                          key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                          className="inline-flex max-w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
-                        >
-                          {isImage ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
-                          <span className="max-w-[180px] truncate font-medium md:max-w-[260px]">{file.name}</span>
-                          {extractionStatus ? (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                              {extractionStatus}
-                            </span>
+                        <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2">
+                          <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                            {isImage ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
+                            <span className="max-w-[180px] truncate font-medium md:max-w-[260px]">{file.name}</span>
+                            {extractionStatus ? (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                                {extractionStatus}
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(index)}
+                              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-100"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          {hasScannedSelectionPrompt ? (
+                            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-900">
+                              <p className="font-semibold">Scanned PDF detected. Choose up to {MAX_SCANNED_PDF_OCR_PAGES} pages.</p>
+                              <p className="mt-1 text-amber-800">
+                                This file appears image-based. For cost control, OCR will run only on selected pages.
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={scannedSelectionState.input || ''}
+                                  onChange={(event) => {
+                                    const nextInput = event.target.value;
+                                    const parsedPages = parseSelectedPagesInput(nextInput);
+                                    setScannedPdfSelectionByKey((prev) => ({
+                                      ...prev,
+                                      [fileKey]: {
+                                        ...prev[fileKey],
+                                        input: nextInput,
+                                        selectedPages: parsedPages,
+                                        error: parsedPages.length > MAX_SCANNED_PDF_OCR_PAGES
+                                          ? `You can select up to ${MAX_SCANNED_PDF_OCR_PAGES} pages only.`
+                                          : '',
+                                      },
+                                    }));
+                                  }}
+                                  placeholder="Example: 1, 2, 5"
+                                  className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-zinc-900 outline-none md:w-56"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={Boolean(scannedSelectionState.isSubmitting) || parseSelectedPagesInput(scannedSelectionState.input || '').length > MAX_SCANNED_PDF_OCR_PAGES}
+                                  onClick={() => submitScannedPdfPageSelection(file, fileKey)}
+                                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                                >
+                                  {scannedSelectionState.isSubmitting ? 'Running OCR...' : 'Run OCR for selected pages'}
+                                </button>
+                              </div>
+                              {scannedSelectionState.selectedPages?.length ? (
+                                <p className="mt-1 text-[11px] text-amber-700">
+                                  Selected pages: {scannedSelectionState.selectedPages.join(', ')}
+                                </p>
+                              ) : null}
+                              {scannedSelectionState.error ? (
+                                <p className="mt-1 text-[11px] font-semibold text-rose-700">{scannedSelectionState.error}</p>
+                              ) : null}
+                            </div>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(index)}
-                            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-100"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
                         </div>
                       );
                     })}
@@ -591,6 +771,11 @@ export default function StudentDashboardPage() {
               {error ? (
                 <p className="mt-2 text-xs text-rose-700">
                   {error}
+                </p>
+              ) : null}
+              {hasPendingScannedPdfSelection ? (
+                <p className="mt-2 text-xs text-amber-700">
+                  At least one scanned PDF still needs page selection (maximum {MAX_SCANNED_PDF_OCR_PAGES} pages) before request submission.
                 </p>
               ) : null}
             </div>
