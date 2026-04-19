@@ -20,6 +20,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/finalize-session-billing/, '/finalizeSessionBilling'),
       },
+      '/image-ocr': {
+        target: 'http://localhost:5001/claxi-bakayise/us-central1',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/image-ocr/, '/extractImageOcr'),
+      },
     },
   },
 })
