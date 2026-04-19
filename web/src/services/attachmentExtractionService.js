@@ -131,7 +131,7 @@ async function extractPdfWithOcr(file) {
 
 function buildExtractionResult({ file, fileType, extractionMethod, extractedText, textLength, extractionQuality, success }) {
   return {
-    fileName: file.name,
+    fileName: file?.name || 'unknown-file',
     fileType,
     extractionMethod,
     success,
@@ -241,7 +241,31 @@ export async function extractAttachments(files = [], onProgress) {
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
-    const result = await extractSingleAttachment(file);
+    console.debug('[attachmentExtraction] extraction started', {
+      fileName: file?.name,
+      index,
+      total: files.length,
+    });
+
+    let result;
+
+    try {
+      result = await extractSingleAttachment(file);
+    } catch (error) {
+      console.debug('[attachmentExtraction] extraction crashed; returning fallback', {
+        fileName: file?.name,
+        error: error?.message,
+      });
+      result = buildExtractionResult({
+        file,
+        fileType: detectAttachmentType(file) || 'image',
+        extractionMethod: 'fallback',
+        extractedText: '',
+        textLength: 0,
+        extractionQuality: 'failed',
+        success: false,
+      });
+    }
 
     console.debug('[attachmentExtraction] extraction completed', {
       fileName: result.fileName,
@@ -252,7 +276,14 @@ export async function extractAttachments(files = [], onProgress) {
 
     results.push(result);
     if (typeof onProgress === 'function') {
-      onProgress(result, index, files.length);
+      try {
+        onProgress(result, index, files.length);
+      } catch (progressError) {
+        console.debug('[attachmentExtraction] progress callback failed', {
+          fileName: result.fileName,
+          error: progressError?.message,
+        });
+      }
     }
   }
 

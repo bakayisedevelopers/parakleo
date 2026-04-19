@@ -63,6 +63,9 @@ export default function StudentDashboardPage() {
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const attachmentsRef = useRef([]);
+  const extractionRunCounterRef = useRef(0);
+  const activeExtractionTokenByKeyRef = useRef({});
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
 
@@ -121,6 +124,7 @@ export default function StudentDashboardPage() {
 
   const onFileChange = (event) => {
     const files = Array.from(event.target.files || []);
+    console.debug('[attachmentExtraction] file selection received', { selectedCount: files.length });
     if (!files.length) return;
 
     const validFiles = files.filter((file) => {
@@ -129,57 +133,108 @@ export default function StudentDashboardPage() {
       return isImage || isPdf;
     });
 
-    if (!validFiles.length) return;
+    if (!validFiles.length) {
+      console.debug('[attachmentExtraction] no supported files in selection');
+      event.target.value = '';
+      return;
+    }
 
-    let newFilesForExtraction = [];
+    const existingKeys = new Set(attachmentsRef.current.map((file) => getAttachmentKey(file)));
+    const newFilesForExtraction = validFiles.filter((file) => !existingKeys.has(getAttachmentKey(file)));
 
-    setAttachments((prev) => {
-      const existingKeys = new Set(prev.map((file) => getAttachmentKey(file)));
-      const newFiles = validFiles.filter((file) => !existingKeys.has(getAttachmentKey(file)));
-      newFilesForExtraction = newFiles;
-      return [...prev, ...newFiles];
+    if (!newFilesForExtraction.length) {
+      console.debug('[attachmentExtraction] selection ignored because files are already attached');
+      event.target.value = '';
+      return;
+    }
+
+    const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
+    attachmentsRef.current = nextAttachments;
+    setAttachments(nextAttachments);
+    console.debug('[attachmentExtraction] files queued for extraction', {
+      queuedCount: newFilesForExtraction.length,
+      totalAttachments: nextAttachments.length,
+      fileNames: newFilesForExtraction.map((file) => file.name),
     });
 
-    if (newFilesForExtraction.length) {
+    const extractionTokenByFileKey = {};
+
+    setAttachmentExtractionStatusByKey((prev) => {
+      const next = { ...prev };
+      newFilesForExtraction.forEach((file) => {
+        const fileKey = getAttachmentKey(file);
+        const token = extractionRunCounterRef.current + 1;
+        extractionRunCounterRef.current = token;
+        activeExtractionTokenByKeyRef.current[fileKey] = token;
+        extractionTokenByFileKey[fileKey] = token;
+        next[fileKey] = 'extracting';
+        console.debug('[attachmentExtraction] extraction state set', {
+          fileName: file.name,
+          fileKey,
+          token,
+          status: 'extracting',
+        });
+      });
+      return next;
+    });
+
+    extractAttachments(newFilesForExtraction, (result, index) => {
+      const file = newFilesForExtraction[index];
+      const fileKey = getAttachmentKey(file);
+      const tokenForThisResult = extractionTokenByFileKey[fileKey];
+      const activeToken = activeExtractionTokenByKeyRef.current[fileKey];
+
+      if (!tokenForThisResult || tokenForThisResult !== activeToken) {
+        console.debug('[attachmentExtraction] ignoring stale extraction result', {
+          fileName: file?.name,
+          fileKey,
+          tokenForThisResult,
+          activeToken,
+        });
+        return;
+      }
+
+      console.debug('[attachmentExtraction] extraction result received', {
+        fileName: result.fileName,
+        fileKey,
+        success: result.success,
+        extractionMethod: result.extractionMethod,
+      });
+      setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
+      setAttachmentExtractionStatusByKey((prev) => ({
+        ...prev,
+        [fileKey]: result.success
+          ? 'text extracted'
+          : result.extractionMethod === 'fallback'
+            ? 'fallback needed'
+            : 'extraction weak',
+      }));
+    }).finally(() => {
       setAttachmentExtractionStatusByKey((prev) => {
         const next = { ...prev };
         newFilesForExtraction.forEach((file) => {
-          next[getAttachmentKey(file)] = 'extracting';
+          const fileKey = getAttachmentKey(file);
+          if (next[fileKey] === 'extracting') {
+            next[fileKey] = 'fallback needed';
+            console.debug('[attachmentExtraction] extraction status auto-resolved from extracting', {
+              fileName: file.name,
+              fileKey,
+              status: next[fileKey],
+            });
+          }
         });
         return next;
       });
-
-      extractAttachments(newFilesForExtraction, (result, index) => {
-        const file = newFilesForExtraction[index];
-        const fileKey = getAttachmentKey(file);
-        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
-        setAttachmentExtractionStatusByKey((prev) => ({
-          ...prev,
-          [fileKey]: result.success
-            ? 'text extracted'
-            : result.extractionMethod === 'fallback'
-              ? 'fallback needed'
-              : 'extraction weak',
-        }));
-      }).catch((extractionError) => {
-        console.debug('[attachmentExtraction] batch extraction failed', { error: extractionError?.message });
-        setAttachmentExtractionStatusByKey((prev) => {
-          const next = { ...prev };
-          newFilesForExtraction.forEach((file) => {
-            next[getAttachmentKey(file)] = 'fallback needed';
-          });
-          return next;
-        });
-      });
-    }
+    });
 
     event.target.value = '';
   };
 
   const removeAttachment = (indexToRemove) => {
-    const removed = attachments[indexToRemove];
+    const removed = attachmentsRef.current[indexToRemove];
     if (removed) {
       const removedKey = getAttachmentKey(removed);
+      delete activeExtractionTokenByKeyRef.current[removedKey];
       setAttachmentExtractionByKey((current) => {
         const updated = { ...current };
         delete updated[removedKey];
@@ -190,8 +245,14 @@ export default function StudentDashboardPage() {
         delete updated[removedKey];
         return updated;
       });
+      console.debug('[attachmentExtraction] extraction state cleaned on removal', {
+        fileName: removed.name,
+        fileKey: removedKey,
+      });
     }
-    setAttachments((prev) => prev.filter((_, index) => index !== indexToRemove));
+    const nextAttachments = attachmentsRef.current.filter((_, index) => index !== indexToRemove);
+    attachmentsRef.current = nextAttachments;
+    setAttachments(nextAttachments);
   };
 
   const goToRequestStatus = async () => {
@@ -285,6 +346,10 @@ export default function StudentDashboardPage() {
     refreshQuote(durationMinutes).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingStatus.complete]);
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
 
   const handleDurationChange = async (event) => {
     const minutes = Number(event.target.value || DEFAULT_LESSON_DURATION);
