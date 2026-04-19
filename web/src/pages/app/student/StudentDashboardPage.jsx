@@ -44,12 +44,13 @@ export default function StudentDashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const textareaRef = useRef(null);
+  const isManualSubjectRef = useRef(false);
   const [topic, setTopic] = useState('');
   const [cardId, setCardId] = useState(
     user?.paymentMethods?.find((card) => card.isDefault)?.id || user?.paymentMethods?.[0]?.id || ''
   );
   const [attachments, setAttachments] = useState([]);
-  const [manualSubject, setManualSubject] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [quote, setQuote] = useState(null);
@@ -88,14 +89,19 @@ export default function StudentDashboardPage() {
   };
 
   const onTopicChange = (event) => {
-    setTopic(event.target.value);
-    setManualSubject('');
+    const nextTopic = event.target.value;
+    setTopic(nextTopic);
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(resolveSubjectFromText(nextTopic, SUBJECT_OPTIONS));
+    }
     resizeTextarea();
   };
 
   const applySuggestion = (value) => {
     setTopic(value);
-    setManualSubject('');
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(resolveSubjectFromText(value, SUBJECT_OPTIONS));
+    }
     setTimeout(() => resizeTextarea(), 0);
   };
 
@@ -137,7 +143,7 @@ export default function StudentDashboardPage() {
 
   const goToRequestStatus = async () => {
     if (!canSend || isSubmitting) return;
-    if (!resolvedSubject) {
+    if (!selectedSubject) {
       setShowSubjectFallback(true);
       return;
     }
@@ -187,7 +193,7 @@ export default function StudentDashboardPage() {
       }
 
       const requestId = await createClassRequest({
-        subject: resolvedSubject,
+        subject: selectedSubject,
         topic: requestText,
         description: topic.trim(),
         preferredDate: '',
@@ -368,7 +374,19 @@ export default function StudentDashboardPage() {
                 />
 
                 <div className="mt-2 text-xs text-zinc-400">
-                  Subject: {resolvedSubject ? <span className="font-semibold text-emerald-300">{resolvedSubject}</span> : <span className="font-semibold text-amber-300">Selection required before submit</span>}
+                  Subject:{' '}
+                  {selectedSubject ? (
+                    <span className="font-semibold text-emerald-300">{selectedSubject}</span>
+                  ) : (
+                    <span className="font-semibold text-amber-300">Selection required before submit</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowSubjectFallback(true)}
+                    className="ml-2 text-xs font-semibold text-emerald-300 underline underline-offset-2 transition hover:text-emerald-200"
+                  >
+                    Change
+                  </button>
                 </div>
               </div>
 
@@ -464,8 +482,12 @@ export default function StudentDashboardPage() {
             </p>
 
             <select
-              value={manualSubject}
-              onChange={(event) => setManualSubject(event.target.value)}
+              value={selectedSubject}
+              onChange={(event) => {
+                const nextSubject = event.target.value;
+                isManualSubjectRef.current = Boolean(nextSubject);
+                setSelectedSubject(nextSubject);
+              }}
               className="mt-4 w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none"
             >
               <option value="">Select subject</option>
@@ -486,9 +508,9 @@ export default function StudentDashboardPage() {
               </button>
               <button
                 type="button"
-                disabled={!manualSubject}
+                disabled={!selectedSubject}
                 onClick={() => setShowSubjectFallback(false)}
-                className={`rounded-xl px-3 py-2 text-xs font-semibold text-white ${manualSubject ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-zinc-600'}`}
+                className={`rounded-xl px-3 py-2 text-xs font-semibold text-white ${selectedSubject ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-zinc-600'}`}
               >
                 Confirm subject
               </button>
