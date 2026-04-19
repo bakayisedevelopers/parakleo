@@ -1,7 +1,7 @@
 import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai';
 import { getFirebaseClients } from '../firebase/config';
 
-const CLASSIFICATION_MODEL = import.meta.env.VITE_FIREBASE_AI_SUBJECT_MODEL || 'gemini-2.0-flash';
+const CLASSIFICATION_MODEL = import.meta.env.VITE_FIREBASE_AI_SUBJECT_MODEL || 'gemini-2.5-flash';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 
 const UNKNOWN_CLASSIFICATION = {

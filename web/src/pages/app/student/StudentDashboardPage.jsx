@@ -591,56 +591,17 @@ export default function StudentDashboardPage() {
         <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
           <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/70 p-6 backdrop-blur-xl md:p-10">
             <div className="max-w-3xl">
-              <div className="mb-4 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                Smart class requests
-              </div>
-
-              <h1 className="text-3xl font-black leading-tight tracking-tight text-zinc-100 md:text-3xl">
-                Hello{' '}
-                <span className="bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                  {displayName}
-                </span>
-                , request anything you would like help with.
-              </h1>
-
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300 md:text-base">
-                Upload a picture or document first, then add any extra details if needed.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-4 text-sm text-indigo-100">
-            <p className="font-semibold">Free minutes balance: {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</p>
-            <p className="mt-1 text-xs text-indigo-200">
-              Use your referral code <span className="font-semibold">{user?.referralCode || 'Loading...'}</span> to invite students and earn +30 min each.
-            </p>
-          </div>
-
-          {latestOpenSession || activeOrOngoingRequest ? (
-            <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-              <p className="font-semibold">Continue your class</p>
-              {latestOpenSession ? (
-                <p className="mt-1">
-                  Live session available: <span className="font-semibold">{latestOpenSession.topic || 'Mathematics class'}</span>.
-                  <Link to={`/app/session/${latestOpenSession.id}`} className="ml-1 underline">Join now</Link>
-                </p>
-              ) : null}
-              {!latestOpenSession && activeOrOngoingRequest ? (
-                <p className="mt-1">
-                  We&apos;re still processing your latest request: <span className="font-semibold">{activeOrOngoingRequest.topic || 'Mathematics request'}</span>.
-                  <Link to={`/app/student/request/${activeOrOngoingRequest.id}`} className="ml-1 underline">View status</Link>
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="flex-1" />
-
-          <div className="sticky bottom-0 z-20 mt-8 pb-1 md:pb-1">
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-zinc-950 via-zinc-950/85 to-transparent" />
-
-            <div className="relative rounded-[2rem] bg-transparent p-1 md:p-1">
+              <div className="relative rounded-[2rem] bg-transparent p-1 md:p-1">
               <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900 px-4 py-3 shadow-inner md:px-5 md:py-4">
+                <div className="mt-4 mb-4 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                  Smart class requests
+                </div>
+                <h1 className="text-3xl font-black leading-tight tracking-tight text-zinc-100 md:text-3xl mb-4">
+                  Hello{' '}
+                  <span className="bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                    {displayName}
+                  </span>
+                </h1>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   {QUICK_REQUEST_SUGGESTIONS.map((option) => (
                     <button
@@ -841,6 +802,7 @@ export default function StudentDashboardPage() {
                 <p className="mt-2 text-xs text-zinc-600">
                   Original {formatRand(pricingPreview.originalPrice)} • Free-minute discount {formatRand(pricingPreview.discountApplied)} ({pricingPreview.freeMinutesApplied.toFixed(2)} min) • Pay now {formatRand(pricingPreview.finalPrice)}
                 </p>
+                
               ) : null}
 
               {!user?.paymentMethods?.length ? (
@@ -859,8 +821,34 @@ export default function StudentDashboardPage() {
                   At least one scanned PDF still needs page selection (maximum {MAX_SCANNED_PDF_OCR_PAGES} pages) before request submission.
                 </p>
               ) : null}
+              <div className="mt-4 rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-4 text-sm text-indigo-100">
+                <p className="font-semibold">Free minutes balance: {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</p>
+                <p className="mt-1 text-xs text-indigo-200">
+                  Use your referral code <span className="font-semibold">{user?.referralCode || 'Loading...'}</span> to invite students and earn +30 min each.
+                </p>
+              </div>
+            </div>
             </div>
           </div>
+
+          {latestOpenSession || activeOrOngoingRequest ? (
+            <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+              <p className="font-semibold">Continue your class</p>
+              {latestOpenSession ? (
+                <p className="mt-1">
+                  Live session available: <span className="font-semibold">{latestOpenSession.topic || 'Mathematics class'}</span>.
+                  <Link to={`/app/session/${latestOpenSession.id}`} className="ml-1 underline">Join now</Link>
+                </p>
+              ) : null}
+              {!latestOpenSession && activeOrOngoingRequest ? (
+                <p className="mt-1">
+                  We&apos;re still processing your latest request: <span className="font-semibold">{activeOrOngoingRequest.topic || 'Mathematics request'}</span>.
+                  <Link to={`/app/student/request/${activeOrOngoingRequest.id}`} className="ml-1 underline">View status</Link>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
         </div>
       </div>
 
