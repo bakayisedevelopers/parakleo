@@ -10,6 +10,7 @@ const TESSERACT_CDN_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tess
 
 let cachedPdfJs = null;
 let cachedTesseract = null;
+let cachedOcrWorkerPromise = null;
 
 function getFileExtension(fileName = '') {
   const normalizedName = String(fileName || '').toLowerCase();
@@ -28,6 +29,66 @@ async function loadTesseract() {
   if (cachedTesseract) return cachedTesseract;
   cachedTesseract = await import(/* @vite-ignore */ TESSERACT_CDN_URL);
   return cachedTesseract;
+}
+
+function normalizeOcrText(rawText) {
+  return String(rawText || '').replace(/\s+/g, ' ').trim();
+}
+
+function buildOcrResult(rawText) {
+  const extractedText = normalizeOcrText(rawText);
+  const textLength = extractedText.length;
+
+  return {
+    success: textLength > 0,
+    extractedText,
+    textLength,
+    extractionMethod: 'ocr',
+  };
+}
+
+async function getOcrWorker() {
+  if (cachedOcrWorkerPromise) return cachedOcrWorkerPromise;
+
+  cachedOcrWorkerPromise = (async () => {
+    try {
+      const tesseract = await loadTesseract();
+      if (typeof tesseract?.createWorker !== 'function') {
+        throw new Error('Tesseract createWorker API unavailable');
+      }
+
+      const worker = await tesseract.createWorker('eng', 1, {
+        logger: (message) => {
+          if (message?.status) {
+            console.debug('[attachmentExtraction][ocr] worker', message);
+          }
+        },
+      });
+
+      console.debug('[attachmentExtraction][ocr] worker initialized', { language: 'eng' });
+      return worker;
+    } catch (error) {
+      cachedOcrWorkerPromise = null;
+      console.debug('[attachmentExtraction][ocr] worker initialization failed', {
+        error: error?.message,
+      });
+      throw error;
+    }
+  })();
+
+  return cachedOcrWorkerPromise;
+}
+
+async function normalizeOcrInput(input) {
+  if (!input) return input;
+  if (typeof HTMLCanvasElement !== 'undefined' && input instanceof HTMLCanvasElement) {
+    const blob = await new Promise((resolve) => input.toBlob(resolve, 'image/png'));
+    if (!blob) {
+      throw new Error('Canvas conversion to Blob failed');
+    }
+    return blob;
+  }
+  return input;
 }
 
 export function detectAttachmentType(file) {
@@ -75,14 +136,42 @@ export function evaluateExtractionQuality(rawText) {
 }
 
 async function runOcr(blobLike) {
-  const tesseract = await loadTesseract();
-  const result = await tesseract.recognize(blobLike, 'eng');
-  return result?.data?.text || '';
+  const worker = await getOcrWorker();
+  const normalizedInput = await normalizeOcrInput(blobLike);
+  const inputType = normalizedInput?.constructor?.name || typeof normalizedInput;
+
+  console.debug('[attachmentExtraction][ocr] OCR started', {
+    inputType,
+  });
+
+  try {
+    const result = await worker.recognize(normalizedInput);
+    const rawText = result?.data?.text || '';
+    const normalizedText = normalizeOcrText(rawText);
+
+    console.debug('[attachmentExtraction][ocr] OCR raw text', { rawText: normalizedText });
+    console.debug('[attachmentExtraction][ocr] OCR text length', { textLength: normalizedText.length });
+    return rawText;
+  } catch (error) {
+    console.debug('[attachmentExtraction][ocr] OCR failed', {
+      inputType,
+      error: error?.message,
+    });
+    throw error;
+  }
 }
 
 async function extractFromImage(file) {
-  const text = await runOcr(file);
-  return evaluateExtractionQuality(text);
+  try {
+    const text = await runOcr(file);
+    return buildOcrResult(text);
+  } catch (error) {
+    console.debug('[attachmentExtraction][ocr] image OCR extraction failed', {
+      fileName: file?.name,
+      error: error?.message,
+    });
+    return buildOcrResult('');
+  }
 }
 
 async function extractPdfDigitalText(file) {
@@ -126,7 +215,7 @@ async function extractPdfWithOcr(file) {
     pageTexts.push(pageText);
   }
 
-  return evaluateExtractionQuality(pageTexts.join('\n').trim());
+  return buildOcrResult(pageTexts.join('\n').trim());
 }
 
 function buildExtractionResult({ file, fileType, extractionMethod, extractedText, textLength, extractionQuality, success }) {
@@ -171,8 +260,8 @@ export async function extractSingleAttachment(file) {
         extractionMethod: 'ocr',
         extractedText: imageResult.extractedText,
         textLength: imageResult.textLength,
-        extractionQuality: imageResult.extractionQuality,
-        success: imageResult.isUsable,
+        extractionQuality: imageResult.success ? 'good' : 'failed',
+        success: imageResult.success,
       });
     } catch (error) {
       console.debug('[attachmentExtraction] image OCR failed', { fileName: file.name, error: error?.message });
@@ -211,7 +300,7 @@ export async function extractSingleAttachment(file) {
     });
 
     const ocrResult = await extractPdfWithOcr(file);
-    const useOcr = ocrResult.isUsable;
+    const useOcr = ocrResult.success;
 
     return buildExtractionResult({
       file,
@@ -219,7 +308,7 @@ export async function extractSingleAttachment(file) {
       extractionMethod: useOcr ? 'ocr' : 'fallback',
       extractedText: useOcr ? ocrResult.extractedText : '',
       textLength: useOcr ? ocrResult.textLength : 0,
-      extractionQuality: ocrResult.extractionQuality,
+      extractionQuality: useOcr ? 'poor' : 'failed',
       success: useOcr,
     });
   } catch (error) {
