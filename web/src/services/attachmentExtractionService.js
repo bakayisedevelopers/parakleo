@@ -1,3 +1,5 @@
+import { extractImageTextWithVision } from './visionOcrService';
+
 const MIN_TEXT_LENGTH = 30;
 const MIN_READABLE_WORDS = 4;
 const READABLE_WORD_PATTERN = /[A-Za-z]{2,}/g;
@@ -6,11 +8,10 @@ const GARBAGE_CHAR_PATTERN = /[^\w\s.,;:!?()\[\]{}'"\-/%]/g;
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'];
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
-const TESSERACT_CDN_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js';
-
 let cachedPdfJs = null;
+const TESSERACT_CDN_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js';
 let cachedTesseract = null;
-let cachedOcrWorkerPromise = null;
+let cachedTesseractWorkerPromise = null;
 
 function getFileExtension(fileName = '') {
   const normalizedName = String(fileName || '').toLowerCase();
@@ -47,10 +48,10 @@ function buildOcrResult(rawText) {
   };
 }
 
-async function getOcrWorker() {
-  if (cachedOcrWorkerPromise) return cachedOcrWorkerPromise;
+async function getTesseractWorker() {
+  if (cachedTesseractWorkerPromise) return cachedTesseractWorkerPromise;
 
-  cachedOcrWorkerPromise = (async () => {
+  cachedTesseractWorkerPromise = (async () => {
     try {
       const tesseract = await loadTesseract();
       if (typeof tesseract?.createWorker !== 'function') {
@@ -68,7 +69,7 @@ async function getOcrWorker() {
       console.debug('[attachmentExtraction][ocr] worker initialized', { language: 'eng' });
       return worker;
     } catch (error) {
-      cachedOcrWorkerPromise = null;
+      cachedTesseractWorkerPromise = null;
       console.debug('[attachmentExtraction][ocr] worker initialization failed', {
         error: error?.message,
       });
@@ -76,7 +77,7 @@ async function getOcrWorker() {
     }
   })();
 
-  return cachedOcrWorkerPromise;
+  return cachedTesseractWorkerPromise;
 }
 
 async function normalizeOcrInput(input) {
@@ -135,8 +136,8 @@ export function evaluateExtractionQuality(rawText) {
   };
 }
 
-async function runOcr(blobLike) {
-  const worker = await getOcrWorker();
+async function runOcrWithTesseract(blobLike) {
+  const worker = await getTesseractWorker();
   const normalizedInput = await normalizeOcrInput(blobLike);
   const inputType = normalizedInput?.constructor?.name || typeof normalizedInput;
 
@@ -163,10 +164,9 @@ async function runOcr(blobLike) {
 
 async function extractFromImage(file) {
   try {
-    const text = await runOcr(file);
-    return buildOcrResult(text);
+    return await extractImageTextWithVision(file);
   } catch (error) {
-    console.debug('[attachmentExtraction][ocr] image OCR extraction failed', {
+    console.debug('[attachmentExtraction][ocr] image OCR extraction via google-vision failed', {
       fileName: file?.name,
       error: error?.message,
     });
@@ -211,7 +211,7 @@ async function extractPdfWithOcr(file) {
   for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
     const page = await pdfDocument.getPage(pageNumber);
     const canvas = await renderPdfPageToCanvas(page);
-    const pageText = await runOcr(canvas);
+    const pageText = await runOcrWithTesseract(canvas);
     pageTexts.push(pageText);
   }
 

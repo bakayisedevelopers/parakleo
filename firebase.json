@@ -32,6 +32,10 @@
         "function": "syncStudentGrowth"
       },
       {
+        "source": "/image-ocr",
+        "function": "extractImageOcr"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

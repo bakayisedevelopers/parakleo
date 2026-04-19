@@ -2,6 +2,7 @@ const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
+const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
 const { randomUUID } = require('crypto');
@@ -63,6 +64,14 @@ const ACTIVE_REQUEST_STATUSES = new Set([
   REQUEST_STATUS.OFFERED,
   REQUEST_STATUS.NO_TUTOR_AVAILABLE,
 ]);
+let visionClient = null;
+
+function getVisionClient() {
+  if (!visionClient) {
+    visionClient = new vision.ImageAnnotatorClient();
+  }
+  return visionClient;
+}
 
 function normalizeMillis(value) {
   if (!value) return 0;
@@ -443,6 +452,10 @@ function getBearerToken(req) {
   return authHeader.substring('Bearer '.length).trim();
 }
 
+function normalizeExtractedText(rawText) {
+  return String(rawText || '').replace(/\s+/g, ' ').trim();
+}
+
 function getSafeSecretPreview(value) {
   if (!value || typeof value !== 'string') {
     return {
@@ -572,6 +585,105 @@ exports.getPricingQuote = onRequest({ cors: true }, async (req, res) => {
   });
 
   res.status(200).json({ success: true, quote: sanitizePricingSnapshot(quotePayload) });
+});
+
+exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const objectPath = String(req.body?.objectPath || '').trim();
+  const fileName = String(req.body?.fileName || '').trim() || null;
+  const mimeType = String(req.body?.mimeType || '').trim() || null;
+  const imageBase64 = String(req.body?.imageBase64 || '').trim();
+  const sourceLabel = objectPath || fileName || 'inline-image';
+
+  logger.info('image_ocr_invoked', {
+    uid: decoded.uid,
+    source: sourceLabel,
+    hasObjectPath: Boolean(objectPath),
+    hasInlineImage: Boolean(imageBase64),
+    mimeType,
+  });
+
+  if (!objectPath && !imageBase64) {
+    res.status(400).json({ success: false, message: 'Missing image source for OCR.' });
+    return;
+  }
+
+  if (objectPath) {
+    const [, ownerUid] = objectPath.split('/');
+    if (!ownerUid || ownerUid !== decoded.uid) {
+      logger.warn('image_ocr_forbidden_path', {
+        uid: decoded.uid,
+        objectPath,
+      });
+      res.status(403).json({ success: false, message: 'You are not allowed to OCR this image.' });
+      return;
+    }
+  }
+
+  try {
+    let imageBuffer;
+    if (objectPath) {
+      const bucket = admin.storage().bucket();
+      const [bytes] = await bucket.file(objectPath).download();
+      imageBuffer = bytes;
+    } else {
+      imageBuffer = Buffer.from(imageBase64, 'base64');
+    }
+
+    const [ocrResponse] = await getVisionClient().documentTextDetection({
+      image: { content: imageBuffer },
+    });
+
+    const rawText = ocrResponse?.fullTextAnnotation?.text || ocrResponse?.textAnnotations?.[0]?.description || '';
+    const extractedText = normalizeExtractedText(rawText);
+    const textLength = extractedText.length;
+
+    logger.info('image_ocr_completed', {
+      uid: decoded.uid,
+      source: sourceLabel,
+      success: textLength > 0,
+      textLength,
+      provider: 'google-vision',
+    });
+
+    res.status(200).json({
+      success: textLength > 0,
+      extractedText,
+      textLength,
+      extractionMethod: 'ocr',
+      provider: 'google-vision',
+    });
+  } catch (error) {
+    logger.error('image_ocr_failed', {
+      uid: decoded.uid,
+      source: sourceLabel,
+      error: error?.message || 'unknown_error',
+    });
+    res.status(500).json({
+      success: false,
+      extractedText: '',
+      textLength: 0,
+      extractionMethod: 'ocr',
+      provider: 'google-vision',
+      message: 'Image OCR failed.',
+    });
+  }
 });
 
 exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
