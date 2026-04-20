@@ -64,6 +64,39 @@ function parseSelectedPagesInput(rawInput = '') {
   ).sort((a, b) => a - b);
 }
 
+function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {} }) {
+  const attachmentExtractions = attachments.map((file, index) => {
+    const fileKey = getAttachmentKey(file);
+    const extraction = attachmentExtractionByKey[fileKey] || null;
+    const uploadedAttachment = uploadedAttachments[index] || null;
+
+    return {
+      fileName: file.name,
+      uploadedAttachment,
+      extractedText: String(extraction?.extractedText || '').trim(),
+      extractionMethod: extraction?.extractionMethod || '',
+      extractionQuality: extraction?.extractionQuality || '',
+      fileType: extraction?.fileType || '',
+      selectedPages: Array.isArray(extraction?.selectedPages) ? extraction.selectedPages : [],
+      scannedPdfDetected: Boolean(extraction?.scannedPdfDetected),
+      ocrStatus: extraction?.ocrStatus || '',
+      success: Boolean(extraction?.success),
+    };
+  });
+
+  const extractedText = attachmentExtractions
+    .map((item) => item.extractedText)
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
+  return {
+    extractedText,
+    attachmentExtractions,
+    ocrImageReferences: [],
+  };
+}
+
 export default function StudentDashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -445,6 +478,18 @@ export default function StudentDashboardPage() {
         );
       }
 
+      const boardPreparationSource = buildBoardPreparationSource({
+        attachments,
+        uploadedAttachments,
+        attachmentExtractionByKey,
+      });
+
+      console.debug('[whiteboardPreparation] request board source prepared', {
+        attachmentCount: uploadedAttachments.length,
+        extractionCount: boardPreparationSource.attachmentExtractions.length,
+        extractedTextLength: boardPreparationSource.extractedText.length,
+      });
+
       const requestId = await createClassRequest({
         subject: selectedSubject,
         topic: requestText,
@@ -464,6 +509,7 @@ export default function StudentDashboardPage() {
         studentEmail: user.email,
         selectedCardId: cardId,
         pricingSnapshot: quoteWithDiscount,
+        boardPreparationSource,
       });
 
       navigate(`/app/student/request/${requestId}`, {

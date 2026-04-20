@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import TldrawSdkEmbed from '../../components/app/TldrawSdkEmbed';
 import { useAuth } from '../../hooks/useAuth';
+import { useClassRequest } from '../../hooks/useClassRequests';
 import { useStudentSessions, useTutorSessions } from '../../hooks/useSessions';
 import { SESSION_STATUS } from '../../constants/lifecycle';
 import {
@@ -128,6 +129,7 @@ export default function SessionRoomPage() {
   const { sessions: tutorSessions } = useTutorSessions(user?.uid);
   const sessions = role === 'tutor' ? tutorSessions : studentSessions;
   const session = sessions.find((item) => item.id === id);
+  const { request } = useClassRequest(session?.requestId || '');
 
   const [ratingForm, setRatingForm] = useState({ overall: '5' });
   const [isSaving, setIsSaving] = useState(false);
@@ -164,6 +166,7 @@ export default function SessionRoomPage() {
   const studentControlsTimeoutRef = useRef(null);
   const autoEndingRef = useRef(false);
   const boardContentLoadedRef = useRef(false);
+  const boardEditorRef = useRef(null);
   const previousStatusRef = useRef(null);
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
@@ -227,30 +230,49 @@ export default function SessionRoomPage() {
   }, [session?.id, role]);
 
   const getSessionBoardSeedContent = useCallback(() => {
-    const attachments = session?.attachments || (session?.requestAttachment ? [session.requestAttachment] : []);
-    const extractedText = session?.extractedText
-      || session?.requestExtractedText
+    const boardPreparationSource = session?.boardPreparationSource || request?.boardPreparationSource || null;
+    const attachments = session?.attachments
+      || request?.attachments
+      || (session?.requestAttachment ? [session.requestAttachment] : [])
+      || (request?.attachment ? [request.attachment] : []);
+    const extractedText = boardPreparationSource?.extractedText
       || session?.requestDescription
+      || request?.description
       || session?.topic
+      || request?.topic
       || '';
-    const ocrImageReferences = session?.ocrImageReferences || session?.selectedPageImages || [];
+    const ocrImageReferences = boardPreparationSource?.ocrImageReferences || [];
+
+    debugLog('sessionRoom', '[whiteboardPreparation] board source resolved.', {
+      sessionId: session?.id || null,
+      requestId: session?.requestId || request?.id || null,
+      sourceOnSession: Boolean(session?.boardPreparationSource),
+      sourceOnRequest: Boolean(request?.boardPreparationSource),
+      attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+      extractedTextLength: String(extractedText || '').trim().length,
+      ocrImageReferenceCount: Array.isArray(ocrImageReferences) ? ocrImageReferences.length : 0,
+    });
 
     return {
       extractedText,
       attachments,
       ocrImageReferences,
     };
-  }, [session]);
+  }, [request, session]);
 
-  const injectPreparedBoardContent = useCallback((editor) => {
+  const injectPreparedBoardContent = useCallback(async (editor) => {
     if (!editor || boardContentLoadedRef.current || role !== 'tutor') return;
 
     const { extractedText, attachments, ocrImageReferences } = getSessionBoardSeedContent();
     if (!String(extractedText || '').trim() && !(attachments || []).length) {
+      debugLog('sessionRoom', '[whiteboardPreparation] skipped injection because no board source data was available.', {
+        sessionId: session?.id || null,
+      });
       return;
     }
 
     try {
+      const { AssetRecordType, createShapeId, toRichText } = await import('tldraw');
       const parsedQuestions = parseQuestionsFromExtraction({
         extractedText,
         attachments,
@@ -258,25 +280,38 @@ export default function SessionRoomPage() {
       });
       const layout = prepareWhiteboardLayout(parsedQuestions);
 
+      debugLog('sessionRoom', '[whiteboardPreparation] parsing finished.', {
+        sessionId: session?.id || null,
+        questionCount: parsedQuestions.length,
+        layoutCount: layout.length,
+      });
+
       const assets = [];
       const shapes = [];
 
       layout.forEach((item, index) => {
         if (item.type === 'text') {
           shapes.push({
-            id: `shape:text:${session?.id || 'session'}:${index}`,
+            id: createShapeId(),
             type: 'text',
+            parentId: editor.getCurrentPageId(),
             x: item.position.x,
             y: item.position.y,
             props: {
-              text: item.content,
+              richText: toRichText(item.content),
+              autoSize: false,
+              w: 900,
+              size: 'm',
+              font: 'sans',
+              textAlign: 'start',
+              scale: 1,
             },
           });
           return;
         }
 
         if (item.type === 'image' && item.src) {
-          const assetId = `asset:image:${session?.id || 'session'}:${index}`;
+          const assetId = AssetRecordType.createId();
           assets.push({
             id: assetId,
             type: 'image',
@@ -293,8 +328,9 @@ export default function SessionRoomPage() {
           });
 
           shapes.push({
-            id: `shape:image:${session?.id || 'session'}:${index}`,
+            id: createShapeId(),
             type: 'image',
+            parentId: editor.getCurrentPageId(),
             x: item.position.x,
             y: item.position.y,
             props: {
@@ -314,15 +350,36 @@ export default function SessionRoomPage() {
       }
 
       boardContentLoadedRef.current = true;
-      console.debug('[whiteboardPreparation] number of elements placed on board', {
-        count: shapes.length,
+      debugLog('sessionRoom', '[whiteboardPreparation] board injection completed.', {
+        sessionId: session?.id || null,
+        insertedAssetCount: assets.length,
+        insertedShapeCount: shapes.length,
       });
     } catch (error) {
-      console.debug('[whiteboardPreparation] board injection failed', {
+      debugLog('sessionRoom', '[whiteboardPreparation] board injection failed.', {
+        sessionId: session?.id || null,
         message: error?.message,
       });
     }
   }, [getSessionBoardSeedContent, role, session?.id]);
+
+  const handleBoardMount = useCallback((editor) => {
+    boardEditorRef.current = editor;
+    debugLog('sessionRoom', '[whiteboardPreparation] tldraw editor mounted.', {
+      sessionId: session?.id || null,
+      role,
+    });
+  }, [role, session?.id]);
+
+  useEffect(() => {
+    if (!boardEditorRef.current) return;
+    injectPreparedBoardContent(boardEditorRef.current).catch((error) => {
+      debugLog('sessionRoom', '[whiteboardPreparation] board injection effect failed.', {
+        sessionId: session?.id || null,
+        message: error?.message,
+      });
+    });
+  }, [injectPreparedBoardContent, request?.boardPreparationSource, session?.boardPreparationSource, session?.id]);
 
   useEffect(() => {
     if (!session?.id) return;
@@ -841,7 +898,7 @@ export default function SessionRoomPage() {
         <TldrawSdkEmbed
           roomId={whiteboardRoom}
           licenseKey={tldrawLicenseKey}
-          onMount={injectPreparedBoardContent}
+          onMount={handleBoardMount}
         />
       </div>
     </div>

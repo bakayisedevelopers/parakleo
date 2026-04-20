@@ -31,6 +31,10 @@ export function useStudentRequests(studentId) {
 }
 
 export function useStudentRequest(requestId) {
+  return useClassRequest(requestId);
+}
+
+export function useClassRequest(requestId) {
   const [request, setRequest] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
