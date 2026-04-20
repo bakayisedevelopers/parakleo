@@ -1,4 +1,4 @@
-export const ADMIN_EMAILS = ['jebuobed1@gmail.com'];
+export const ADMIN_EMAILS = ['jabuobed1@gmail.com'];
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
