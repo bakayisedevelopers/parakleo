@@ -20,6 +20,10 @@ const MOCK_SESSIONS_KEY = 'claxi_mock_sessions';
 const MATCHING_TIMEOUT_MS = 3 * 60 * 1000;
 const MATCHING_STATUS_DELAY_MS = 3000;
 const NO_TUTOR_STATUS_DELAY_MS = 3000;
+const DEFAULT_RATING_STATUS = {
+  student: 'pending',
+  tutor: 'pending',
+};
 
 let isUpdatingRequests = false;
 let isUpdatingSessions = false;
@@ -357,6 +361,11 @@ export async function createClassRequest(payload) {
     imageAttachment: payload.imageAttachment || '',
     attachment: payload.attachment || null,
     statusDetail: 'Request submitted. Initializing tutor matching.',
+    ratings: {
+      student: null,
+      tutor: null,
+    },
+    ratingStatus: DEFAULT_RATING_STATUS,
   };
 
   if (!clients) {
@@ -675,6 +684,7 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
             student: null,
             tutor: null,
           },
+          ratingStatus: DEFAULT_RATING_STATUS,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -849,6 +859,7 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
                 student: null,
                 tutor: null,
               },
+              ratingStatus: DEFAULT_RATING_STATUS,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             },

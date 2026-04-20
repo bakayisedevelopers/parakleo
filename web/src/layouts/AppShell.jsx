@@ -3,7 +3,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '../components/app/Sidebar';
 import Topbar from '../components/app/Topbar';
 import TutorOfferOverlay from '../components/app/TutorOfferOverlay';
-import SessionRatingPrompt from '../components/app/SessionRatingPrompt';
 import AppBottomNav from '../components/app/AppBottomNav';
 import { useAuth } from '../hooks/useAuth';
 import useViewportMode from '../hooks/useViewportMode';
@@ -63,7 +62,6 @@ export default function AppShell() {
           <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-56 rounded-[2rem] bg-gradient-to-r from-emerald-500/20 via-indigo-500/10 to-cyan-500/20" />
           <div className="relative z-10">
             {activeRole === 'tutor' && !isSessionRoute && !isTutorRestrictedMobile ? <TutorOfferOverlay /> : null}
-            <SessionRatingPrompt />
             <Topbar
               name={user?.fullName || user?.displayName || 'Claxi User'}
               role={activeRole}

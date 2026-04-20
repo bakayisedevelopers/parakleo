@@ -17,6 +17,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useStudentSessions, useTutorSessions } from '../../hooks/useSessions';
 import { SESSION_STATUS } from '../../constants/lifecycle';
 import {
+  dismissSessionRating,
   endSession,
   finalizeSessionClosure,
   joinSessionAsStudent,
@@ -29,7 +30,6 @@ import { debugLog } from '../../utils/devLogger';
 import { parseQuestionsFromExtraction } from '../../services/questionParsingService';
 import { prepareWhiteboardLayout } from '../../services/whiteboardPreparationService';
 
-const HANDLED_KEY = 'claxi_handled_session_room_ratings';
 const RATABLE_STATUSES = new Set([
   SESSION_STATUS.COMPLETED,
   SESSION_STATUS.CANCELED,
@@ -123,7 +123,7 @@ export default function SessionRoomPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const role = user?.role === 'tutor' ? 'tutor' : 'student';
+  const role = String(user?.activeRole || user?.role || 'student').toLowerCase() === 'tutor' ? 'tutor' : 'student';
   const { sessions: studentSessions } = useStudentSessions(user?.uid);
   const { sessions: tutorSessions } = useTutorSessions(user?.uid);
   const sessions = role === 'tutor' ? tutorSessions : studentSessions;
@@ -131,7 +131,7 @@ export default function SessionRoomPage() {
 
   const [ratingForm, setRatingForm] = useState({ overall: '5' });
   const [isSaving, setIsSaving] = useState(false);
-  const [handledRatingIds, setHandledRatingIds] = useState([]);
+  const [isRatingPromptOpen, setIsRatingPromptOpen] = useState(false);
   const [selectedCardId] = useState(
     user?.paymentMethods?.find((card) => card.isDefault)?.id
       || user?.paymentMethods?.[0]?.id
@@ -164,12 +164,15 @@ export default function SessionRoomPage() {
   const studentControlsTimeoutRef = useRef(null);
   const autoEndingRef = useRef(false);
   const boardContentLoadedRef = useRef(false);
+  const previousStatusRef = useRef(null);
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
   const billedSeconds = useLiveSeconds(session?.billingStartedAt);
+  const ratingStatus = session?.ratingStatus?.[role] || 'pending';
   const needsRating = Boolean(session?.id)
+    && isRatingPromptOpen
     && RATABLE_STATUSES.has(session?.status)
-    && !handledRatingIds.includes(session.id);
+    && ratingStatus === 'pending';
   const tldrawLicenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY;
   const forceRelayOnly = String(import.meta.env.VITE_WEBRTC_FORCE_RELAY_ONLY || '').toLowerCase() === 'true';
   const whiteboardRoom = session?.whiteboardRoomId || session?.requestId || session?.id;
@@ -192,6 +195,15 @@ export default function SessionRoomPage() {
     return 'info';
   }, [connectionMessage, networkError]);
 
+  const navigateAfterRatingFlow = useCallback(() => {
+    if (role === 'student') {
+      navigate('/app/student', { replace: true });
+      return;
+    }
+
+    navigate('/app/tutor', { replace: true });
+  }, [navigate, role]);
+
   useEffect(() => {
     if (session) {
       hadSessionRef.current = true;
@@ -210,6 +222,8 @@ export default function SessionRoomPage() {
     extensionPromptShownRef.current = false;
     autoEndingRef.current = false;
     boardContentLoadedRef.current = false;
+    previousStatusRef.current = session?.status || null;
+    setIsRatingPromptOpen(false);
   }, [session?.id, role]);
 
   const getSessionBoardSeedContent = useCallback(() => {
@@ -311,23 +325,26 @@ export default function SessionRoomPage() {
   }, [getSessionBoardSeedContent, role, session?.id]);
 
   useEffect(() => {
-    try {
-      const parsed = JSON.parse(sessionStorage.getItem(HANDLED_KEY) || '[]');
-      setHandledRatingIds(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      setHandledRatingIds([]);
-    }
-  }, []);
+    if (!session?.id) return;
 
-  const markRatingHandled = useCallback((sessionId) => {
-    if (!sessionId) return;
-    setHandledRatingIds((prev) => {
-      if (prev.includes(sessionId)) return prev;
-      const next = [...prev, sessionId];
-      sessionStorage.setItem(HANDLED_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, []);
+    const previousStatus = previousStatusRef.current;
+    const currentStatus = session.status;
+    const movedIntoTerminalState = previousStatus
+      && previousStatus !== currentStatus
+      && !RATABLE_STATUSES.has(previousStatus)
+      && RATABLE_STATUSES.has(currentStatus);
+
+    if (movedIntoTerminalState && ratingStatus === 'pending') {
+      setRatingForm({ overall: '5' });
+      setIsRatingPromptOpen(true);
+    }
+
+    if (ratingStatus !== 'pending' || !RATABLE_STATUSES.has(currentStatus)) {
+      setIsRatingPromptOpen(false);
+    }
+
+    previousStatusRef.current = currentStatus;
+  }, [ratingStatus, session?.id, session?.status]);
 
   useEffect(() => {
     return () => {
@@ -602,7 +619,7 @@ export default function SessionRoomPage() {
 
   useEffect(() => {
     if (!session?.status) return;
-    if (![SESSION_STATUS.CANCELED, SESSION_STATUS.CANCELED_DURING].includes(session.status)) return;
+    if (!RATABLE_STATUSES.has(session.status)) return;
 
     rtcRef.current?.close?.();
     rtcRef.current = null;
@@ -610,27 +627,10 @@ export default function SessionRoomPage() {
     setRemoteScreenStreamObj(null);
     setShowStudentControls(false);
 
-    if (role === 'student') {
-      navigate(`/app/student/request/${session.requestId}`, {
-        replace: true,
-        state: { requestId: session.requestId },
-      });
-      return;
-    }
+    if (ratingStatus === 'pending') return;
 
-    navigate('/app/tutor/sessions', { replace: true });
-  }, [navigate, role, session?.requestId, session?.status]);
-
-  useEffect(() => {
-    if (!session?.status) return;
-    if (session.status !== SESSION_STATUS.COMPLETED) return;
-    if (role !== 'student') return;
-
-    navigate(`/app/student/request/${session.requestId}`, {
-      replace: true,
-      state: { requestId: session.requestId },
-    });
-  }, [navigate, role, session?.requestId, session?.status]);
+    navigateAfterRatingFlow();
+  }, [navigateAfterRatingFlow, ratingStatus, session?.status]);
 
   useEffect(() => {
     if (session) return;
@@ -643,11 +643,11 @@ export default function SessionRoomPage() {
     setShowStudentControls(false);
 
     if (role === 'student') {
-      navigate('/app/student/request', { replace: true });
+      navigate('/app/student', { replace: true });
       return;
     }
 
-    navigate('/app/tutor/sessions', { replace: true });
+    navigate('/app/tutor', { replace: true });
   }, [navigate, role, session]);
 
   const askCancellationReason = () => {
@@ -681,16 +681,6 @@ export default function SessionRoomPage() {
       canceledBy: role,
       canceledReason: cancellationReason,
     });
-
-    if (role === 'student') {
-      navigate(`/app/student/request/${session.requestId}`, {
-        replace: true,
-        state: { requestId: session.requestId },
-      });
-      return;
-    }
-
-    navigate('/app/tutor/sessions', { replace: true });
   };
 
   const endCurrentSession = async () => {
@@ -699,16 +689,6 @@ export default function SessionRoomPage() {
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     await endSession(session);
-
-    if (role === 'student') {
-      navigate(`/app/student/request/${session.requestId}`, {
-        replace: true,
-        state: { requestId: session.requestId },
-      });
-      return;
-    }
-
-    navigate('/app/tutor', { replace: true });
   };
 
   useEffect(() => {
@@ -750,7 +730,20 @@ export default function SessionRoomPage() {
       await submitSessionRating(session, role, {
         overall: Number(overall),
       });
-      markRatingHandled(session.id);
+      setIsRatingPromptOpen(false);
+      navigateAfterRatingFlow();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const closeRatingPrompt = async () => {
+    if (!session || isSaving) return;
+    setIsSaving(true);
+    try {
+      await dismissSessionRating(session, role);
+      setIsRatingPromptOpen(false);
+      navigateAfterRatingFlow();
     } finally {
       setIsSaving(false);
     }
@@ -1006,16 +999,48 @@ export default function SessionRoomPage() {
       </div>
 
       {needsRating ? (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-[32px] border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-            <div className="flex items-center gap-2">
-              <Star className="h-5 w-5 text-amber-300" />
-              <p className="text-lg font-semibold text-zinc-100">Rate this session</p>
-            </div>
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_32%),linear-gradient(180deg,_#111827_0%,_#030712_100%)]">
+          <div className="min-h-screen w-full px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
+            <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col rounded-[32px] border border-white/10 bg-zinc-950/80 p-6 shadow-2xl backdrop-blur md:p-8 lg:p-10">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
+                      <Star className="h-6 w-6 text-amber-300" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
+                        Session feedback
+                      </p>
+                      <h2 className="mt-2 text-2xl font-semibold text-zinc-100 sm:text-3xl lg:text-4xl">
+                        Rate this session
+                      </h2>
+                    </div>
+                  </div>
+                  <p className="mt-5 max-w-2xl text-sm text-zinc-400 sm:text-base">
+                    Tell us how this session went. Once you rate it or close this screen, it will not appear again.
+                  </p>
+                </div>
 
-            <div className="mt-5 grid gap-4">
-              <p className="text-sm text-zinc-300">Overall rating</p>
-              <div className="flex items-center gap-2" role="radiogroup" aria-label="Overall rating">
+                <button
+                  type="button"
+                  onClick={closeRatingPrompt}
+                  disabled={isSaving}
+                  aria-label="Close rating prompt"
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className={`mt-10 flex flex-1 flex-col justify-center ${isSaving ? 'pointer-events-none' : ''}`}>
+                <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:p-10">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Overall rating</p>
+                  <div
+                    className="mt-6 flex flex-wrap items-center gap-3 sm:gap-4 lg:gap-5"
+                    role="radiogroup"
+                    aria-label="Overall rating"
+                  >
                 {[1, 2, 3, 4, 5].map((starValue) => (
                   <button
                     key={starValue}
@@ -1028,24 +1053,22 @@ export default function SessionRoomPage() {
                       setRatingForm({ overall: String(starValue) });
                       submitRating(starValue);
                     }}
-                    className="text-4xl leading-none transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="text-[2.5rem] leading-none transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60 sm:text-[3.25rem] lg:text-[4.5rem]"
                   >
                     <span className={starValue <= Number(ratingForm.overall) ? 'text-amber-300' : 'text-zinc-600'}>★</span>
                   </button>
                 ))}
-              </div>
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => markRatingHandled(session.id)}
-                  disabled={isSaving}
-                  className="rounded-2xl border border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-zinc-900 disabled:opacity-50"
-                >
-                  Close
-                </button>
-                <p className="text-xs font-semibold text-zinc-400">
-                  {isSaving ? 'Saving rating...' : 'Tap a star to submit automatically.'}
-                </p>
+                  </div>
+
+                  <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-medium text-zinc-400">
+                      {isSaving ? 'Saving rating...' : 'Tap a star to submit automatically.'}
+                    </p>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                      {isSaving ? 'Saving' : 'Ready'}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

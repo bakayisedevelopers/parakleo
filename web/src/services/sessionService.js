@@ -10,6 +10,18 @@ import { debugError, debugLog } from '../utils/devLogger';
 
 const MOCK_SESSIONS_KEY = 'claxi_mock_sessions';
 const MOCK_REQUESTS_KEY = 'claxi_mock_requests';
+const DEFAULT_RATING_STATUS = {
+  student: 'pending',
+  tutor: 'pending',
+};
+
+function mergeRatingStatus(existing, role, nextValue) {
+  return {
+    ...DEFAULT_RATING_STATUS,
+    ...(existing || {}),
+    [role]: nextValue,
+  };
+}
 
 function getMockSessions() {
   return JSON.parse(localStorage.getItem(MOCK_SESSIONS_KEY) || '[]');
@@ -353,10 +365,11 @@ export async function submitSessionRating(session, role, payload) {
     ...(session.ratings || {}),
     [role]: ratingEntry,
   };
+  const ratingStatus = mergeRatingStatus(session.ratingStatus, role, 'submitted');
 
   const updatedSession = await updateSession(session.id, {
-    ...session,
     ratings,
+    ratingStatus,
   });
 
   const clients = await getFirebaseClients();
@@ -369,6 +382,7 @@ export async function submitSessionRating(session, role, payload) {
               ...(request.ratings || {}),
               [role]: ratingEntry,
             },
+            ratingStatus: mergeRatingStatus(request.ratingStatus, role, 'submitted'),
             updatedAt: new Date().toISOString(),
           }
         : request,
@@ -379,6 +393,7 @@ export async function submitSessionRating(session, role, payload) {
     const { doc, serverTimestamp, updateDoc } = firestoreModule;
     await updateDoc(doc(db, 'classRequests', session.requestId), {
       [`ratings.${role}`]: ratingEntry,
+      [`ratingStatus.${role}`]: 'submitted',
       updatedAt: serverTimestamp(),
     });
   }
@@ -391,10 +406,44 @@ export async function submitSessionRating(session, role, payload) {
     }
   } catch (error) {
     debugError('sessionService', 'Failed to update user rating summary.', { message: error.message, sessionId: session?.id });
-    throw error;
   }
 
   debugLog('sessionService', 'Session rating submitted successfully.', { sessionId: session?.id, role });
+  return updatedSession;
+}
+
+export async function dismissSessionRating(session, role) {
+  debugLog('sessionService', 'Dismissing session rating.', { sessionId: session?.id, role });
+  const ratingStatus = mergeRatingStatus(session?.ratingStatus, role, 'dismissed');
+
+  const updatedSession = await updateSession(session.id, {
+    ratingStatus,
+  });
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    const nextRequests = getMockRequests().map((request) =>
+      request.id === session.requestId
+        ? {
+            ...request,
+            ratingStatus: mergeRatingStatus(request.ratingStatus, role, 'dismissed'),
+            updatedAt: new Date().toISOString(),
+          }
+        : request,
+    );
+    setMockRequests(nextRequests);
+    return updatedSession;
+  }
+
+  if (session.requestId) {
+    const { db, firestoreModule } = clients;
+    const { doc, serverTimestamp, updateDoc } = firestoreModule;
+    await updateDoc(doc(db, 'classRequests', session.requestId), {
+      [`ratingStatus.${role}`]: 'dismissed',
+      updatedAt: serverTimestamp(),
+    });
+  }
+
   return updatedSession;
 }
 
