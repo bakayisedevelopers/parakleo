@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after fixing rating and navigation bugs and rating UI - 20.04.2026 - 3."
+git commit -m "Commit after fixing issues with the auto attachment of the extracted text - 20.04.2026 - 4."
 git push origin main
 git push origin main --force
 
