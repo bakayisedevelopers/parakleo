@@ -280,6 +280,39 @@ async function runScannedPdfFullDocumentOcr(file) {
   });
 }
 
+function buildPdfBestEffortResult({ file, pdfResult, ocrResult }) {
+  const hasDigitalText = Boolean(pdfResult?.textLength);
+  const hasOcrText = Boolean(ocrResult?.success && ocrResult?.textLength);
+
+  if (hasOcrText) {
+    return ocrResult;
+  }
+
+  if (hasDigitalText) {
+    console.debug('[attachmentExtraction] OCR fallback weak; using available digital PDF text instead', {
+      fileName: file?.name,
+      digitalTextLength: pdfResult?.textLength || 0,
+    });
+
+    return buildExtractionResult({
+      file,
+      fileType: 'pdf',
+      extractionMethod: 'pdf',
+      extractedText: pdfResult.extractedText,
+      textLength: pdfResult.textLength,
+      extractionQuality: pdfResult.extractionQuality || 'poor',
+      success: true,
+      scannedPdfDetected: true,
+      requiresPageSelection: false,
+      selectedPages: [],
+      ocrStatus: 'fallback_needed',
+      pageCount: pdfResult.pageCount || null,
+    });
+  }
+
+  return ocrResult;
+}
+
 export async function extractSingleAttachment(file) {
   const fileType = detectAttachmentType(file);
   console.debug('[attachmentExtraction] file type detected', {
@@ -350,7 +383,12 @@ export async function extractSingleAttachment(file) {
       pageCount: pdfResult.pageCount,
     });
 
-    return await runScannedPdfFullDocumentOcr(file);
+    const ocrResult = await runScannedPdfFullDocumentOcr(file);
+    return buildPdfBestEffortResult({
+      file,
+      pdfResult,
+      ocrResult,
+    });
   } catch (error) {
     console.debug('[attachmentExtraction] pdf extraction failed', { fileName: file.name, error: error?.message });
     return buildExtractionResult({

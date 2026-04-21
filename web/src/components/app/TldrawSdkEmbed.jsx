@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import 'tldraw/tldraw.css';
 import { debugError, debugLog } from '../../utils/devLogger';
 
+const TLDRAW_RELOAD_RETRY_KEY = 'claxi_tldraw_chunk_reload_retry';
+
 export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
   const [TldrawComponent, setTldrawComponent] = useState(null);
   const [loadError, setLoadError] = useState('');
@@ -38,6 +40,21 @@ export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
         debugError('tldraw', 'Whiteboard SDK load failed.', {
           message: error?.message,
         });
+
+        const isChunkLoadFailure = /Failed to fetch dynamically imported module/i.test(error?.message || '');
+        const hasRetried = typeof window !== 'undefined'
+          && window.sessionStorage?.getItem(TLDRAW_RELOAD_RETRY_KEY) === 'true';
+
+        if (isChunkLoadFailure && !hasRetried && typeof window !== 'undefined') {
+          debugLog('tldraw', 'Retrying once after dynamic import chunk load failure.');
+          window.sessionStorage?.setItem(TLDRAW_RELOAD_RETRY_KEY, 'true');
+          window.location.reload();
+          return;
+        }
+
+        if (typeof window !== 'undefined') {
+          window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
+        }
         setLoadError(error?.message || 'Unable to load tldraw SDK.');
       }
     }
@@ -48,6 +65,11 @@ export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
       canceled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!TldrawComponent || typeof window === 'undefined') return;
+    window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
+  }, [TldrawComponent]);
 
   if (loadError) {
     return (
