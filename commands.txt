@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after manual refining of the desing and White board is not working anymore and tutor can't accept requests anymore - 21.04.2026 - 4."
+git commit -m "Commit after changes - 21.04.2026 - 5."
 git push origin main
 git push origin main --force
 
