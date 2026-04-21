@@ -96,7 +96,13 @@ export default function SessionRatingPrompt() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{statusCopy}</p>
             <h3 className="text-2xl font-black text-zinc-900">Rate this session</h3>
           </div>
-          <button type="button" onClick={() => markHandled(target.id)} className="rounded-xl border border-zinc-300 px-3 py-1 text-xs font-semibold">Close</button>
+          <button
+            type="button"
+            onClick={() => markHandled(target.id)}
+            className="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+          >
+            Close
+          </button>
         </div>
 
         <div className="mt-4 grid gap-4">

@@ -1,7 +1,7 @@
 export default function SelectField({ label, name, options, error, className = '', ...props }) {
   return (
     <div>
-      <label htmlFor={name} className="mb-2 block text-sm font-semibold text-zinc-700">
+      <label htmlFor={name} className="mb-2 block text-sm font-semibold text-zinc-200">
         {label}
       </label>
       <select
@@ -16,7 +16,7 @@ export default function SelectField({ label, name, options, error, className = '
           </option>
         ))}
       </select>
-      {error ? <p className="mt-1 text-xs text-rose-500">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs text-rose-300">{error}</p> : null}
     </div>
   );
 }

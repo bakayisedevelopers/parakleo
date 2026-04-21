@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
   Camera,
   ChevronRight,
   CreditCard,
@@ -839,12 +838,12 @@ export default function StudentDashboardPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.14),_transparent_36%)]" />
           <div className="relative space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Student request</p>
                 <h1 className="mt-2 text-[1.9rem] font-black leading-tight tracking-tight text-white">
                   Hi {displayName.split(' ')[0]}, start with a picture.
                 </h1>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-300">
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
                   Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
                 </p>
                 {stage !== 'review' ? (
@@ -899,9 +898,9 @@ export default function StudentDashboardPage() {
                             ref={textareaRef}
                             value={topic}
                             onChange={onTopicChange}
-                            placeholder="Optional text path: explain the homework, test prep, or lesson you want."
+                            placeholder="Type here..."
                             rows={1}
-                            className="max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent px-0 py-0 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none"
+                            className="max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent p-3 text-sm leading-6 text-zinc-100 placeholder:text-zinc-500 outline-none"
                           />
                           <div className="mt-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
@@ -948,53 +947,18 @@ export default function StudentDashboardPage() {
 
             <div className="grid gap-3">
               {stage === 'review' ? (
-                <div className="overflow-hidden rounded-[1.75rem] border border-white/5 bg-white/[0.03] p-3 opacity-80">
-                  <div className="flex justify-start">
-                    <button
-                      type="button"
-                      onClick={() => setStage('input')}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-950"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                      Back
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {stage === 'review' ? (
                 <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
                   <div>
                     <h2 className="text-2xl font-black tracking-tight text-white">Review and confirm</h2>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-3 text-sm text-zinc-200">
-                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Subject</span>
-                      <span className="font-semibold text-white">{selectedSubject || 'Select subject'}</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Topic</span>
-                      <span className="font-semibold text-white">{reviewTopic || 'Not set'}</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Free minutes</span>
-                      <span className="font-semibold text-white">{freeMinutesRemaining.toFixed(2)} min</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Base price</span>
-                      <span className="font-semibold text-white">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Per minute</span>
-                      <span className="font-semibold text-white">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
-                    </div>
-                    <label className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <span className="text-brand">Time</span>
+                  <div className="mt-4 space-y-3 text-sm text-zinc-200">
+                    <label className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
+                      <span className="font-semibold text-brand">Time</span>
                       <select
                         value={durationMinutes}
                         onChange={handleDurationChange}
-                        className="bg-transparent text-sm font-semibold text-white outline-none"
+                        className="bg-transparent text-right text-sm font-semibold text-white outline-none"
                       >
                         {durationOptions.map((option) => (
                           <option key={option} value={option}>
@@ -1003,28 +967,58 @@ export default function StudentDashboardPage() {
                         ))}
                       </select>
                     </label>
-                    {pricingPreview ? (
-                      <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                        <span className="text-brand">Due now</span>
-                        <span className="font-semibold text-white">{formatRand(pricingPreview.finalPrice)}</span>
+
+                    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
+                      <span className="font-semibold text-brand">Minutes</span>
+                      <span className="text-right font-semibold text-white">
+                        {durationMinutes} selected • {freeMinutesRemaining.toFixed(2)} free
+                      </span>
+                    </div>
+
+                    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
+                      <span className="font-semibold text-brand">Subject</span>
+                      <span className="text-right font-semibold text-white">{selectedSubject || 'Select subject'}</span>
+                    </div>
+
+                    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
+                      <span className="font-semibold text-brand">Topic</span>
+                      <span className="text-right font-semibold text-white">{reviewTopic || 'Not set'}</span>
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border border-brand/20 bg-brand/5 p-4">
+                      <div className="flex w-full items-center justify-between gap-3">
+                        <span className="font-semibold text-brand">Base price</span>
+                        <span className="text-right font-semibold text-white">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
                       </div>
-                    ) : null}
-                    <label className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
-                      <CreditCard className="h-4 w-4 text-brand" />
-                      <span className="text-brand">Payment</span>
-                      <select
-                        value={cardId}
-                        onChange={(event) => setCardId(event.target.value)}
-                        className="max-w-[180px] bg-transparent text-sm font-semibold text-white outline-none"
-                      >
-                        <option value="">Select card</option>
-                        {paymentMethods.map((card) => (
-                          <option key={card.id} value={card.id}>
-                            {formatCardLabel(card)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <div className="flex w-full items-center justify-between gap-3">
+                        <span className="font-semibold text-brand">Per minute</span>
+                        <span className="text-right font-semibold text-white">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
+                      </div>
+                      {pricingPreview ? (
+                        <div className="flex w-full items-center justify-between gap-3">
+                          <span className="font-semibold text-brand">Due now</span>
+                          <span className="text-right font-semibold text-white">{formatRand(pricingPreview.finalPrice)}</span>
+                        </div>
+                      ) : null}
+                      <label className="flex w-full items-center justify-between gap-3">
+                        <span className="inline-flex items-center gap-2 font-semibold text-brand">
+                          <CreditCard className="h-4 w-4 text-brand" />
+                          Payment
+                        </span>
+                        <select
+                          value={cardId}
+                          onChange={(event) => setCardId(event.target.value)}
+                          className="max-w-[180px] bg-transparent text-right text-sm font-semibold text-white outline-none"
+                        >
+                          <option value="">Select card</option>
+                          {paymentMethods.map((card) => (
+                            <option key={card.id} value={card.id}>
+                              {formatCardLabel(card)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   </div>
 
                   {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}

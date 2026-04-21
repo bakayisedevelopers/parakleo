@@ -146,12 +146,24 @@ export default function OnboardingPage() {
         <SectionCard title="Tutor setup" subtitle={tutorStatus.message}>
           <form className="grid gap-4 md:grid-cols-2" onSubmit={saveTutorProfile}>
             <div>
-              <label className="block text-sm font-semibold text-zinc-700">Highest grade result document</label>
-              <input name="highestGradeResultFile" type="file" accept=".pdf,.jpg,.jpeg,.png" required className="mt-2 block w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm" />
+              <label className="block text-sm font-semibold text-zinc-200">Highest grade result document</label>
+              <input
+                name="highestGradeResultFile"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                required
+                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-zinc-800"
+              />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-zinc-700">Profile photo</label>
-              <input name="profilePhotoFile" type="file" accept="image/*" required className="mt-2 block w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm" />
+              <label className="block text-sm font-semibold text-zinc-200">Profile photo</label>
+              <input
+                name="profilePhotoFile"
+                type="file"
+                accept="image/*"
+                required
+                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-zinc-800"
+              />
             </div>
             <FormField label="Math score %" name="mathScore" type="number" defaultValue={user?.tutorProfile?.mathScore ?? ''} required />
             <FormField

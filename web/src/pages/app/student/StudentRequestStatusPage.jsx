@@ -320,7 +320,11 @@ export default function StudentRequestStatusPage() {
               placeholder="Type your cancellation reason"
             />
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCancelModal(false)} className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(false)}
+                className="rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+              >
                 Close
               </button>
               <button
