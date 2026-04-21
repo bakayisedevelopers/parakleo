@@ -231,6 +231,7 @@ export default function SessionRoomPage() {
 
   const getSessionBoardSeedContent = useCallback(() => {
     const boardPreparationSource = session?.boardPreparationSource || request?.boardPreparationSource || null;
+    const attachmentExtractions = boardPreparationSource?.attachmentExtractions || [];
     const attachments = session?.attachments
       || request?.attachments
       || (session?.requestAttachment ? [session.requestAttachment] : [])
@@ -249,6 +250,7 @@ export default function SessionRoomPage() {
       sourceOnSession: Boolean(session?.boardPreparationSource),
       sourceOnRequest: Boolean(request?.boardPreparationSource),
       attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+      attachmentExtractionCount: Array.isArray(attachmentExtractions) ? attachmentExtractions.length : 0,
       extractedTextLength: String(extractedText || '').trim().length,
       ocrImageReferenceCount: Array.isArray(ocrImageReferences) ? ocrImageReferences.length : 0,
     });
@@ -256,6 +258,7 @@ export default function SessionRoomPage() {
     return {
       extractedText,
       attachments,
+      attachmentExtractions,
       ocrImageReferences,
     };
   }, [request, session]);
@@ -263,7 +266,12 @@ export default function SessionRoomPage() {
   const injectPreparedBoardContent = useCallback(async (editor) => {
     if (!editor || boardContentLoadedRef.current || role !== 'tutor') return;
 
-    const { extractedText, attachments, ocrImageReferences } = getSessionBoardSeedContent();
+    const {
+      extractedText,
+      attachments,
+      attachmentExtractions,
+      ocrImageReferences,
+    } = getSessionBoardSeedContent();
     if (!String(extractedText || '').trim() && !(attachments || []).length) {
       debugLog('sessionRoom', '[whiteboardPreparation] skipped injection because no board source data was available.', {
         sessionId: session?.id || null,
@@ -276,6 +284,7 @@ export default function SessionRoomPage() {
       const parsedQuestions = parseQuestionsFromExtraction({
         extractedText,
         attachments,
+        attachmentExtractions,
         ocrImageReferences,
       });
       const layout = prepareWhiteboardLayout(parsedQuestions);
@@ -300,7 +309,7 @@ export default function SessionRoomPage() {
             props: {
               richText: toRichText(item.content),
               autoSize: false,
-              w: 900,
+              w: item.width || 900,
               size: 'm',
               font: 'sans',
               textAlign: 'start',
@@ -319,9 +328,9 @@ export default function SessionRoomPage() {
             props: {
               name: `Question image ${index + 1}`,
               src: item.src,
-              mimeType: 'image/*',
-              w: 800,
-              h: 600,
+              mimeType: item.mimeType || 'image/png',
+              w: item.width || 800,
+              h: item.height || 600,
               isAnimated: false,
             },
             meta: {},
@@ -335,8 +344,8 @@ export default function SessionRoomPage() {
             y: item.position.y,
             props: {
               assetId,
-              w: 420,
-              h: 320,
+              w: item.width || 420,
+              h: item.height || 320,
             },
           });
         }
@@ -354,6 +363,7 @@ export default function SessionRoomPage() {
         sessionId: session?.id || null,
         insertedAssetCount: assets.length,
         insertedShapeCount: shapes.length,
+        createdElementCount: assets.length + shapes.length,
       });
     } catch (error) {
       debugLog('sessionRoom', '[whiteboardPreparation] board injection failed.', {

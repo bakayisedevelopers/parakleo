@@ -6,7 +6,6 @@ const READABLE_WORD_PATTERN = /[A-Za-z]{2,}/g;
 const GARBAGE_CHAR_PATTERN = /[^\w\s.,;:!?()\[\]{}'"\-/%]/g;
 
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'];
-export const MAX_SCANNED_PDF_OCR_PAGES = 3;
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 let cachedPdfJs = null;
@@ -236,46 +235,21 @@ function buildExtractionResult({
   };
 }
 
-function normalizeSelectedPages(selectedPages = []) {
-  const uniqueSorted = Array.from(
-    new Set(
-      selectedPages
-        .map((page) => Number(page))
-        .filter((page) => Number.isInteger(page) && page > 0)
-    )
-  ).sort((a, b) => a - b);
-
-  return uniqueSorted;
-}
-
-export async function runScannedPdfSelectedPageOcr({ file, selectedPages = [] }) {
-  const normalizedPages = normalizeSelectedPages(selectedPages);
-  if (!normalizedPages.length || normalizedPages.length > MAX_SCANNED_PDF_OCR_PAGES) {
-    throw new Error(`Select between 1 and ${MAX_SCANNED_PDF_OCR_PAGES} pages for scanned PDF OCR.`);
-  }
-
-  console.debug('[attachmentExtraction] selected scanned-PDF pages submitted', {
-    fileName: file?.name,
-    selectedPages: normalizedPages,
-  });
-
+async function runScannedPdfFullDocumentOcr(file) {
   const pdfjs = await loadPdfJs();
   const pdfData = await file.arrayBuffer();
   const pdfDocument = await pdfjs.getDocument({ data: pdfData }).promise;
-  const invalidPage = normalizedPages.find((page) => page > pdfDocument.numPages);
-  if (invalidPage) {
-    throw new Error(`Page ${invalidPage} is out of range. This PDF has ${pdfDocument.numPages} pages.`);
-  }
 
-  console.debug('[attachmentExtraction] OCR started for selected scanned-PDF pages only', {
+  console.debug('[attachmentExtraction] OCR started for full scanned PDF', {
     fileName: file?.name,
-    selectedPages: normalizedPages,
     pageCount: pdfDocument.numPages,
   });
 
   const pageTexts = [];
-  for (let index = 0; index < normalizedPages.length; index += 1) {
-    const pageNumber = normalizedPages[index];
+  const selectedPages = Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1);
+
+  for (let index = 0; index < selectedPages.length; index += 1) {
+    const pageNumber = selectedPages[index];
     const page = await pdfDocument.getPage(pageNumber);
     const canvas = await renderPdfPageToCanvas(page);
     const pageText = await runOcrWithTesseract(canvas);
@@ -283,9 +257,9 @@ export async function runScannedPdfSelectedPageOcr({ file, selectedPages = [] })
   }
 
   const ocrResult = buildOcrResult(pageTexts.join('\n').trim());
-  console.debug('[attachmentExtraction] OCR completed for selected scanned-PDF pages', {
+  console.debug('[attachmentExtraction] OCR completed for full scanned PDF', {
     fileName: file?.name,
-    selectedPages: normalizedPages,
+    processedPages: selectedPages.length,
     success: ocrResult.success,
     textLength: ocrResult.textLength,
   });
@@ -300,7 +274,7 @@ export async function runScannedPdfSelectedPageOcr({ file, selectedPages = [] })
     success: ocrResult.success,
     scannedPdfDetected: true,
     requiresPageSelection: false,
-    selectedPages: normalizedPages,
+    selectedPages,
     ocrStatus: ocrResult.success ? 'complete' : 'fallback_needed',
     pageCount: pdfDocument.numPages,
   });
@@ -370,26 +344,13 @@ export async function extractSingleAttachment(file) {
       });
     }
 
-    console.debug('[attachmentExtraction] scanned PDF detected; page selection requested', {
+    console.debug('[attachmentExtraction] scanned PDF detected; full-document OCR fallback starting', {
       fileName: file.name,
       digitalTextLength: pdfResult.textLength,
       pageCount: pdfResult.pageCount,
     });
 
-    return buildExtractionResult({
-      file,
-      fileType,
-      extractionMethod: 'pdf',
-      extractedText: '',
-      textLength: 0,
-      extractionQuality: 'poor',
-      success: false,
-      scannedPdfDetected: true,
-      requiresPageSelection: true,
-      selectedPages: [],
-      ocrStatus: 'pending_selection',
-      pageCount: pdfResult.pageCount || null,
-    });
+    return await runScannedPdfFullDocumentOcr(file);
   } catch (error) {
     console.debug('[attachmentExtraction] pdf extraction failed', { fileName: file.name, error: error?.message });
     return buildExtractionResult({

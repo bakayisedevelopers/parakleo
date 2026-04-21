@@ -13,7 +13,7 @@ export default function Topbar({
             <button
               type="button"
               onClick={onOpenNav}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-zinc-800/70 text-zinc-100 md:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-zinc-800/70 text-zinc-100"
               aria-label="Open more navigation"
             >
               <Menu className="h-5 w-5" />
