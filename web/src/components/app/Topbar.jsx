@@ -20,10 +20,11 @@ export default function Topbar({
             <button
               type="button"
               onClick={onOpenNav}
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-zinc-800/70 text-zinc-100 md:hidden"
-              aria-label="Open navigation"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-zinc-800/70 px-3 text-zinc-100 md:hidden"
+              aria-label="Open more navigation"
             >
-              <Menu className="h-6 w-6" />
+              <Menu className="h-5 w-5" />
+              <span className="text-sm font-semibold">More</span>
             </button>
           ) : null}
 

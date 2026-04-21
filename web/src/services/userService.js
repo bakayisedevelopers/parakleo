@@ -2,6 +2,7 @@ import { getFirebaseClients } from '../firebase/config';
 import { DEFAULT_SUBJECTS } from '../constants/subjects';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 90;
+const MOCK_USER_KEY = 'claxi_mock_user';
 
 function buildReferralCode(uid) {
   return `CLX-${String(uid || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
@@ -133,6 +134,39 @@ export async function getUserProfile(uid) {
   }
 
   return { uid: snap.id, ...snap.data() };
+}
+
+export function subscribeToUserProfile(uid, callback) {
+  let unsub = () => {};
+
+  getFirebaseClients().then((clients) => {
+    if (!uid) {
+      callback(null);
+      return;
+    }
+
+    if (!clients) {
+      const emit = () => {
+        const saved = localStorage.getItem(MOCK_USER_KEY);
+        const parsed = saved ? JSON.parse(saved) : null;
+        callback(parsed?.uid === uid ? parsed : null);
+      };
+
+      emit();
+      window.addEventListener('storage', emit);
+      unsub = () => window.removeEventListener('storage', emit);
+      return;
+    }
+
+    const { db, firestoreModule } = clients;
+    const { doc, onSnapshot } = firestoreModule;
+
+    unsub = onSnapshot(doc(db, 'users', uid), (snapshot) => {
+      callback(snapshot.exists() ? { uid: snapshot.id, ...snapshot.data() } : null);
+    });
+  });
+
+  return () => unsub?.();
 }
 
 

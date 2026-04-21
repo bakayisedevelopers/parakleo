@@ -1,16 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CreditCard, Paperclip, Send, X, FileText, ImageIcon } from 'lucide-react';
+import {
+  Camera,
+  ChevronRight,
+  CreditCard,
+  FileText,
+  ImageIcon,
+  Loader,
+  Paperclip,
+  Send,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import OnboardingStatusBanner from '../../../components/app/OnboardingStatusBanner';
 import { useAuth } from '../../../hooks/useAuth';
+import { useLiveUserProfile } from '../../../hooks/useLiveUserProfile';
 import { useStudentRequests } from '../../../hooks/useClassRequests';
-import { createClassRequest } from '../../../services/classRequestService';
-import { uploadUserFile } from '../../../services/storageService';
-import { getStudentOnboardingStatus } from '../../../utils/onboarding';
-import { REQUEST_STATUSES } from '../../../utils/requestStatus';
-import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
-import { fetchPricingQuote } from '../../../services/pricingService';
-import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import {
@@ -18,10 +23,17 @@ import {
   MAX_SCANNED_PDF_OCR_PAGES,
   runScannedPdfSelectedPageOcr,
 } from '../../../services/attachmentExtractionService';
+import { createClassRequest } from '../../../services/classRequestService';
+import { fetchPricingQuote } from '../../../services/pricingService';
+import { uploadUserFile } from '../../../services/storageService';
+import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import {
   buildSubjectClassificationInput,
   classifySubjectFromText,
 } from '../../../services/subjectClassificationService';
+import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
+import { REQUEST_STATUSES } from '../../../utils/requestStatus';
+import { getStudentOnboardingStatus } from '../../../utils/onboarding';
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -59,8 +71,8 @@ function parseSelectedPagesInput(rawInput = '') {
       String(rawInput)
         .split(',')
         .map((value) => Number.parseInt(value.trim(), 10))
-        .filter((value) => Number.isInteger(value) && value > 0)
-    )
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
   ).sort((a, b) => a - b);
 }
 
@@ -97,14 +109,58 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
   };
 }
 
+function normalizeEstimatedDuration(estimatedMinutes) {
+  const numeric = Number(estimatedMinutes || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_LESSON_DURATION;
+  return Math.min(90, Math.max(10, Math.round(numeric)));
+}
+
+function getDurationOptions(estimatedMinutes) {
+  const normalizedEstimate = normalizeEstimatedDuration(estimatedMinutes);
+  return Array.from(new Set([...LESSON_DURATION_OPTIONS, normalizedEstimate])).sort((a, b) => a - b);
+}
+
+function getReviewTopic({ classifiedTopic, topic, attachments }) {
+  if (String(classifiedTopic || '').trim()) return String(classifiedTopic).trim();
+  if (String(topic || '').trim()) return String(topic).trim();
+  if (attachments.length === 1) return `Help with ${attachments[0].name}`;
+  if (attachments.length > 1) return `Help with ${attachments.length} attachments`;
+  return 'Class request';
+}
+
+function getRequestFlowState({ onboardingComplete, latestOpenSession, activeOrOngoingRequest }) {
+  if (!onboardingComplete) return 'blocked_onboarding';
+  if (latestOpenSession) return 'blocked_active_session';
+  if (activeOrOngoingRequest) return 'blocked_active_request';
+  return 'request_flow';
+}
+
+function formatCardLabel(card) {
+  if (!card) return 'Saved card';
+  const nickname = String(card.nickname || 'card');
+  return nickname.charAt(0).toUpperCase() + nickname.slice(1);
+}
+
 export default function StudentDashboardPage() {
   const { user } = useAuth();
+  const { profile: liveProfile } = useLiveUserProfile(user?.uid);
+  const currentUser = liveProfile || user;
+  const paymentMethods = currentUser?.paymentMethods || user?.paymentMethods || [];
+  const displayName = currentUser?.fullName || currentUser?.displayName || user?.fullName || user?.displayName || 'Student';
+  const freeMinutesRemaining = Number(currentUser?.freeMinutesRemaining || user?.freeMinutesRemaining || 0);
   const navigate = useNavigate();
   const textareaRef = useRef(null);
+  const attachmentsRef = useRef([]);
   const isManualSubjectRef = useRef(false);
+  const extractionRunCounterRef = useRef(0);
+  const activeExtractionTokenByKeyRef = useRef({});
+  const classificationRunCounterRef = useRef(0);
+
+  const [stage, setStage] = useState('input');
+  const [advanceIntent, setAdvanceIntent] = useState('');
   const [topic, setTopic] = useState('');
   const [cardId, setCardId] = useState(
-    user?.paymentMethods?.find((card) => card.isDefault)?.id || user?.paymentMethods?.[0]?.id || ''
+    paymentMethods.find((card) => card.isDefault)?.id || paymentMethods[0]?.id || '',
   );
   const [attachments, setAttachments] = useState([]);
   const [attachmentExtractionByKey, setAttachmentExtractionByKey] = useState({});
@@ -112,36 +168,19 @@ export default function StudentDashboardPage() {
   const [scannedPdfSelectionByKey, setScannedPdfSelectionByKey] = useState({});
   const [selectedSubject, setSelectedSubject] = useState('');
   const [classifiedTopic, setClassifiedTopic] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [classificationStatus, setClassificationStatus] = useState('');
+  const [classificationState, setClassificationState] = useState('idle');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
+  const [hasManualDurationOverride, setHasManualDurationOverride] = useState(false);
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const attachmentsRef = useRef([]);
-  const extractionRunCounterRef = useRef(0);
-  const activeExtractionTokenByKeyRef = useRef({});
-  const classificationRunCounterRef = useRef(0);
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
 
-  const onboardingStatus = getStudentOnboardingStatus(user);
-  const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
-  const hasPendingScannedPdfSelection = attachments.some((file) => {
-    const fileKey = getAttachmentKey(file);
-    const extraction = attachmentExtractionByKey[fileKey];
-    return extraction?.scannedPdfDetected && extraction?.requiresPageSelection;
-  });
-  const hasRunningExtraction = attachments.some((file) => {
-    const fileKey = getAttachmentKey(file);
-    const status = attachmentExtractionStatusByKey[fileKey];
-    return status === 'extracting' || status === 'ocr processing';
-  });
-  const canSend = onboardingStatus.complete
-    && hasRequestContent
-    && Boolean(cardId)
-    && !hasPendingScannedPdfSelection
-    && !hasRunningExtraction;
+  const onboardingStatus = getStudentOnboardingStatus(currentUser || user);
   const activeOrOngoingRequest = requests.find((request) => [
     REQUEST_STATUSES.PENDING,
     REQUEST_STATUSES.MATCHING,
@@ -152,37 +191,45 @@ export default function StudentDashboardPage() {
     REQUEST_STATUSES.IN_SESSION,
   ].includes(request.status));
   const latestOpenSession = sessions.find((session) => ['waiting_student', 'in_progress'].includes(session.status));
+  const flowState = getRequestFlowState({
+    onboardingComplete: onboardingStatus.complete,
+    latestOpenSession,
+    activeOrOngoingRequest,
+  });
+
+  const hasTypedText = Boolean(topic.trim());
+  const hasRequestContent = hasTypedText || attachments.length > 0;
+  const hasPendingScannedPdfSelection = attachments.some((file) => {
+    const fileKey = getAttachmentKey(file);
+    const extraction = attachmentExtractionByKey[fileKey];
+    return extraction?.scannedPdfDetected && extraction?.requiresPageSelection;
+  });
+  const hasRunningExtraction = attachments.some((file) => {
+    const fileKey = getAttachmentKey(file);
+    const status = attachmentExtractionStatusByKey[fileKey];
+    return status === 'extracting' || status === 'ocr processing';
+  });
+  const reviewTopic = getReviewTopic({ classifiedTopic, topic, attachments });
+  const durationOptions = useMemo(() => getDurationOptions(estimatedMinutes), [estimatedMinutes]);
   const pricingPreview = quote
     ? estimateFreeMinutePricing({
         originalPrice: quote.totalAmount,
         requestedDurationMinutes: durationMinutes,
-        freeMinutesRemaining: user?.freeMinutesRemaining || 0,
+        freeMinutesRemaining,
       })
     : null;
+  const readyForReview = hasRequestContent
+    && !hasPendingScannedPdfSelection
+    && !hasRunningExtraction
+    && classificationState === 'done'
+    && Boolean(estimatedMinutes)
+    && Boolean(quote);
+  const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && !isSubmitting;
 
   const resizeTextarea = () => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = 'auto';
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
-  };
-
-  const onTopicChange = (event) => {
-    const nextTopic = event.target.value;
-    setTopic(nextTopic);
-    if (!isManualSubjectRef.current) {
-      setSelectedSubject(resolveSubjectFromText(nextTopic, SUBJECT_OPTIONS));
-      setClassificationStatus('');
-    }
-    resizeTextarea();
-  };
-
-  const applySuggestion = (value) => {
-    setTopic(value);
-    if (!isManualSubjectRef.current) {
-      setSelectedSubject(resolveSubjectFromText(value, SUBJECT_OPTIONS));
-      setClassificationStatus('');
-    }
-    setTimeout(() => resizeTextarea(), 0);
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
   };
 
   const refreshQuote = async (minutes) => {
@@ -194,19 +241,50 @@ export default function StudentDashboardPage() {
     return nextQuote;
   };
 
+  const maybeAdvanceToReview = (intent = '') => {
+    if (flowState !== 'request_flow') return;
+    if (!readyForReview) {
+      setAdvanceIntent(intent || 'text');
+      return;
+    }
+    if (!selectedSubject) {
+      setAdvanceIntent(intent || 'text');
+      setShowSubjectFallback(true);
+      return;
+    }
+    setAdvanceIntent('');
+    setStage('review');
+  };
+
+  const onTopicChange = (event) => {
+    const nextTopic = event.target.value;
+    setTopic(nextTopic);
+    setStage('input');
+    setAdvanceIntent('');
+    setError('');
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(resolveSubjectFromText(nextTopic, SUBJECT_OPTIONS));
+    }
+    resizeTextarea();
+  };
+
+  const applySuggestion = (value) => {
+    setTopic(value);
+    setStage('input');
+    setAdvanceIntent('');
+    setError('');
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(resolveSubjectFromText(value, SUBJECT_OPTIONS));
+    }
+    setTimeout(() => resizeTextarea(), 0);
+  };
+
   const onFileChange = (event) => {
     const files = Array.from(event.target.files || []);
-    console.debug('[attachmentExtraction] file selection received', { selectedCount: files.length });
     if (!files.length) return;
 
-    const validFiles = files.filter((file) => {
-      const isImage = file.type.startsWith('image/');
-      const isPdf = file.type === 'application/pdf';
-      return isImage || isPdf;
-    });
-
+    const validFiles = files.filter((file) => file.type.startsWith('image/') || file.type === 'application/pdf');
     if (!validFiles.length) {
-      console.debug('[attachmentExtraction] no supported files in selection');
       event.target.value = '';
       return;
     }
@@ -215,19 +293,17 @@ export default function StudentDashboardPage() {
     const newFilesForExtraction = validFiles.filter((file) => !existingKeys.has(getAttachmentKey(file)));
 
     if (!newFilesForExtraction.length) {
-      console.debug('[attachmentExtraction] selection ignored because files are already attached');
       event.target.value = '';
       return;
     }
 
+    setStage('input');
+    setAdvanceIntent('attachment');
+    setError('');
+
     const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
-    console.debug('[attachmentExtraction] files queued for extraction', {
-      queuedCount: newFilesForExtraction.length,
-      totalAttachments: nextAttachments.length,
-      fileNames: newFilesForExtraction.map((file) => file.name),
-    });
 
     const extractionTokenByFileKey = {};
 
@@ -240,12 +316,6 @@ export default function StudentDashboardPage() {
         activeExtractionTokenByKeyRef.current[fileKey] = token;
         extractionTokenByFileKey[fileKey] = token;
         next[fileKey] = 'extracting';
-        console.debug('[attachmentExtraction] extraction state set', {
-          fileName: file.name,
-          fileKey,
-          token,
-          status: 'extracting',
-        });
       });
       return next;
     });
@@ -257,21 +327,9 @@ export default function StudentDashboardPage() {
       const activeToken = activeExtractionTokenByKeyRef.current[fileKey];
 
       if (!tokenForThisResult || tokenForThisResult !== activeToken) {
-        console.debug('[attachmentExtraction] ignoring stale extraction result', {
-          fileName: file?.name,
-          fileKey,
-          tokenForThisResult,
-          activeToken,
-        });
         return;
       }
 
-      console.debug('[attachmentExtraction] extraction result received', {
-        fileName: result.fileName,
-        fileKey,
-        success: result.success,
-        extractionMethod: result.extractionMethod,
-      });
       setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
       setAttachmentExtractionStatusByKey((prev) => ({
         ...prev,
@@ -279,10 +337,11 @@ export default function StudentDashboardPage() {
           ? 'text extracted'
           : result.requiresPageSelection
             ? 'choose up to 3 pages'
-          : result.extractionMethod === 'fallback'
-            ? 'fallback needed'
-            : 'extraction weak',
+            : result.extractionMethod === 'fallback'
+              ? 'fallback needed'
+              : 'extraction weak',
       }));
+
       if (result.requiresPageSelection) {
         setScannedPdfSelectionByKey((prev) => ({
           ...prev,
@@ -301,11 +360,6 @@ export default function StudentDashboardPage() {
           const fileKey = getAttachmentKey(file);
           if (next[fileKey] === 'extracting') {
             next[fileKey] = 'fallback needed';
-            console.debug('[attachmentExtraction] extraction status auto-resolved from extracting', {
-              fileName: file.name,
-              fileKey,
-              status: next[fileKey],
-            });
           }
         });
         return next;
@@ -335,14 +389,13 @@ export default function StudentDashboardPage() {
         delete updated[removedKey];
         return updated;
       });
-      console.debug('[attachmentExtraction] extraction state cleaned on removal', {
-        fileName: removed.name,
-        fileKey: removedKey,
-      });
     }
+
     const nextAttachments = attachmentsRef.current.filter((_, index) => index !== indexToRemove);
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
+    setStage('input');
+    setAdvanceIntent(nextAttachments.length ? 'attachment' : '');
   };
 
   const submitScannedPdfPageSelection = async (file, fileKey) => {
@@ -404,13 +457,8 @@ export default function StudentDashboardPage() {
           isSubmitting: false,
         },
       }));
-    } catch (error) {
-      console.debug('[attachmentExtraction] selected-page OCR failed', {
-        fileName: file?.name,
-        fileKey,
-        selectedPages,
-        error: error?.message,
-      });
+      setAdvanceIntent('attachment');
+    } catch (scanError) {
       setAttachmentExtractionStatusByKey((prev) => ({
         ...prev,
         [fileKey]: 'choose up to 3 pages',
@@ -420,17 +468,18 @@ export default function StudentDashboardPage() {
         [fileKey]: {
           ...prev[fileKey],
           selectedPages,
-          error: error?.message || 'Unable to process selected pages.',
+          error: scanError?.message || 'Unable to process selected pages.',
           isSubmitting: false,
         },
       }));
     }
   };
 
-  const goToRequestStatus = async () => {
-    if (!canSend || isSubmitting) return;
-    if (!selectedSubject) {
-      setShowSubjectFallback(true);
+  const confirmRequest = async () => {
+    if (!canConfirm) {
+      if (!selectedSubject) {
+        setShowSubjectFallback(true);
+      }
       return;
     }
 
@@ -442,8 +491,9 @@ export default function StudentDashboardPage() {
       const activePricingPreview = estimateFreeMinutePricing({
         originalPrice: activeQuote.totalAmount,
         requestedDurationMinutes: durationMinutes,
-        freeMinutesRemaining: user?.freeMinutesRemaining || 0,
+        freeMinutesRemaining,
       });
+
       const quoteWithDiscount = {
         ...activeQuote,
         originalPrice: activePricingPreview.originalPrice,
@@ -453,11 +503,8 @@ export default function StudentDashboardPage() {
         freeMinutesApplied: activePricingPreview.freeMinutesApplied,
         requestedDurationMinutes: durationMinutes,
       };
-      const requestText =
-        topic.trim() || `Help me with attached file${attachments.length > 1 ? 's' : ''}: ${attachments.map((file) => file.name).join(', ')}`;
 
       let uploadedAttachments = [];
-
       if (attachments.length) {
         uploadedAttachments = await Promise.all(
           attachments.map(async (file) => {
@@ -474,7 +521,7 @@ export default function StudentDashboardPage() {
               path: uploadResult.objectPath,
               downloadUrl: uploadResult.downloadUrl,
             };
-          })
+          }),
         );
       }
 
@@ -484,16 +531,11 @@ export default function StudentDashboardPage() {
         attachmentExtractionByKey,
       });
 
-      console.debug('[whiteboardPreparation] request board source prepared', {
-        attachmentCount: uploadedAttachments.length,
-        extractionCount: boardPreparationSource.attachmentExtractions.length,
-        extractedTextLength: boardPreparationSource.extractedText.length,
-      });
-
       const requestId = await createClassRequest({
         subject: selectedSubject,
-        topic: requestText,
-        classifiedTopic: classifiedTopic || '',
+        topic: reviewTopic,
+        classifiedTopic: classifiedTopic || reviewTopic,
+        estimatedMinutes: normalizeEstimatedDuration(estimatedMinutes),
         description: topic.trim(),
         preferredDate: '',
         preferredTime: '',
@@ -505,7 +547,7 @@ export default function StudentDashboardPage() {
         attachment: uploadedAttachments[0] || null,
         attachments: uploadedAttachments,
         studentId: user.uid,
-        studentName: user.fullName || user.displayName || user.email,
+        studentName: currentUser?.fullName || currentUser?.displayName || user?.email,
         studentEmail: user.email,
         selectedCardId: cardId,
         pricingSnapshot: quoteWithDiscount,
@@ -515,7 +557,7 @@ export default function StudentDashboardPage() {
       navigate(`/app/student/request/${requestId}`, {
         state: {
           requestId,
-          topic: requestText,
+          topic: reviewTopic,
         },
       });
     } catch (requestError) {
@@ -525,7 +567,16 @@ export default function StudentDashboardPage() {
     }
   };
 
-  const displayName = user?.fullName || user?.displayName || 'Student';
+  useEffect(() => {
+    if (!paymentMethods.length) {
+      setCardId('');
+      return;
+    }
+
+    const hasCurrentCard = paymentMethods.some((card) => card.id === cardId);
+    if (hasCurrentCard) return;
+    setCardId(paymentMethods.find((card) => card.isDefault)?.id || paymentMethods[0]?.id || '');
+  }, [cardId, paymentMethods]);
 
   useEffect(() => {
     if (!onboardingStatus.complete) return;
@@ -538,17 +589,34 @@ export default function StudentDashboardPage() {
   }, [attachments]);
 
   useEffect(() => {
+    if (flowState !== 'request_flow') {
+      setStage('input');
+      setAdvanceIntent('');
+      return;
+    }
+    if (!hasRequestContent) {
+      setStage('input');
+      setAdvanceIntent('');
+    }
+  }, [flowState, hasRequestContent]);
+
+  useEffect(() => {
     if (isManualSubjectRef.current) return;
 
     const extractionResults = Object.values(attachmentExtractionByKey || {});
-    const { combinedText, sourceLabels, hasUsableText } = buildSubjectClassificationInput({
+    const { combinedText, hasUsableText } = buildSubjectClassificationInput({
       typedText: topic,
       attachmentExtractions: extractionResults,
     });
 
     if (!hasUsableText) {
       setClassifiedTopic('');
+      setEstimatedMinutes(DEFAULT_LESSON_DURATION);
       setClassificationStatus('');
+      setClassificationState('idle');
+      if (!hasManualDurationOverride) {
+        setDurationMinutes(DEFAULT_LESSON_DURATION);
+      }
       return;
     }
 
@@ -556,14 +624,11 @@ export default function StudentDashboardPage() {
     classificationRunCounterRef.current = runId;
     let isCancelled = false;
 
+    setClassificationState('running');
+    setClassificationStatus('Analyzing your request...');
+
     const timeoutId = setTimeout(async () => {
       try {
-        console.debug('[subjectClassification] running classification', {
-          sourceLabels,
-          typedTextLength: String(topic || '').trim().length,
-          attachmentTextCount: extractionResults.filter((item) => String(item?.extractedText || '').trim()).length,
-        });
-
         const result = await classifySubjectFromText({
           inputText: combinedText,
           supportedSubjects: SUBJECT_OPTIONS,
@@ -571,340 +636,521 @@ export default function StudentDashboardPage() {
 
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
 
-        console.debug('[subjectClassification] classification complete', {
-          hasSupportedSubject: Boolean(result.subject),
-          needsManualSubjectSelection: result.needsManualSubjectSelection,
-          subjectConfidence: result.subjectConfidence,
-          hasTopic: Boolean(result.topic),
-        });
-
+        const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
         setClassifiedTopic(result.topic || '');
+        setEstimatedMinutes(nextEstimatedMinutes);
+        setClassificationState('done');
 
         if (result.subject) {
           setSelectedSubject(result.subject);
           setClassificationStatus(
             result.needsManualSubjectSelection || result.subjectConfidence === 'low'
-              ? 'Subject detected — please confirm.'
-              : 'Subject detected from request text.'
+              ? 'Subject detected. Please confirm before sending.'
+              : 'Subject and study focus detected from your request.',
           );
         } else {
-          setClassificationStatus('Subject could not be detected. Please select manually.');
+          setClassificationStatus('We need you to choose the subject manually before review.');
         }
-      } catch (error) {
+
+        if (!hasManualDurationOverride) {
+          setDurationMinutes(nextEstimatedMinutes);
+        }
+      } catch (classificationError) {
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
-        console.debug('[subjectClassification] classification failed', {
-          message: error?.message,
-        });
-        setClassificationStatus('');
+        setClassificationState('error');
+        setClassificationStatus('We could not estimate the request yet. Keep editing or try again.');
       }
-    }, 500);
+    }, 450);
 
     return () => {
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [topic, attachmentExtractionByKey]);
+  }, [topic, attachmentExtractionByKey, hasManualDurationOverride]);
 
-  const handleDurationChange = async (event) => {
-    const minutes = Number(event.target.value || DEFAULT_LESSON_DURATION);
-    setDurationMinutes(minutes);
-    setError('');
-    try {
-      await refreshQuote(minutes);
-    } catch (quoteError) {
+  useEffect(() => {
+    if (!onboardingStatus.complete) return;
+    refreshQuote(durationMinutes).catch((quoteError) => {
       setError(quoteError.message || 'Unable to refresh pricing quote.');
-    }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [durationMinutes]);
+
+  useEffect(() => {
+    if (!advanceIntent || !readyForReview) return;
+    maybeAdvanceToReview(advanceIntent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advanceIntent, readyForReview, selectedSubject, flowState]);
+
+  const handleDurationChange = (event) => {
+    setHasManualDurationOverride(true);
+    setDurationMinutes(Number(event.target.value || DEFAULT_LESSON_DURATION));
+    setError('');
   };
 
-  return (
-    <div className="relative flex min-h-[calc(100vh-13rem)] flex-col overflow-hidden bg-transparent">
-      {!onboardingStatus.complete ? (
-        <div className="mb-4">
-          <OnboardingStatusBanner user={user} role="student" />
-          <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            <p>{onboardingStatus.message}</p>
+  const renderAttachmentRow = (file, index) => {
+    const isImage = file.type.startsWith('image/');
+    const fileKey = getAttachmentKey(file);
+    const extractionStatus = attachmentExtractionStatusByKey[fileKey];
+    const extractionResult = attachmentExtractionByKey[fileKey];
+    const scannedSelectionState = scannedPdfSelectionByKey[fileKey] || {};
+    const hasScannedSelectionPrompt = extractionResult?.scannedPdfDetected && extractionResult?.requiresPageSelection;
+
+    return (
+      <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2 rounded-3xl border border-white/10 bg-white/5 p-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-zinc-900 text-zinc-200">
+            {isImage ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-zinc-100">{file.name}</p>
+            <p className="text-xs text-zinc-400">{extractionStatus || 'Queued'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => removeAttachment(index)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-zinc-900/80 text-zinc-300 transition hover:text-white"
+            aria-label={`Remove ${file.name}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {hasScannedSelectionPrompt ? (
+          <div className="rounded-2xl border border-amber-300/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+            <p className="font-semibold">Scanned PDF detected. Choose up to {MAX_SCANNED_PDF_OCR_PAGES} pages.</p>
+            <p className="mt-1 text-amber-100/80">OCR will run only on selected pages.</p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={scannedSelectionState.input || ''}
+                onChange={(event) => {
+                  const nextInput = event.target.value;
+                  const parsedPages = parseSelectedPagesInput(nextInput);
+                  setScannedPdfSelectionByKey((prev) => ({
+                    ...prev,
+                    [fileKey]: {
+                      ...prev[fileKey],
+                      input: nextInput,
+                      selectedPages: parsedPages,
+                      error: parsedPages.length > MAX_SCANNED_PDF_OCR_PAGES
+                        ? `You can select up to ${MAX_SCANNED_PDF_OCR_PAGES} pages only.`
+                        : '',
+                    },
+                  }));
+                }}
+                placeholder="Example: 1, 2, 5"
+                className="w-full rounded-2xl border border-white/15 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none"
+              />
+              <button
+                type="button"
+                disabled={Boolean(scannedSelectionState.isSubmitting) || parseSelectedPagesInput(scannedSelectionState.input || '').length > MAX_SCANNED_PDF_OCR_PAGES}
+                onClick={() => submitScannedPdfPageSelection(file, fileKey)}
+                className="rounded-2xl bg-amber-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-amber-200"
+              >
+                {scannedSelectionState.isSubmitting ? 'Running OCR...' : 'Run OCR'}
+              </button>
+            </div>
+            {scannedSelectionState.selectedPages?.length ? (
+              <p className="mt-2 text-[11px] text-amber-100/80">Selected pages: {scannedSelectionState.selectedPages.join(', ')}</p>
+            ) : null}
+            {scannedSelectionState.error ? (
+              <p className="mt-2 text-[11px] font-semibold text-rose-300">{scannedSelectionState.error}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  if (flowState === 'blocked_onboarding') {
+    return (
+      <div className="space-y-4">
+        <OnboardingStatusBanner user={currentUser || user} role="student" />
+        <div className="overflow-hidden rounded-[2rem] border border-amber-300/30 bg-zinc-900/75 p-5 shadow-[0_20px_70px_rgba(2,6,23,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200/80">Complete setup first</p>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-white">Finish your student profile before requesting a class.</h1>
+          <p className="mt-2 text-sm text-zinc-300">{onboardingStatus.message}</p>
+          <Link
+            to="/app/onboarding?role=student"
+            className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300"
+          >
+            Complete onboarding
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (flowState === 'blocked_active_session' || flowState === 'blocked_active_request') {
+    const showSession = flowState === 'blocked_active_session' && latestOpenSession;
+
+    return (
+      <div className="space-y-4">
+        <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/75 p-5 shadow-[0_20px_70px_rgba(2,6,23,0.35)]">
+          <div className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+            Continue current class
+          </div>
+          <h1 className="mt-4 text-2xl font-black tracking-tight text-white">
+            {showSession ? 'Your class is already in progress.' : 'You already have a request in progress.'}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-300">
+            {showSession
+              ? 'Jump back into the active session instead of starting a new intake.'
+              : 'Open the current request status instead of creating another request.'}
+          </p>
+
+          <div className="mt-5 rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
+              {showSession ? (latestOpenSession?.subject || 'Current class') : (activeOrOngoingRequest?.subject || 'Current request')}
+            </p>
+            <p className="mt-2 text-lg font-bold text-white">
+              {showSession
+                ? (latestOpenSession?.topic || 'Live class')
+                : (activeOrOngoingRequest?.topic || 'Live request')}
+            </p>
+            <p className="mt-1 text-sm text-zinc-400">
+              {showSession
+                ? `${latestOpenSession?.duration || 'Live now'}`
+                : `${activeOrOngoingRequest?.statusDetail || 'Tutor matching is still running.'}`}
+            </p>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <Link
-              to="/app/onboarding?role=student"
-              className="mt-2 inline-flex rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
+              to={showSession ? `/app/session/${latestOpenSession.id}` : `/app/student/request/${activeOrOngoingRequest.id}`}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
-              Complete profile
+              {showSession ? 'Continue current class' : 'View current request'}
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+            <Link
+              to={showSession ? '/app/student/requests' : '/app/student/requests'}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+            >
+              Open my classes
             </Link>
           </div>
         </div>
-      ) : null}
+      </div>
+    );
+  }
 
-      <div className="relative flex flex-1 flex-col px-4 pt-4 md:px-6 md:pt-6">
-        <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
-          <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/70 p-6 backdrop-blur-xl md:p-10">
-            <div className="max-w-3xl">
-              <div className="relative rounded-[2rem] bg-transparent p-1 md:p-1">
-              <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900 px-4 py-3 shadow-inner md:px-5 md:py-4">
-                <div className="mt-4 mb-4 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                  Smart class requests
-                </div>
-                <h1 className="text-3xl font-black leading-tight tracking-tight text-zinc-100 md:text-3xl mb-4">
-                  Hello{' '}
-                  <span className="bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                    {displayName}
-                  </span>
+  return (
+    <div className="space-y-4 pb-4">
+      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/75 shadow-[0_24px_80px_rgba(2,6,23,0.42)] backdrop-blur">
+        <div className="relative overflow-hidden p-4 sm:p-5">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.14),_transparent_36%)]" />
+          <div className="relative space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Student request</p>
+                <h1 className="mt-2 text-[1.9rem] font-black leading-tight tracking-tight text-white">
+                  Hi {displayName.split(' ')[0]}, start with a picture.
                 </h1>
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  {QUICK_REQUEST_SUGGESTIONS.map((option) => (
-                    <button
-                      key={option.label}
-                      type="button"
-                      onClick={() => applySuggestion(option.value)}
-                      className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50"
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                <label className="mb-3 flex cursor-pointer flex-col rounded-2xl border border-dashed border-emerald-300 bg-emerald-500/10 p-4 transition hover:border-emerald-200 hover:bg-emerald-500/15">
-                  <span className="text-sm font-semibold text-emerald-100">Upload image or PDF (recommended)</span>
-                  <span className="mt-1 text-xs text-emerald-200">Tap to add homework photos, assignment sheets, or exam prep docs.</span>
-                  <input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    multiple
-                    onChange={onFileChange}
-                    className="hidden"
-                  />
-                </label>
-
-                {attachments.length > 0 ? (
-                  <div className="mb-3 space-y-2">
-                    {attachments.map((file, index) => {
-                      const isImage = file.type.startsWith('image/');
-                      const fileKey = getAttachmentKey(file);
-                      const extractionStatus = attachmentExtractionStatusByKey[fileKey];
-                      const extractionResult = attachmentExtractionByKey[fileKey];
-                      const scannedSelectionState = scannedPdfSelectionByKey[fileKey] || {};
-                      const hasScannedSelectionPrompt = extractionResult?.scannedPdfDetected && extractionResult?.requiresPageSelection;
-                      return (
-                        <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2">
-                          <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                            {isImage ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
-                            <span className="max-w-[180px] truncate font-medium md:max-w-[260px]">{file.name}</span>
-                            {extractionStatus ? (
-                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                                {extractionStatus}
-                              </span>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => removeAttachment(index)}
-                              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-100"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-
-                          {hasScannedSelectionPrompt ? (
-                            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-900">
-                              <p className="font-semibold">Scanned PDF detected. Choose up to {MAX_SCANNED_PDF_OCR_PAGES} pages.</p>
-                              <p className="mt-1 text-amber-800">
-                                This file appears image-based. For cost control, OCR will run only on selected pages.
-                              </p>
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={scannedSelectionState.input || ''}
-                                  onChange={(event) => {
-                                    const nextInput = event.target.value;
-                                    const parsedPages = parseSelectedPagesInput(nextInput);
-                                    setScannedPdfSelectionByKey((prev) => ({
-                                      ...prev,
-                                      [fileKey]: {
-                                        ...prev[fileKey],
-                                        input: nextInput,
-                                        selectedPages: parsedPages,
-                                        error: parsedPages.length > MAX_SCANNED_PDF_OCR_PAGES
-                                          ? `You can select up to ${MAX_SCANNED_PDF_OCR_PAGES} pages only.`
-                                          : '',
-                                      },
-                                    }));
-                                  }}
-                                  placeholder="Example: 1, 2, 5"
-                                  className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-zinc-900 outline-none md:w-56"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={Boolean(scannedSelectionState.isSubmitting) || parseSelectedPagesInput(scannedSelectionState.input || '').length > MAX_SCANNED_PDF_OCR_PAGES}
-                                  onClick={() => submitScannedPdfPageSelection(file, fileKey)}
-                                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
-                                >
-                                  {scannedSelectionState.isSubmitting ? 'Running OCR...' : 'Run OCR for selected pages'}
-                                </button>
-                              </div>
-                              {scannedSelectionState.selectedPages?.length ? (
-                                <p className="mt-1 text-[11px] text-amber-700">
-                                  Selected pages: {scannedSelectionState.selectedPages.join(', ')}
-                                </p>
-                              ) : null}
-                              {scannedSelectionState.error ? (
-                                <p className="mt-1 text-[11px] font-semibold text-rose-700">{scannedSelectionState.error}</p>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                <textarea
-                  ref={textareaRef}
-                  value={topic}
-                  onChange={onTopicChange}
-                  placeholder="Optional: describe what you need help with..."
-                  rows={1}
-                  className="max-h-[220px] min-h-[28px] w-full resize-none overflow-y-auto bg-transparent py-1 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none md:text-[15px]"
-                />
-
-                <div className="mt-2 text-xs text-zinc-400">
-                  Subject:{' '}
-                  {selectedSubject ? (
-                    <span className="font-semibold text-emerald-300">{selectedSubject}</span>
-                  ) : (
-                    <span className="font-semibold text-amber-300">Selection required before submit</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowSubjectFallback(true)}
-                    className="ml-2 text-xs font-semibold text-emerald-300 underline underline-offset-2 transition hover:text-emerald-200"
-                  >
-                    Change
-                  </button>
-                </div>
-                {classificationStatus ? (
-                  <p className="mt-1 text-[11px] text-zinc-400">{classificationStatus}</p>
-                ) : null}
+                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-300">
+                  Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
+                </p>
               </div>
-
-              <div className="mt-3 flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex h-11 min-w-[140px] items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50">
-                    <span className="text-xs font-semibold text-zinc-500">Duration</span>
-                    <select
-                      value={durationMinutes}
-                      onChange={handleDurationChange}
-                      className="w-auto bg-transparent text-xs text-zinc-800 outline-none"
-                    >
-                      {LESSON_DURATION_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option} min</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50">
-                    <Paperclip className="h-4 w-4 shrink-0" />
-                    <span className="hidden text-xs font-semibold sm:inline">Add more files</span>
-                    <input
-                      type="file"
-                      accept="application/pdf,image/*"
-                      multiple
-                      onChange={onFileChange}
-                      className="hidden"
-                    />
-                  </label>
-
-                  <label className="inline-flex h-11 min-w-[52px] items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-3 text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50 sm:min-w-[180px]">
-                    <CreditCard className="h-4 w-4 shrink-0" />
-                    <span className="hidden text-xs font-semibold text-zinc-500 sm:inline">Card</span>
-                    <select
-                      value={cardId}
-                      onChange={(event) => setCardId(event.target.value)}
-                      className="w-auto max-w-[130px] bg-transparent text-xs text-zinc-800 outline-none sm:max-w-none"
-                    >
-                      <option value="">Select</option>
-                      {(user?.paymentMethods || []).map((card) => (
-                        <option key={card.id} value={card.id}>
-                          {card.nickname.charAt(0).toUpperCase() + card.nickname.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                </div>
-
-                <button
-                  type="button"
-                  onClick={goToRequestStatus}
-                  disabled={!canSend || isSubmitting}
-                  className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold text-white transition md:h-14 md:text-[15px] ${
-                    canSend
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-zinc-400'
-                  }`}
-                >
-                  <Send className="h-4 w-4" />
-                  {isSubmitting ? 'Requesting...' : `Request ${pricingPreview ? formatRand(pricingPreview.finalPrice) : quote ? formatRand(quote.totalAmount) : 'quote'}`}
-                </button>
-              </div>
-
-              {quote && pricingPreview ? (
-                <p className="mt-2 text-xs text-zinc-600">
-                  Original {formatRand(pricingPreview.originalPrice)} • Free-minute discount {formatRand(pricingPreview.discountApplied)} ({pricingPreview.freeMinutesApplied.toFixed(2)} min) • Pay now {formatRand(pricingPreview.finalPrice)}
-                </p>
-                
-              ) : null}
-
-              {!user?.paymentMethods?.length ? (
-                <p className="mt-2 text-xs text-amber-700">
-                  Add a payment card from Payment page first.
-                </p>
-              ) : null}
-
-              {error ? (
-                <p className="mt-2 text-xs text-rose-700">
-                  {error}
-                </p>
-              ) : null}
-              {hasPendingScannedPdfSelection ? (
-                <p className="mt-2 text-xs text-amber-700">
-                  At least one scanned PDF still needs page selection (maximum {MAX_SCANNED_PDF_OCR_PAGES} pages) before request submission.
-                </p>
-              ) : null}
-              <div className="mt-4 rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-4 text-sm text-indigo-100">
-                <p className="font-semibold">Free minutes balance: {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</p>
-                <p className="mt-1 text-xs text-indigo-200">
-                  Use your referral code <span className="font-semibold">{user?.referralCode || 'Loading...'}</span> to invite students and earn +30 min each.
-                </p>
+              <div className="hidden rounded-3xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300 sm:block">
+                2-step intake
               </div>
             </div>
+
+            <div className="grid gap-3">
+              <div className={`overflow-hidden rounded-[1.75rem] border transition-all duration-300 ${stage === 'review' ? 'border-white/5 bg-white/[0.03] p-3 opacity-80' : 'border-white/10 bg-white/5 p-4'}`}>
+                {stage === 'review' ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Stage 1 complete</p>
+                      <p className="mt-1 text-sm text-zinc-200">
+                        {attachments.length ? `${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : 'Text request'}
+                        {' '}ready for review.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setStage('input')}
+                      className="rounded-2xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-950"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-[1.5rem] border border-emerald-400/20 bg-emerald-500/10 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <label className="flex min-h-[124px] flex-1 cursor-pointer flex-col justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4 transition hover:border-emerald-300/50 hover:bg-zinc-950">
+                          <div>
+                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-zinc-950">
+                              <Camera className="h-5 w-5" />
+                            </div>
+                            <p className="mt-4 text-lg font-bold text-white">Take Picture</p>
+                            <p className="mt-1 text-sm text-zinc-400">Best for homework questions and handwritten pages.</p>
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            multiple
+                            onChange={onFileChange}
+                            className="hidden"
+                          />
+                        </label>
+
+                        <label className="flex min-h-[124px] flex-1 cursor-pointer flex-col justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4 transition hover:border-cyan-300/50 hover:bg-zinc-950">
+                          <div>
+                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-400 text-zinc-950">
+                              <FileText className="h-5 w-5" />
+                            </div>
+                            <p className="mt-4 text-lg font-bold text-white">Upload PDF</p>
+                            <p className="mt-1 text-sm text-zinc-400">Works for worksheets, past papers, and assignment briefs.</p>
+                          </div>
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            multiple
+                            onChange={onFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        {QUICK_REQUEST_SUGGESTIONS.map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() => applySuggestion(option.value)}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-300/40 hover:bg-emerald-500/10"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                        <p className="text-sm font-semibold text-white">Or describe what you need help with</p>
+                        <textarea
+                          ref={textareaRef}
+                          value={topic}
+                          onChange={onTopicChange}
+                          placeholder="Optional text path: explain the homework, test prep, or lesson you want."
+                          rows={1}
+                          className="mt-3 max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent px-0 py-0 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none"
+                        />
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Detected subject</p>
+                            <p className="mt-1 text-sm text-zinc-200">
+                              {selectedSubject || 'Waiting for subject confirmation'}
+                            </p>
+                            {classificationStatus ? (
+                              <p className="mt-1 text-xs text-zinc-400">{classificationStatus}</p>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => maybeAdvanceToReview('text')}
+                            disabled={!topic.trim()}
+                            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                          >
+                            Continue
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {attachments.length ? (
+                      <div className="space-y-3">
+                        {attachments.map((file, index) => renderAttachmentRow(file, index))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-between gap-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/45 px-4 py-3 text-sm text-zinc-300">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {classificationState === 'running' || hasRunningExtraction ? (
+                          <Loader className="h-4 w-4 animate-spin text-emerald-300" />
+                        ) : (
+                          <Sparkles className="h-4 w-4 text-emerald-300" />
+                        )}
+                        <span className="truncate">
+                          {hasPendingScannedPdfSelection
+                            ? 'Choose PDF pages to finish intake.'
+                            : classificationState === 'running' || hasRunningExtraction
+                              ? 'Preparing your request details...'
+                              : advanceIntent === 'attachment' && readyForReview
+                                ? 'Ready to review.'
+                                : 'Picture-first path moves to review automatically.'}
+                        </span>
+                      </div>
+
+                      <label className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
+                        <Paperclip className="h-4 w-4" />
+                        Add more
+                        <input
+                          type="file"
+                          accept="application/pdf,image/*"
+                          multiple
+                          onChange={onFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {!paymentMethods.length ? (
+                      <p className="text-xs text-amber-200">
+                        Add a saved card on the Payment page before confirming a request.
+                      </p>
+                    ) : null}
+                    {hasPendingScannedPdfSelection ? (
+                      <p className="text-xs text-amber-200">
+                        At least one scanned PDF still needs page selection before review.
+                      </p>
+                    ) : null}
+                    {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+                  </div>
+                )}
+              </div>
+
+              {stage === 'review' ? (
+                <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Stage 2</p>
+                      <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Review and confirm</h2>
+                      <p className="mt-2 text-sm text-zinc-300">Pricing and payment stay on the existing flow. This step only repackages them for review.</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-right">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/70">Free minutes</p>
+                      <p className="mt-1 text-lg font-bold text-white">{freeMinutesRemaining.toFixed(2)} min</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Subject</p>
+                      <p className="mt-2 text-lg font-bold text-white">{selectedSubject || 'Select subject'}</p>
+                    </div>
+                    <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Topic</p>
+                      <p className="mt-2 text-lg font-bold text-white">{reviewTopic}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Estimated session duration</p>
+                        <p className="mt-2 text-2xl font-black text-white">{normalizeEstimatedDuration(estimatedMinutes)} min</p>
+                        <p className="mt-1 text-sm text-zinc-400">AI suggestion based on visible workload. You can adjust it below.</p>
+                      </div>
+
+                      <label className="inline-flex min-h-[52px] items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-200">
+                        <span className="font-semibold">Duration</span>
+                        <select
+                          value={durationMinutes}
+                          onChange={handleDurationChange}
+                          className="bg-transparent text-sm text-white outline-none"
+                        >
+                          {durationOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option} min
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Pricing summary</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      {quote ? (
+                        <>
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <p className="text-xs text-zinc-500">Base price</p>
+                            <p className="mt-1 text-lg font-bold text-white">{formatRand(quote.adjustedBaseAmount ?? quote.baseAmount ?? 0)}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <p className="text-xs text-zinc-500">Per minute</p>
+                            <p className="mt-1 text-lg font-bold text-white">{formatRand(quote.adjustedRatePerMinute ?? quote.ratePerMinute ?? 0)}</p>
+                          </div>
+                        </>
+                      ) : null}
+                      {pricingPreview ? (
+                        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-3 sm:col-span-2">
+                          <p className="text-xs text-emerald-100/80">Total due now</p>
+                          <p className="mt-1 text-2xl font-black text-white">{formatRand(pricingPreview.finalPrice)}</p>
+                          <p className="mt-1 text-xs text-emerald-100/80">
+                            Original {formatRand(pricingPreview.originalPrice)} • Free minutes applied {pricingPreview.freeMinutesApplied.toFixed(2)} min • Discount {formatRand(pricingPreview.discountApplied)}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Payment method</p>
+                        <p className="mt-1 text-sm text-zinc-400">Uses the existing card authorization flow.</p>
+                      </div>
+
+                      <label className="inline-flex min-h-[52px] items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-200">
+                        <CreditCard className="h-4 w-4" />
+                        <select
+                          value={cardId}
+                          onChange={(event) => setCardId(event.target.value)}
+                          className="max-w-[180px] bg-transparent text-sm text-white outline-none"
+                        >
+                          <option value="">Select card</option>
+                          {paymentMethods.map((card) => (
+                            <option key={card.id} value={card.id}>
+                              {formatCardLabel(card)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
+
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={confirmRequest}
+                      disabled={!canConfirm}
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-500 disabled:text-zinc-200"
+                    >
+                      <Send className="h-4 w-4" />
+                      {isSubmitting ? 'Confirming...' : 'Confirm request'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStage('input')}
+                      className="inline-flex h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+                    >
+                      Back to input
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-
-          {latestOpenSession || activeOrOngoingRequest ? (
-            <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-              <p className="font-semibold">Continue your class</p>
-              {latestOpenSession ? (
-                <p className="mt-1">
-                  Live session available: <span className="font-semibold">{latestOpenSession.topic || 'Mathematics class'}</span>.
-                  <Link to={`/app/session/${latestOpenSession.id}`} className="ml-1 underline">Join now</Link>
-                </p>
-              ) : null}
-              {!latestOpenSession && activeOrOngoingRequest ? (
-                <p className="mt-1">
-                  We&apos;re still processing your latest request: <span className="font-semibold">{activeOrOngoingRequest.topic || 'Mathematics request'}</span>.
-                  <Link to={`/app/student/request/${activeOrOngoingRequest.id}`} className="ml-1 underline">View status</Link>
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
         </div>
-      </div>
+      </section>
 
       {showSubjectFallback ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/70 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-5">
-            <p className="text-lg font-semibold text-zinc-100">Choose subject before submitting</p>
-            <p className="mt-1 text-sm text-zinc-400">
-              We couldn&apos;t detect a supported subject from your request details.
-            </p>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/75 px-4">
+          <div className="w-full max-w-md rounded-[1.75rem] border border-white/10 bg-zinc-900 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.55)]">
+            <p className="text-lg font-bold text-white">Choose subject before review</p>
+            <p className="mt-2 text-sm text-zinc-400">We couldn&apos;t confidently resolve a supported subject from the request details.</p>
 
             <select
               value={selectedSubject}
@@ -913,7 +1159,7 @@ export default function StudentDashboardPage() {
                 isManualSubjectRef.current = Boolean(nextSubject);
                 setSelectedSubject(nextSubject);
               }}
-              className="mt-4 w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none"
+              className="mt-4 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-3 py-3 text-sm text-white outline-none"
             >
               <option value="">Select subject</option>
               {SUBJECT_OPTIONS.map((subject) => (
@@ -927,15 +1173,18 @@ export default function StudentDashboardPage() {
               <button
                 type="button"
                 onClick={() => setShowSubjectFallback(false)}
-                className="rounded-xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200"
+                className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={!selectedSubject}
-                onClick={() => setShowSubjectFallback(false)}
-                className={`rounded-xl px-3 py-2 text-xs font-semibold text-white ${selectedSubject ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-zinc-600'}`}
+                onClick={() => {
+                  setShowSubjectFallback(false);
+                  maybeAdvanceToReview(advanceIntent || 'text');
+                }}
+                className="rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-600 disabled:text-zinc-200"
               >
                 Confirm subject
               </button>

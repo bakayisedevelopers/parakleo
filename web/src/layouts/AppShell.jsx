@@ -3,7 +3,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '../components/app/Sidebar';
 import Topbar from '../components/app/Topbar';
 import TutorOfferOverlay from '../components/app/TutorOfferOverlay';
-import AppBottomNav from '../components/app/AppBottomNav';
 import { useAuth } from '../hooks/useAuth';
 import useViewportMode from '../hooks/useViewportMode';
 import { updateUserProfile } from '../services/userService';
@@ -49,10 +48,7 @@ export default function AppShell() {
   }, [isTutorRestrictedMobile, setUser, user?.onlineStatus, user?.uid]);
 
   return (
-    <div
-      className="min-h-screen px-3 py-3 text-zinc-100 md:px-6 md:py-6"
-      style={useBottomNav ? { paddingBottom: "calc(6.5rem + env(safe-area-inset-bottom, 0px))" } : undefined}
-    >
+    <div className="min-h-screen px-3 py-3 text-zinc-100 md:px-6 md:py-6">
       <div className={`mx-auto grid max-w-7xl gap-4 ${isTutor ? 'md:grid-cols-[300px_1fr]' : 'lg:grid-cols-[260px_1fr]'} md:gap-6`}>
         <div className={`hidden ${isTutor ? 'md:block' : 'lg:block'} md:sticky md:top-6 md:h-[calc(100vh-3rem)] ${useBottomNav ? '!hidden' : ''}`}>
           <Sidebar role={activeRole} />
@@ -66,7 +62,7 @@ export default function AppShell() {
               name={user?.fullName || user?.displayName || 'Claxi User'}
               role={activeRole}
               onOpenNav={() => setIsNavOpen(true)}
-              showMenuButton={!useBottomNav}
+              showMenuButton={useBottomNav}
             />
             <Outlet />
           </div>
@@ -85,10 +81,6 @@ export default function AppShell() {
             <Sidebar role={activeRole} mobile onNavigate={() => setIsNavOpen(false)} />
           </div>
         </div>
-      ) : null}
-
-      {useBottomNav ? (
-        <AppBottomNav role={activeRole} />
       ) : null}
     </div>
   );

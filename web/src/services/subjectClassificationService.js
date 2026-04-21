@@ -7,9 +7,16 @@ const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const UNKNOWN_CLASSIFICATION = {
   subject: '',
   topic: '',
+  estimatedMinutes: 30,
   subjectConfidence: 'unknown',
   needsManualSubjectSelection: true,
 };
+
+function clampEstimatedMinutes(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return UNKNOWN_CLASSIFICATION.estimatedMinutes;
+  return Math.min(90, Math.max(10, Math.round(numeric)));
+}
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -73,10 +80,13 @@ function buildClassificationPrompt({ supportedSubjects = [], inputText = '' }) {
   return [
     'You classify tutoring request text.',
     `Supported subjects: ${supportedList.join(', ')}`,
-    'Return JSON only with keys: subject, topic, subjectConfidence, needsManualSubjectSelection.',
+    'Return JSON only with keys: subject, topic, estimatedMinutes, subjectConfidence, needsManualSubjectSelection.',
     'Rules:',
     '- subject must be one of the supported subjects above or empty string.',
     '- topic must be a short optional string or empty string.',
+    '- estimatedMinutes must be an integer from 10 to 90.',
+    '- estimatedMinutes should reflect likely tutoring workload visible in the text, including question count, text volume, and diagram or multi-step complexity when implied.',
+    '- Treat estimatedMinutes as a suggestion, not a fixed booking length.',
     "- subjectConfidence must be one of: 'high', 'low', 'unknown'.",
     '- needsManualSubjectSelection must be true when subject is unclear, unsupported, or ambiguous.',
     '- If text does not clearly indicate a supported subject, set subject to empty string, subjectConfidence to unknown, needsManualSubjectSelection to true.',
@@ -93,46 +103,46 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
     return UNKNOWN_CLASSIFICATION;
   }
 
-  await getFirebaseClients();
-
-  const ai = getAI(undefined, { backend: new GoogleAIBackend() });
-  const model = getGenerativeModel(ai, {
-    model: CLASSIFICATION_MODEL,
-    generationConfig: {
-      temperature: 0,
-      topK: 1,
-      topP: 0.1,
-      maxOutputTokens: 200,
-      responseMimeType: 'application/json',
-    },
-  });
-
-  const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
-  const response = await model.generateContent(prompt);
-  const text = normalizeText(response?.response?.text?.() || '');
-
-  let parsed;
   try {
-    parsed = JSON.parse(text);
+    await getFirebaseClients();
+
+    const ai = getAI(undefined, { backend: new GoogleAIBackend() });
+    const model = getGenerativeModel(ai, {
+      model: CLASSIFICATION_MODEL,
+      generationConfig: {
+        temperature: 0,
+        topK: 1,
+        topP: 0.1,
+        maxOutputTokens: 200,
+        responseMimeType: 'application/json',
+      },
+    });
+
+    const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
+    const response = await model.generateContent(prompt);
+    const text = normalizeText(response?.response?.text?.() || '');
+    const parsed = JSON.parse(text);
+
+    const supportedSubject = normalizeSubjectToSupported(parsed?.subject, supportedSubjects);
+    const confidence = ['high', 'low', 'unknown'].includes(parsed?.subjectConfidence)
+      ? parsed.subjectConfidence
+      : 'unknown';
+    const topic = normalizeText(parsed?.topic);
+    const estimatedMinutes = clampEstimatedMinutes(parsed?.estimatedMinutes);
+
+    const needsManualSubjectSelection = Boolean(parsed?.needsManualSubjectSelection)
+      || !supportedSubject
+      || confidence === 'unknown';
+
+    return {
+      subject: supportedSubject,
+      topic,
+      estimatedMinutes,
+      subjectConfidence: confidence,
+      needsManualSubjectSelection,
+    };
   } catch (error) {
-    console.debug('[subjectClassification] invalid JSON response', { error: error?.message, text });
+    console.debug('[subjectClassification] classification failed, using fallback', { error: error?.message });
     return UNKNOWN_CLASSIFICATION;
   }
-
-  const supportedSubject = normalizeSubjectToSupported(parsed?.subject, supportedSubjects);
-  const confidence = ['high', 'low', 'unknown'].includes(parsed?.subjectConfidence)
-    ? parsed.subjectConfidence
-    : 'unknown';
-  const topic = normalizeText(parsed?.topic);
-
-  const needsManualSubjectSelection = Boolean(parsed?.needsManualSubjectSelection)
-    || !supportedSubject
-    || confidence === 'unknown';
-
-  return {
-    subject: supportedSubject,
-    topic,
-    subjectConfidence: confidence,
-    needsManualSubjectSelection,
-  };
 }
