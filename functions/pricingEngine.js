@@ -57,6 +57,19 @@ const DEFAULT_PRICING_CONFIG = {
   },
 };
 
+const LEGACY_SAFE_PRICING_SNAPSHOT = {
+  pricingBand: 'normal',
+  baseAmount: 12,
+  ratePerMinute: 1.8,
+  adjustedBaseAmount: 12,
+  adjustedRatePerMinute: 1.8,
+  durationMinutes: 10,
+  totalAmount: 30,
+  configVersion: `${PRICING_CONFIG_VERSION}-legacy-safe`,
+  explanationLabel: 'Standard pricing',
+  currency: 'ZAR',
+};
+
 function roundCurrency(value) {
   return Number((Number(value || 0)).toFixed(2));
 }
@@ -225,15 +238,31 @@ function computePricingQuote({ minutes, subject, signalContext = {}, config = DE
 }
 
 function sanitizePricingSnapshot(snapshot = {}) {
-  if (!snapshot || typeof snapshot !== 'object') return null;
-  const totalAmount = roundCurrency(snapshot.totalAmount);
-  const durationMinutes = Math.max(1, Math.floor(Number(snapshot.durationMinutes || 0)));
-  const adjustedRatePerMinute = roundCurrency(snapshot.adjustedRatePerMinute || snapshot.ratePerMinute || 0);
-  const adjustedBaseAmount = roundCurrency(snapshot.adjustedBaseAmount || snapshot.baseAmount || 0);
+  if (!snapshot || typeof snapshot !== 'object' || Object.keys(snapshot).length === 0) {
+    snapshot = LEGACY_SAFE_PRICING_SNAPSHOT;
+  }
+
+  const durationMinutes = Math.max(
+    1,
+    Math.floor(Number(snapshot.durationMinutes || LEGACY_SAFE_PRICING_SNAPSHOT.durationMinutes)),
+  );
+  const adjustedRatePerMinute = roundCurrency(
+    snapshot.adjustedRatePerMinute
+    || snapshot.ratePerMinute
+    || LEGACY_SAFE_PRICING_SNAPSHOT.adjustedRatePerMinute,
+  );
+  const adjustedBaseAmount = roundCurrency(
+    snapshot.adjustedBaseAmount
+    || snapshot.baseAmount
+    || LEGACY_SAFE_PRICING_SNAPSHOT.adjustedBaseAmount,
+  );
+  const totalAmount = roundCurrency(
+    snapshot.totalAmount ?? (adjustedBaseAmount + (adjustedRatePerMinute * durationMinutes)),
+  );
 
   return {
     quoteId: snapshot.quoteId || null,
-    pricingBand: snapshot.pricingBand || 'normal',
+    pricingBand: snapshot.pricingBand || LEGACY_SAFE_PRICING_SNAPSHOT.pricingBand,
     baseAmount: roundCurrency(snapshot.baseAmount || adjustedBaseAmount),
     ratePerMinute: roundCurrency(snapshot.ratePerMinute || adjustedRatePerMinute),
     adjustedBaseAmount,
@@ -248,12 +277,12 @@ function sanitizePricingSnapshot(snapshot = {}) {
     durationAdjustment: snapshot.durationAdjustment || { multiplier: 1, label: 'legacy' },
     combinedMultiplier: Number(snapshot.combinedMultiplier || 1),
     totalAmount,
-    configVersion: snapshot.configVersion || PRICING_CONFIG_VERSION,
-    explanationLabel: snapshot.explanationLabel || 'Legacy pricing snapshot',
+    configVersion: snapshot.configVersion || LEGACY_SAFE_PRICING_SNAPSHOT.configVersion,
+    explanationLabel: snapshot.explanationLabel || LEGACY_SAFE_PRICING_SNAPSHOT.explanationLabel,
     quotedAt: snapshot.quotedAt || new Date().toISOString(),
     lockedAt: snapshot.lockedAt || new Date().toISOString(),
     lockExpiresAt: snapshot.lockExpiresAt || null,
-    currency: snapshot.currency || 'ZAR',
+    currency: snapshot.currency || LEGACY_SAFE_PRICING_SNAPSHOT.currency,
   };
 }
 
@@ -314,6 +343,7 @@ async function loadPricingConfig(db, fallback = DEFAULT_PRICING_CONFIG) {
 
 module.exports = {
   DEFAULT_PRICING_CONFIG,
+  LEGACY_SAFE_PRICING_SNAPSHOT,
   PRICING_CONFIG_VERSION,
   computePricingQuote,
   loadPricingConfig,

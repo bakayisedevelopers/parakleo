@@ -8,6 +8,7 @@ const { Resend } = require('resend');
 const { randomUUID } = require('crypto');
 const {
   DEFAULT_PRICING_CONFIG,
+  LEGACY_SAFE_PRICING_SNAPSHOT,
   computePricingQuote,
   computeFinalAmountFromSnapshot,
   loadPricingConfig,
@@ -394,49 +395,191 @@ function parseTurnTtlSeconds(rawValue) {
   return Math.max(60, Math.min(172800, Math.floor(parsed)));
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderEmailTemplate({
+  eyebrow = 'Claxi',
+  title,
+  intro,
+  details = [],
+  tone = 'emerald',
+  closing = 'Thanks for learning with Claxi.',
+}) {
+  const accent = tone === 'rose'
+    ? { solid: '#f43f5e', soft: '#ffe4e6', glow: 'rgba(244, 63, 94, 0.22)' }
+    : tone === 'sky'
+      ? { solid: '#38bdf8', soft: '#e0f2fe', glow: 'rgba(56, 189, 248, 0.22)' }
+      : { solid: '#10b981', soft: '#d1fae5', glow: 'rgba(16, 185, 129, 0.22)' };
+
+  const detailMarkup = details.length
+    ? `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top: 24px; border-collapse: separate; border-spacing: 0 10px;">
+        ${details.map((item) => `
+          <tr>
+            <td style="width: 38%; padding: 12px 14px; border-radius: 14px 0 0 14px; background: rgba(255,255,255,0.04); color: #a1a1aa; font-size: 13px; letter-spacing: 0.02em;">
+              ${escapeHtml(item.label)}
+            </td>
+            <td style="padding: 12px 14px; border-radius: 0 14px 14px 0; background: rgba(255,255,255,0.07); color: #f4f4f5; font-size: 13px; font-weight: 600;">
+              ${escapeHtml(item.value)}
+            </td>
+          </tr>
+        `).join('')}
+      </table>
+    `
+    : '';
+
+  return `
+    <!doctype html>
+    <html>
+      <body style="margin: 0; padding: 0; background: #09090b; font-family: Inter, Arial, sans-serif; color: #f4f4f5;">
+        <div style="background:
+          radial-gradient(circle at 12% 20%, ${accent.glow}, transparent 34%),
+          radial-gradient(circle at 82% 6%, rgba(99, 102, 241, 0.18), transparent 40%),
+          linear-gradient(180deg, #09090b 0%, #0f172a 100%);
+          padding: 32px 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 640px; margin: 0 auto; border-collapse: separate;">
+            <tr>
+              <td style="padding-bottom: 18px; text-align: center;">
+                <div style="display: inline-block; padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #e4e4e7; font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;">
+                  ${escapeHtml(eyebrow)}
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="border: 1px solid rgba(255,255,255,0.08); background: rgba(24,24,27,0.88); box-shadow: 0 20px 40px rgba(2,6,23,0.45); border-radius: 28px; padding: 32px;">
+                <div style="height: 6px; width: 88px; border-radius: 999px; background: ${accent.solid}; margin-bottom: 22px;"></div>
+                <h1 style="margin: 0 0 12px; color: #fafafa; font-size: 28px; line-height: 1.2; font-weight: 800;">
+                  ${escapeHtml(title)}
+                </h1>
+                <p style="margin: 0; color: #d4d4d8; font-size: 15px; line-height: 1.7;">
+                  ${escapeHtml(intro)}
+                </p>
+                ${detailMarkup}
+                <div style="margin-top: 28px; padding: 16px 18px; border-radius: 18px; background: ${accent.soft}; color: #111827; font-size: 14px; line-height: 1.6;">
+                  ${escapeHtml(closing)}
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-top: 14px; text-align: center; color: #a1a1aa; font-size: 12px; line-height: 1.6;">
+                Claxi session notifications
+              </td>
+            </tr>
+          </table>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 function buildEmailPayload(eventType, payload) {
   switch (eventType) {
     case 'welcome':
       return {
         to: payload.email,
         subject: `Welcome to Claxi, ${payload.fullName}!`,
-        html: `<p>Welcome to Claxi. Your ${payload.role} account is ready.</p>`,
+        html: renderEmailTemplate({
+          eyebrow: 'Welcome',
+          title: `Welcome to Claxi, ${payload.fullName || 'there'}`,
+          intro: `Your ${payload.role || 'Claxi'} account is ready. You can now manage requests, sessions, and payments from one place.`,
+          details: [
+            { label: 'Account type', value: payload.role || 'User' },
+          ],
+        }),
       };
     case 'request_created':
       return {
         to: payload.studentEmail,
         subject: 'Your class request is live',
-        html: `<p>Your ${payload.subject} request has been posted and is visible to tutors.</p>`,
+        html: renderEmailTemplate({
+          eyebrow: 'Request live',
+          title: 'Your class request is now live',
+          intro: `Your ${payload.subject || 'class'} request has been posted and is now visible to tutors.`,
+          details: [
+            { label: 'Subject', value: payload.subject || 'Class request' },
+          ],
+        }),
       };
     case 'request_accepted':
       return {
         to: payload.studentEmail,
         subject: 'A tutor accepted your request',
-        html: `<p>${payload.tutorName} accepted your ${payload.subject} request.</p>`,
+        html: renderEmailTemplate({
+          eyebrow: 'Tutor found',
+          title: 'A tutor accepted your request',
+          intro: `${payload.tutorName || 'A tutor'} accepted your ${payload.subject || 'class'} request.`,
+          details: [
+            { label: 'Tutor', value: payload.tutorName || 'Tutor' },
+            { label: 'Subject', value: payload.subject || 'Class request' },
+          ],
+        }),
       };
     case 'session_scheduled':
       return {
         to: [payload.studentEmail, payload.tutorEmail],
         subject: `Session scheduled: ${payload.subject}`,
-        html: `<p>Your session is scheduled for ${payload.scheduledDate} at ${payload.scheduledTime}. Link: ${payload.meetingLink || 'to be added'}</p>`,
+        html: renderEmailTemplate({
+          eyebrow: 'Session scheduled',
+          title: `Session scheduled: ${payload.subject || 'Class'}`,
+          intro: 'Your session has been scheduled and is ready for both participants.',
+          details: [
+            { label: 'Date', value: payload.scheduledDate || 'To be confirmed' },
+            { label: 'Time', value: payload.scheduledTime || 'To be confirmed' },
+            { label: 'Link', value: payload.meetingLink || 'To be added' },
+          ],
+          tone: 'sky',
+        }),
       };
     case 'session_updated':
       return {
         to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
         subject: `Session update: ${payload.subject}`,
-        html: `<p>Session status changed to ${payload.status || 'updated'}.</p>`,
+        html: renderEmailTemplate({
+          eyebrow: 'Session update',
+          title: `Session update: ${payload.subject || 'Class'}`,
+          intro: `This session has been updated and is now marked as ${payload.status || 'updated'}.`,
+          details: [
+            { label: 'Status', value: payload.status || 'Updated' },
+          ],
+          tone: 'sky',
+        }),
       };
     case 'session_completed':
       return {
         to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
         subject: `Session completed: ${payload.subject}`,
-        html: '<p>Your session has been marked as completed. Thanks for learning with Claxi.</p>',
+        html: renderEmailTemplate({
+          eyebrow: 'Session completed',
+          title: `Session completed: ${payload.subject || 'Class'}`,
+          intro: 'This session has been marked as completed and the billing flow has been finalized.',
+          details: [
+            { label: 'Topic', value: payload.topic || payload.subject || 'Session' },
+            { label: 'Amount', value: `R${Number(payload.amount || 0).toFixed(2)}` },
+            { label: 'Payment status', value: payload.paymentStatus || 'Processed' },
+          ],
+        }),
       };
     case 'cancellation':
       return {
         to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
         subject: `Session canceled: ${payload.subject}`,
-        html: '<p>This session has been canceled.</p>',
+        html: renderEmailTemplate({
+          eyebrow: 'Session canceled',
+          title: `Session canceled: ${payload.subject || 'Class'}`,
+          intro: 'This session has been canceled. Check the app for the latest session status and billing outcome.',
+          details: [
+            { label: 'Subject', value: payload.subject || 'Class' },
+          ],
+          tone: 'rose',
+          closing: 'If this was unexpected, review the session details in Claxi.',
+        }),
       };
     default:
       return null;
@@ -1280,34 +1423,47 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
   const startedAt = Number(session.billingStartedAt || session.studentJoinedAt || session.callStartedAt || endedAt);
   const billedSeconds = Math.max(0, Math.floor((endedAt - startedAt) / 1000));
   const billedMinutes = Number((billedSeconds / 60).toFixed(2));
+  const requestRef = session.requestId ? db.collection('classRequests').doc(session.requestId) : null;
+  const requestSnap = requestRef ? await requestRef.get().catch(() => null) : null;
+  const requestData = requestSnap?.exists ? (requestSnap.data() || {}) : {};
 
-  let trustedSnapshot = sanitizePricingSnapshot(session.pricingSnapshot || {});
-  if (session.pricingSnapshot?.quoteId) {
-    const quoteSnap = await db.collection('pricingQuotes').doc(session.pricingSnapshot.quoteId).get();
+  const selectedDurationMinutes = Number(
+    session.durationMinutes
+    || requestData.durationMinutes
+    || session.pricingSnapshot?.requestedDurationMinutes
+    || requestData.pricingSnapshot?.requestedDurationMinutes
+    || session.pricingSnapshot?.durationMinutes
+    || requestData.pricingSnapshot?.durationMinutes
+    || LEGACY_SAFE_PRICING_SNAPSHOT.durationMinutes,
+  );
+  const pricingQuoteId = session.pricingQuoteId
+    || session.pricingSnapshot?.quoteId
+    || requestData.pricingQuoteId
+    || requestData.pricingSnapshot?.quoteId
+    || null;
+
+  let trustedSnapshot = sanitizePricingSnapshot(session.pricingSnapshot || requestData.pricingSnapshot || null);
+  if (pricingQuoteId) {
+    const quoteSnap = await db.collection('pricingQuotes').doc(pricingQuoteId).get();
     if (quoteSnap.exists) {
       trustedSnapshot = sanitizePricingSnapshot(quoteSnap.data());
     }
   }
 
-  const isLegacySession = !trustedSnapshot;
-  const fallbackRate = 1.8;
-  const snapshot = trustedSnapshot || sanitizePricingSnapshot({
-    pricingBand: 'normal',
-    baseAmount: 12,
-    ratePerMinute: fallbackRate,
-    adjustedBaseAmount: 12,
-    adjustedRatePerMinute: fallbackRate,
-    durationMinutes: Math.max(1, Math.round(billedMinutes)),
-    totalAmount: 12 + (fallbackRate * billedMinutes),
-    configVersion: 'pricing-v2.0.0-legacy-fallback',
-    explanationLabel: 'Legacy fallback pricing',
+  const snapshot = sanitizePricingSnapshot({
+    ...(trustedSnapshot || LEGACY_SAFE_PRICING_SNAPSHOT),
+    durationMinutes: Math.max(
+      1,
+      Math.floor(Number(selectedDurationMinutes || LEGACY_SAFE_PRICING_SNAPSHOT.durationMinutes)),
+    ),
   });
+  const isLegacySession = !pricingQuoteId && !session.pricingSnapshot && !requestData.pricingSnapshot;
 
   const settlement = computeFinalAmountFromSnapshot({
     snapshot,
     billedMinutes,
     closureType,
-    selectedDurationMinutes: Number(session.durationMinutes || snapshot.durationMinutes || 0),
+    selectedDurationMinutes,
   });
   const originalPrice = Number(settlement.totalAmount || 0);
 
@@ -1323,7 +1479,8 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
   const tutorAmount = Number((originalPrice * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
   const platformAmount = Number((originalPrice * BILLING_RULES.PLATFORM_FEE_RATE).toFixed(2));
   const paymentMethods = studentData.paymentMethods || [];
-  const selectedCard = paymentMethods.find((card) => card.id === session.selectedCardId)
+  const selectedCardId = session.selectedCardId || requestData.selectedCardId || null;
+  const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
     || paymentMethods.find((card) => card.isDefault)
     || paymentMethods[0]
     || null;
@@ -1355,7 +1512,8 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
     finalPrice: freeMinuteDiscount.finalPrice,
     discountSource: freeMinuteDiscount.discountSource,
     freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
-    requestedDurationMinutes: Number(session.durationMinutes || snapshot.durationMinutes || 0),
+    requestedDurationMinutes: Number(selectedDurationMinutes || snapshot.durationMinutes || 0),
+    selectedCardId,
     canceledBy: closureType === 'canceled_during' ? canceledBy : null,
     canceledReason: closureType === 'canceled_during' ? canceledReason : null,
     pricingSnapshot: {
@@ -1385,16 +1543,18 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 
-  batch.set(db.collection('classRequests').doc(session.requestId), {
-    status: closureType === 'canceled_during' ? 'canceled_during' : 'completed',
-    statusDetail: closureType === 'canceled_during'
-      ? 'Session canceled. Billing completed.'
-      : 'Session ended. Billing completed.',
-    endedAt,
-    canceledBy: closureType === 'canceled_during' ? canceledBy : null,
-    canceledReason: closureType === 'canceled_during' ? canceledReason : null,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
+  if (requestRef) {
+    batch.set(requestRef, {
+      status: closureType === 'canceled_during' ? 'canceled_during' : 'completed',
+      statusDetail: closureType === 'canceled_during'
+        ? 'Session canceled. Billing completed.'
+        : 'Session ended. Billing completed.',
+      endedAt,
+      canceledBy: closureType === 'canceled_during' ? canceledBy : null,
+      canceledReason: closureType === 'canceled_during' ? canceledReason : null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
 
   if (freeMinuteDiscount.freeMinutesApplied > 0) {
     batch.set(studentRef, {

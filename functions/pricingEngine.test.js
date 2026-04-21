@@ -4,6 +4,7 @@ const {
   computeFinalAmountFromSnapshot,
   computePricingQuote,
   DEFAULT_PRICING_CONFIG,
+  LEGACY_SAFE_PRICING_SNAPSHOT,
   sanitizePricingSnapshot,
 } = require('./pricingEngine');
 
@@ -55,6 +56,15 @@ test('sanitizes legacy snapshot safely', () => {
   assert.equal(sanitized.durationMinutes, 20);
   assert.equal(sanitized.totalAmount, 48);
   assert.equal(sanitized.pricingBand, 'normal');
+});
+
+test('falls back to safe legacy pricing snapshot when pricing data is missing', () => {
+  const sanitized = sanitizePricingSnapshot({});
+
+  assert.equal(sanitized.durationMinutes, LEGACY_SAFE_PRICING_SNAPSHOT.durationMinutes);
+  assert.equal(sanitized.adjustedBaseAmount, LEGACY_SAFE_PRICING_SNAPSHOT.adjustedBaseAmount);
+  assert.equal(sanitized.adjustedRatePerMinute, LEGACY_SAFE_PRICING_SNAPSHOT.adjustedRatePerMinute);
+  assert.equal(sanitized.totalAmount, LEGACY_SAFE_PRICING_SNAPSHOT.totalAmount);
 });
 
 test('early cancellation bills base only', () => {
