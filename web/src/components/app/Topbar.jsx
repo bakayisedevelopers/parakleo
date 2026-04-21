@@ -1,37 +1,24 @@
 import { Bell, Menu, UserCircle2 } from 'lucide-react';
 
-function getRoleLabel(role) {
-  if (String(role).toLowerCase() === 'tutor') return 'Tutor Dashboard';
-  if (String(role).toLowerCase() === 'admin') return 'Admin Dashboard';
-  return 'Student Dashboard';
-}
-
 export default function Topbar({
   onOpenNav,
   name,
-  role,
   showMenuButton = true,
 }) {
   return (
     <header className="mb-5 rounded-[1.5rem] border border-white/10 bg-zinc-900/70 px-4 py-3 shadow-[0_16px_35px_rgba(2,6,23,0.45)] backdrop-blur md:mb-6 md:rounded-[2rem] md:px-6 md:py-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center">
           {showMenuButton ? (
             <button
               type="button"
               onClick={onOpenNav}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-zinc-800/70 px-3 text-zinc-100 md:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-zinc-800/70 text-zinc-100 md:hidden"
               aria-label="Open more navigation"
             >
               <Menu className="h-5 w-5" />
-              <span className="text-sm font-semibold">More</span>
             </button>
           ) : null}
-
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">{getRoleLabel(role)}</p>
-            <p className="text-sm font-semibold text-zinc-100 md:text-base">Welcome back, {name?.split(' ')[0] || 'there'}.</p>
-          </div>
         </div>
 
         <div className="flex items-center gap-2 md:gap-3">

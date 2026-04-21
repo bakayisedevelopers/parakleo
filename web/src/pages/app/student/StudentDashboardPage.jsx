@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
+  ArrowLeft,
   Camera,
   ChevronRight,
   CreditCard,
   FileText,
   ImageIcon,
-  Loader,
-  Paperclip,
   Send,
-  Sparkles,
   X,
 } from 'lucide-react';
 import OnboardingStatusBanner from '../../../components/app/OnboardingStatusBanner';
@@ -123,9 +121,7 @@ function getDurationOptions(estimatedMinutes) {
 function getReviewTopic({ classifiedTopic, topic, attachments }) {
   if (String(classifiedTopic || '').trim()) return String(classifiedTopic).trim();
   if (String(topic || '').trim()) return String(topic).trim();
-  if (attachments.length === 1) return `Help with ${attachments[0].name}`;
-  if (attachments.length > 1) return `Help with ${attachments.length} attachments`;
-  return 'Class request';
+  return '';
 }
 
 function getRequestFlowState({ onboardingComplete, latestOpenSession, activeOrOngoingRequest }) {
@@ -174,6 +170,7 @@ export default function StudentDashboardPage() {
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [hasManualDurationOverride, setHasManualDurationOverride] = useState(false);
+  const [isTextEntryOpen, setIsTextEntryOpen] = useState(false);
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -225,6 +222,7 @@ export default function StudentDashboardPage() {
     && Boolean(estimatedMinutes)
     && Boolean(quote);
   const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && !isSubmitting;
+  const isPricingQuoteError = /pricing quote/i.test(error);
 
   const resizeTextarea = () => {
     if (!textareaRef.current) return;
@@ -247,17 +245,13 @@ export default function StudentDashboardPage() {
       setAdvanceIntent(intent || 'text');
       return;
     }
-    if (!selectedSubject) {
-      setAdvanceIntent(intent || 'text');
-      setShowSubjectFallback(true);
-      return;
-    }
     setAdvanceIntent('');
     setStage('review');
   };
 
   const onTopicChange = (event) => {
     const nextTopic = event.target.value;
+    setIsTextEntryOpen(true);
     setTopic(nextTopic);
     setStage('input');
     setAdvanceIntent('');
@@ -269,6 +263,7 @@ export default function StudentDashboardPage() {
   };
 
   const applySuggestion = (value) => {
+    setIsTextEntryOpen(true);
     setTopic(value);
     setStage('input');
     setAdvanceIntent('');
@@ -852,149 +847,28 @@ export default function StudentDashboardPage() {
                 <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-300">
                   Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
                 </p>
-              </div>
-              <div className="hidden rounded-3xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300 sm:block">
-                2-step intake
-              </div>
-            </div>
-
-            <div className="grid gap-3">
-              <div className={`overflow-hidden rounded-[1.75rem] border transition-all duration-300 ${stage === 'review' ? 'border-white/5 bg-white/[0.03] p-3 opacity-80' : 'border-white/10 bg-white/5 p-4'}`}>
-                {stage === 'review' ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Stage 1 complete</p>
-                      <p className="mt-1 text-sm text-zinc-200">
-                        {attachments.length ? `${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : 'Text request'}
-                        {' '}ready for review.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setStage('input')}
-                      className="rounded-2xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-950"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="rounded-[1.5rem] border border-emerald-400/20 bg-emerald-500/10 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <label className="flex min-h-[124px] flex-1 cursor-pointer flex-col justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4 transition hover:border-emerald-300/50 hover:bg-zinc-950">
-                          <div>
-                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-zinc-950">
-                              <Camera className="h-5 w-5" />
-                            </div>
-                            <p className="mt-4 text-lg font-bold text-white">Take Picture</p>
-                            <p className="mt-1 text-sm text-zinc-400">Best for homework questions and handwritten pages.</p>
-                          </div>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            multiple
-                            onChange={onFileChange}
-                            className="hidden"
-                          />
-                        </label>
-
-                        <label className="flex min-h-[124px] flex-1 cursor-pointer flex-col justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4 transition hover:border-cyan-300/50 hover:bg-zinc-950">
-                          <div>
-                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-400 text-zinc-950">
-                              <FileText className="h-5 w-5" />
-                            </div>
-                            <p className="mt-4 text-lg font-bold text-white">Upload PDF</p>
-                            <p className="mt-1 text-sm text-zinc-400">Works for worksheets, past papers, and assignment briefs.</p>
-                          </div>
-                          <input
-                            type="file"
-                            accept="application/pdf"
-                            multiple
-                            onChange={onFileChange}
-                            className="hidden"
-                          />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap gap-2">
-                        {QUICK_REQUEST_SUGGESTIONS.map((option) => (
-                          <button
-                            key={option.label}
-                            type="button"
-                            onClick={() => applySuggestion(option.value)}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-300/40 hover:bg-emerald-500/10"
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                        <p className="text-sm font-semibold text-white">Or describe what you need help with</p>
-                        <textarea
-                          ref={textareaRef}
-                          value={topic}
-                          onChange={onTopicChange}
-                          placeholder="Optional text path: explain the homework, test prep, or lesson you want."
-                          rows={1}
-                          className="mt-3 max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent px-0 py-0 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none"
-                        />
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Detected subject</p>
-                            <p className="mt-1 text-sm text-zinc-200">
-                              {selectedSubject || 'Waiting for subject confirmation'}
-                            </p>
-                            {classificationStatus ? (
-                              <p className="mt-1 text-xs text-zinc-400">{classificationStatus}</p>
-                            ) : null}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => maybeAdvanceToReview('text')}
-                            disabled={!topic.trim()}
-                            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                          >
-                            Continue
-                            <ChevronRight className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {attachments.length ? (
-                      <div className="space-y-3">
-                        {attachments.map((file, index) => renderAttachmentRow(file, index))}
-                      </div>
-                    ) : null}
-
-                    <div className="flex items-center justify-between gap-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/45 px-4 py-3 text-sm text-zinc-300">
-                      <div className="flex min-w-0 items-center gap-2">
-                        {classificationState === 'running' || hasRunningExtraction ? (
-                          <Loader className="h-4 w-4 animate-spin text-emerald-300" />
-                        ) : (
-                          <Sparkles className="h-4 w-4 text-emerald-300" />
-                        )}
-                        <span className="truncate">
-                          {hasPendingScannedPdfSelection
-                            ? 'Choose PDF pages to finish intake.'
-                            : classificationState === 'running' || hasRunningExtraction
-                              ? 'Preparing your request details...'
-                              : advanceIntent === 'attachment' && readyForReview
-                                ? 'Ready to review.'
-                                : 'Picture-first path moves to review automatically.'}
-                        </span>
-                      </div>
-
-                      <label className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
-                        <Paperclip className="h-4 w-4" />
-                        Add more
+                {stage !== 'review' ? (
+                  <>
+                    <div className="mt-4 flex items-center gap-3">
+                      <label className="inline-flex flex-1 cursor-pointer items-center justify-center rounded-2xl bg-brand px-6 py-3 text-sm font-bold text-white shadow-lg shadow-brand/30 transition hover:bg-brand-dark">
+                        <Camera className="mr-2 h-4 w-4" />
+                        Take Picture
                         <input
                           type="file"
-                          accept="application/pdf,image/*"
+                          accept="image/*"
+                          capture="environment"
+                          multiple
+                          onChange={onFileChange}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <label className="inline-flex flex-1 cursor-pointer items-center justify-center rounded-2xl border border-brand/30 bg-brand/10 px-6 py-3 text-sm font-bold text-brand transition hover:bg-brand/20">
+                        Upload PDF
+                        <ChevronRight className="ml-2 h-4 w-4" />
+                        <input
+                          type="file"
+                          accept="application/pdf"
                           multiple
                           onChange={onFileChange}
                           className="hidden"
@@ -1002,121 +876,155 @@ export default function StudentDashboardPage() {
                       </label>
                     </div>
 
-                    {!paymentMethods.length ? (
-                      <p className="text-xs text-amber-200">
-                        Add a saved card on the Payment page before confirming a request.
-                      </p>
-                    ) : null}
-                    {hasPendingScannedPdfSelection ? (
-                      <p className="text-xs text-amber-200">
-                        At least one scanned PDF still needs page selection before review.
-                      </p>
-                    ) : null}
-                    {error ? <p className="text-xs text-rose-300">{error}</p> : null}
-                  </div>
-                )}
-              </div>
-
-              {stage === 'review' ? (
-                <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Stage 2</p>
-                      <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Review and confirm</h2>
-                      <p className="mt-2 text-sm text-zinc-300">Pricing and payment stay on the existing flow. This step only repackages them for review.</p>
-                    </div>
-                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-right">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/70">Free minutes</p>
-                      <p className="mt-1 text-lg font-bold text-white">{freeMinutesRemaining.toFixed(2)} min</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Subject</p>
-                      <p className="mt-2 text-lg font-bold text-white">{selectedSubject || 'Select subject'}</p>
-                    </div>
-                    <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Topic</p>
-                      <p className="mt-2 text-lg font-bold text-white">{reviewTopic}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Estimated session duration</p>
-                        <p className="mt-2 text-2xl font-black text-white">{normalizeEstimatedDuration(estimatedMinutes)} min</p>
-                        <p className="mt-1 text-sm text-zinc-400">AI suggestion based on visible workload. You can adjust it below.</p>
-                      </div>
-
-                      <label className="inline-flex min-h-[52px] items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-200">
-                        <span className="font-semibold">Duration</span>
-                        <select
-                          value={durationMinutes}
-                          onChange={handleDurationChange}
-                          className="bg-transparent text-sm text-white outline-none"
-                        >
-                          {durationOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option} min
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Pricing summary</p>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      {quote ? (
-                        <>
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                            <p className="text-xs text-zinc-500">Base price</p>
-                            <p className="mt-1 text-lg font-bold text-white">{formatRand(quote.adjustedBaseAmount ?? quote.baseAmount ?? 0)}</p>
-                          </div>
-                          <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                            <p className="text-xs text-zinc-500">Per minute</p>
-                            <p className="mt-1 text-lg font-bold text-white">{formatRand(quote.adjustedRatePerMinute ?? quote.ratePerMinute ?? 0)}</p>
-                          </div>
-                        </>
+                    <div className="mt-3 space-y-3">
+                      {attachments.length ? (
+                        <div className="space-y-3">
+                          {attachments.map((file, index) => renderAttachmentRow(file, index))}
+                        </div>
                       ) : null}
-                      {pricingPreview ? (
-                        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-3 sm:col-span-2">
-                          <p className="text-xs text-emerald-100/80">Total due now</p>
-                          <p className="mt-1 text-2xl font-black text-white">{formatRand(pricingPreview.finalPrice)}</p>
-                          <p className="mt-1 text-xs text-emerald-100/80">
-                            Original {formatRand(pricingPreview.originalPrice)} • Free minutes applied {pricingPreview.freeMinutesApplied.toFixed(2)} min • Discount {formatRand(pricingPreview.discountApplied)}
-                          </p>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsTextEntryOpen((current) => !current)}
+                        className="flex w-full items-center justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/45 px-4 py-3 text-left transition hover:bg-zinc-950/60"
+                        aria-expanded={isTextEntryOpen}
+                      >
+                        <span className="text-sm font-semibold text-white">Or describe what you need help with</span>
+                        <ChevronRight className={`h-4 w-4 text-zinc-300 transition ${isTextEntryOpen ? 'rotate-90' : ''}`} />
+                      </button>
+
+                      {isTextEntryOpen ? (
+                        <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                          <textarea
+                            ref={textareaRef}
+                            value={topic}
+                            onChange={onTopicChange}
+                            placeholder="Optional text path: explain the homework, test prep, or lesson you want."
+                            rows={1}
+                            className="max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent px-0 py-0 text-sm leading-7 text-zinc-100 placeholder:text-zinc-500 outline-none"
+                          />
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Detected subject</p>
+                              <p className="mt-1 text-sm text-zinc-200">
+                                {selectedSubject || 'Waiting for subject confirmation'}
+                              </p>
+                              {classificationStatus ? (
+                                <p className="mt-1 text-xs text-zinc-400">{classificationStatus}</p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => maybeAdvanceToReview('text')}
+                              disabled={!topic.trim()}
+                              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                            >
+                              Continue
+                              <ChevronRight className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {QUICK_REQUEST_SUGGESTIONS.map((option) => (
+                              <button
+                                key={option.label}
+                                type="button"
+                                onClick={() => applySuggestion(option.value)}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-300/40 hover:bg-emerald-500/10"
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       ) : null}
                     </div>
+                  </>
+                ) : null}
+              </div>
+              <div className="hidden rounded-3xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300 sm:block">
+                2-step intake
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {stage === 'review' ? (
+                <div className="overflow-hidden rounded-[1.75rem] border border-white/5 bg-white/[0.03] p-3 opacity-80">
+                  <div className="flex justify-start">
+                    <button
+                      type="button"
+                      onClick={() => setStage('input')}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-950"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {stage === 'review' ? (
+                <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight text-white">Review and confirm</h2>
                   </div>
 
-                  <div className="mt-3 rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Payment method</p>
-                        <p className="mt-1 text-sm text-zinc-400">Uses the existing card authorization flow.</p>
-                      </div>
-
-                      <label className="inline-flex min-h-[52px] items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-zinc-200">
-                        <CreditCard className="h-4 w-4" />
-                        <select
-                          value={cardId}
-                          onChange={(event) => setCardId(event.target.value)}
-                          className="max-w-[180px] bg-transparent text-sm text-white outline-none"
-                        >
-                          <option value="">Select card</option>
-                          {paymentMethods.map((card) => (
-                            <option key={card.id} value={card.id}>
-                              {formatCardLabel(card)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                  <div className="mt-4 flex flex-wrap gap-3 text-sm text-zinc-200">
+                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Subject</span>
+                      <span className="font-semibold text-white">{selectedSubject || 'Select subject'}</span>
                     </div>
+                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Topic</span>
+                      <span className="font-semibold text-white">{reviewTopic || 'Not set'}</span>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Free minutes</span>
+                      <span className="font-semibold text-white">{freeMinutesRemaining.toFixed(2)} min</span>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Base price</span>
+                      <span className="font-semibold text-white">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Per minute</span>
+                      <span className="font-semibold text-white">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
+                    </div>
+                    <label className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <span className="text-brand">Time</span>
+                      <select
+                        value={durationMinutes}
+                        onChange={handleDurationChange}
+                        className="bg-transparent text-sm font-semibold text-white outline-none"
+                      >
+                        {durationOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option} min
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {pricingPreview ? (
+                      <div className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                        <span className="text-brand">Due now</span>
+                        <span className="font-semibold text-white">{formatRand(pricingPreview.finalPrice)}</span>
+                      </div>
+                    ) : null}
+                    <label className="inline-flex items-center gap-2 rounded-2xl border border-brand/20 bg-brand/5 px-3 py-2">
+                      <CreditCard className="h-4 w-4 text-brand" />
+                      <span className="text-brand">Payment</span>
+                      <select
+                        value={cardId}
+                        onChange={(event) => setCardId(event.target.value)}
+                        className="max-w-[180px] bg-transparent text-sm font-semibold text-white outline-none"
+                      >
+                        <option value="">Select card</option>
+                        {paymentMethods.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {formatCardLabel(card)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
 
                   {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
@@ -1136,7 +1044,7 @@ export default function StudentDashboardPage() {
                       onClick={() => setStage('input')}
                       className="inline-flex h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
                     >
-                      Back to input
+                      Back
                     </button>
                   </div>
                 </div>

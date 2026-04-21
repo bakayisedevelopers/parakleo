@@ -4,17 +4,20 @@ import { getFirebaseClients } from '../firebase/config';
 const CLASSIFICATION_MODEL = import.meta.env.VITE_FIREBASE_AI_SUBJECT_MODEL || 'gemini-2.5-flash';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 
-const UNKNOWN_CLASSIFICATION = {
-  subject: '',
-  topic: '',
-  estimatedMinutes: 30,
-  subjectConfidence: 'unknown',
-  needsManualSubjectSelection: true,
-};
+function buildFallbackClassification(supportedSubjects = []) {
+  const defaultSubject = normalizeSubjectToSupported('Mathematics', supportedSubjects) || '';
+  return {
+    subject: defaultSubject,
+    topic: '',
+    estimatedMinutes: 10,
+    subjectConfidence: defaultSubject ? 'unknown' : 'unknown',
+    needsManualSubjectSelection: !defaultSubject,
+  };
+}
 
 function clampEstimatedMinutes(value) {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return UNKNOWN_CLASSIFICATION.estimatedMinutes;
+  if (!Number.isFinite(numeric) || numeric <= 0) return 10;
   return Math.min(90, Math.max(10, Math.round(numeric)));
 }
 
@@ -100,7 +103,7 @@ function buildClassificationPrompt({ supportedSubjects = [], inputText = '' }) {
 export async function classifySubjectFromText({ inputText = '', supportedSubjects = [] } = {}) {
   const normalizedInput = normalizeText(inputText);
   if (!normalizedInput) {
-    return UNKNOWN_CLASSIFICATION;
+    return buildFallbackClassification(supportedSubjects);
   }
 
   try {
@@ -119,11 +122,22 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
     });
 
     const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
+    console.info('[subjectClassification] prompt', {
+      model: CLASSIFICATION_MODEL,
+      prompt,
+    });
+
     const response = await model.generateContent(prompt);
-    const text = normalizeText(response?.response?.text?.() || '');
+    const rawText = response?.response?.text?.() || '';
+    const text = normalizeText(rawText);
+    console.info('[subjectClassification] response', {
+      model: CLASSIFICATION_MODEL,
+      rawText,
+    });
     const parsed = JSON.parse(text);
 
-    const supportedSubject = normalizeSubjectToSupported(parsed?.subject, supportedSubjects);
+    const fallbackClassification = buildFallbackClassification(supportedSubjects);
+    const supportedSubject = normalizeSubjectToSupported(parsed?.subject, supportedSubjects) || fallbackClassification.subject;
     const confidence = ['high', 'low', 'unknown'].includes(parsed?.subjectConfidence)
       ? parsed.subjectConfidence
       : 'unknown';
@@ -132,7 +146,7 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
 
     const needsManualSubjectSelection = Boolean(parsed?.needsManualSubjectSelection)
       || !supportedSubject
-      || confidence === 'unknown';
+      || (!fallbackClassification.subject && confidence === 'unknown');
 
     return {
       subject: supportedSubject,
@@ -143,6 +157,6 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
     };
   } catch (error) {
     console.debug('[subjectClassification] classification failed, using fallback', { error: error?.message });
-    return UNKNOWN_CLASSIFICATION;
+    return buildFallbackClassification(supportedSubjects);
   }
 }

@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after Home Page UI redesign - 21.04.2026 - 1."
+git commit -m "Commit after manual refining of the desing - 21.04.2026 - 1."
 git push origin main
 git push origin main --force
 
