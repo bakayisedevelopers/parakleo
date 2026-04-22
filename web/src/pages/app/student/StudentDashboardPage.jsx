@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Camera,
+  CheckCircle2,
   ChevronRight,
   CreditCard,
   FileText,
   ImageIcon,
+  RefreshCw,
   Send,
   X,
 } from 'lucide-react';
@@ -58,6 +60,36 @@ function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
 
 function getAttachmentKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function renderExtractionStatusIcon(status = '') {
+  const normalizedStatus = String(status || '').toLowerCase();
+
+  if (normalizedStatus === 'extracting' || normalizedStatus === 'ocr processing') {
+    return (
+      <span
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400"
+        aria-label="Text extraction in progress"
+        title="Text extraction in progress"
+      >
+        <RefreshCw className="h-4 w-4 animate-spin" />
+      </span>
+    );
+  }
+
+  if (normalizedStatus === 'text extracted') {
+    return (
+      <span
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400"
+        aria-label="Text extraction completed"
+        title="Text extraction completed"
+      >
+        <CheckCircle2 className="h-4 w-4" />
+      </span>
+    );
+  }
+
+  return null;
 }
 
 function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {} }) {
@@ -579,7 +611,7 @@ export default function StudentDashboardPage() {
     const isImage = file.type.startsWith('image/');
     const fileKey = getAttachmentKey(file);
     const extractionStatus = attachmentExtractionStatusByKey[fileKey];
-    const extractionResult = attachmentExtractionByKey[fileKey];
+    const extractionStatusIcon = renderExtractionStatusIcon(extractionStatus);
     return (
       <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2 rounded-3xl border border-white/10 bg-white/5 p-3">
         <div className="flex items-center gap-2">
@@ -588,8 +620,8 @@ export default function StudentDashboardPage() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-zinc-100">{file.name}</p>
-            <p className="text-xs text-zinc-400">{extractionStatus || 'Queued'}</p>
           </div>
+          {extractionStatusIcon}
           <button
             type="button"
             onClick={() => removeAttachment(index)}
