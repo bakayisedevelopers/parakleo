@@ -70,13 +70,19 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       fileName: file.name,
       uploadedAttachment,
       extractedText: String(extraction?.extractedText || '').trim(),
+      text: String(extraction?.text || extraction?.extractedText || '').trim(),
       extractionMethod: extraction?.extractionMethod || '',
       extractionQuality: extraction?.extractionQuality || '',
       fileType: extraction?.fileType || '',
+      source: extraction?.source || extraction?.fileType || '',
       selectedPages: Array.isArray(extraction?.selectedPages) ? extraction.selectedPages : [],
       scannedPdfDetected: Boolean(extraction?.scannedPdfDetected),
       ocrStatus: extraction?.ocrStatus || '',
       success: Boolean(extraction?.success),
+      partialSuccess: Boolean(extraction?.partialSuccess),
+      pages: Array.isArray(extraction?.pages) ? extraction.pages : [],
+      extractedImages: Array.isArray(extraction?.extractedImages) ? extraction.extractedImages : [],
+      failedPageCount: Number(extraction?.failedPageCount || 0),
     };
   });
 
@@ -780,9 +786,6 @@ export default function StudentDashboardPage() {
                     </div>
                   </>
                 ) : null}
-              </div>
-              <div className="hidden rounded-3xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300 sm:block">
-                2-step intake
               </div>
             </div>
 

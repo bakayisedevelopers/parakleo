@@ -78,7 +78,7 @@ function normalizeImageAttachment(item) {
 
   const contentType = String(item?.contentType || item?.mimeType || '').toLowerCase();
   const fileName = String(item?.fileName || '').toLowerCase();
-  const src = item?.downloadUrl || item?.src || '';
+  const src = item?.downloadUrl || item?.src || item?.url || '';
   const isImage = contentType.startsWith('image/')
     || /\.(png|jpg|jpeg|webp|bmp|gif|tiff?)$/.test(fileName)
     || /^data:image\//i.test(src);
@@ -99,6 +99,9 @@ function normalizeImageAttachment(item) {
     type: 'image',
     fileName: item?.fileName || '',
     mimeType,
+    id: item?.id || '',
+    width: Number(item?.width || 0) || undefined,
+    height: Number(item?.height || 0) || undefined,
   };
 }
 
@@ -198,10 +201,22 @@ function parseSourceIntoBlocks({ text = '', images = [] }) {
 function normalizeAttachmentExtractions(attachmentExtractions = []) {
   return (attachmentExtractions || [])
     .map((entry) => {
-      const image = normalizeImageAttachment(entry?.uploadedAttachment);
+      const uploadedImage = normalizeImageAttachment(entry?.uploadedAttachment);
+      const extractedImages = (entry?.extractedImages || [])
+        .map((image) => normalizeImageAttachment(image))
+        .filter(Boolean);
+      const pageImages = (entry?.pages || [])
+        .flatMap((page) => page?.images || [])
+        .map((image) => normalizeImageAttachment(image))
+        .filter(Boolean);
+
       return {
         text: String(entry?.extractedText || ''),
-        images: image ? [image] : [],
+        images: dedupeImages([
+          ...pageImages,
+          ...extractedImages,
+          ...(uploadedImage ? [uploadedImage] : []),
+        ]),
       };
     })
     .filter((entry) => String(entry.text || '').trim() || entry.images.length);

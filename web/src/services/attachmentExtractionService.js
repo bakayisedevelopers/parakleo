@@ -4,14 +4,15 @@ const MIN_TEXT_LENGTH = 30;
 const MIN_READABLE_WORDS = 4;
 const READABLE_WORD_PATTERN = /[A-Za-z]{2,}/g;
 const GARBAGE_CHAR_PATTERN = /[^\w\s.,;:!?()\[\]{}'"\-/%]/g;
+const MIN_SHORT_TEXT_LENGTH = 12;
+const MIN_SHORT_READABLE_WORDS = 2;
+const MAX_GARBAGE_RATIO = 0.35;
+const MAX_SHORT_TEXT_GARBAGE_RATIO = 0.2;
 
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'];
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 let cachedPdfJs = null;
-const TESSERACT_CDN_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js';
-let cachedTesseract = null;
-let cachedTesseractWorkerPromise = null;
 
 function getFileExtension(fileName = '') {
   const normalizedName = String(fileName || '').toLowerCase();
@@ -24,12 +25,6 @@ async function loadPdfJs() {
   cachedPdfJs = await import(/* @vite-ignore */ PDFJS_CDN_URL);
   cachedPdfJs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN_URL;
   return cachedPdfJs;
-}
-
-async function loadTesseract() {
-  if (cachedTesseract) return cachedTesseract;
-  cachedTesseract = await import(/* @vite-ignore */ TESSERACT_CDN_URL);
-  return cachedTesseract;
 }
 
 function normalizeOcrText(rawText) {
@@ -46,50 +41,6 @@ function buildOcrResult(rawText) {
     textLength,
     extractionMethod: 'ocr',
   };
-}
-
-async function getTesseractWorker() {
-  if (cachedTesseractWorkerPromise) return cachedTesseractWorkerPromise;
-
-  cachedTesseractWorkerPromise = (async () => {
-    try {
-      const tesseract = await loadTesseract();
-      if (typeof tesseract?.createWorker !== 'function') {
-        throw new Error('Tesseract createWorker API unavailable');
-      }
-
-      const worker = await tesseract.createWorker('eng', 1, {
-        logger: (message) => {
-          if (message?.status) {
-            console.debug('[attachmentExtraction][ocr] worker', message);
-          }
-        },
-      });
-
-      console.debug('[attachmentExtraction][ocr] worker initialized', { language: 'eng' });
-      return worker;
-    } catch (error) {
-      cachedTesseractWorkerPromise = null;
-      console.debug('[attachmentExtraction][ocr] worker initialization failed', {
-        error: error?.message,
-      });
-      throw error;
-    }
-  })();
-
-  return cachedTesseractWorkerPromise;
-}
-
-async function normalizeOcrInput(input) {
-  if (!input) return input;
-  if (typeof HTMLCanvasElement !== 'undefined' && input instanceof HTMLCanvasElement) {
-    const blob = await new Promise((resolve) => input.toBlob(resolve, 'image/png'));
-    if (!blob) {
-      throw new Error('Canvas conversion to Blob failed');
-    }
-    return blob;
-  }
-  return input;
 }
 
 export function detectAttachmentType(file) {
@@ -124,9 +75,15 @@ export function evaluateExtractionQuality(rawText) {
   const garbageChars = extractedText.match(GARBAGE_CHAR_PATTERN) || [];
   const garbageRatio = textLength ? garbageChars.length / textLength : 1;
 
-  const passesQuality = textLength >= MIN_TEXT_LENGTH
+  const passesLongFormQuality = textLength >= MIN_TEXT_LENGTH
     && readableWords.length >= MIN_READABLE_WORDS
-    && garbageRatio <= 0.35;
+    && garbageRatio <= MAX_GARBAGE_RATIO;
+
+  const passesShortFormQuality = textLength >= MIN_SHORT_TEXT_LENGTH
+    && readableWords.length >= MIN_SHORT_READABLE_WORDS
+    && garbageRatio <= MAX_SHORT_TEXT_GARBAGE_RATIO;
+
+  const passesQuality = passesLongFormQuality || passesShortFormQuality;
 
   return {
     extractedText,
@@ -134,32 +91,6 @@ export function evaluateExtractionQuality(rawText) {
     extractionQuality: passesQuality ? 'good' : 'poor',
     isUsable: passesQuality,
   };
-}
-
-async function runOcrWithTesseract(blobLike) {
-  const worker = await getTesseractWorker();
-  const normalizedInput = await normalizeOcrInput(blobLike);
-  const inputType = normalizedInput?.constructor?.name || typeof normalizedInput;
-
-  console.debug('[attachmentExtraction][ocr] OCR started', {
-    inputType,
-  });
-
-  try {
-    const result = await worker.recognize(normalizedInput);
-    const rawText = result?.data?.text || '';
-    const normalizedText = normalizeOcrText(rawText);
-
-    console.debug('[attachmentExtraction][ocr] OCR raw text', { rawText: normalizedText });
-    console.debug('[attachmentExtraction][ocr] OCR text length', { textLength: normalizedText.length });
-    return rawText;
-  } catch (error) {
-    console.debug('[attachmentExtraction][ocr] OCR failed', {
-      inputType,
-      error: error?.message,
-    });
-    throw error;
-  }
 }
 
 async function extractFromImage(file) {
@@ -174,35 +105,371 @@ async function extractFromImage(file) {
   }
 }
 
-async function extractPdfDigitalText(file) {
-  const pdfjs = await loadPdfJs();
-  const pdfData = await file.arrayBuffer();
-  const pdfDocument = await pdfjs.getDocument({ data: pdfData }).promise;
-  const pageTexts = [];
-
-  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
-    const page = await pdfDocument.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    const pageText = (textContent.items || [])
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ');
-    pageTexts.push(pageText);
-  }
-
-  return {
-    ...evaluateExtractionQuality(pageTexts.join('\n').trim()),
-    pageCount: pdfDocument.numPages,
-  };
+export function isUsablePageText(rawText) {
+  return evaluateExtractionQuality(rawText);
 }
 
 async function renderPdfPageToCanvas(page, scale = 1.75) {
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Unable to create PDF page render context');
+  }
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
   await page.render({ canvasContext: context, viewport }).promise;
   return canvas;
+}
+
+async function canvasToBlob(canvas, mimeType = 'image/png', quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error('Canvas conversion to Blob failed'));
+    }, mimeType, quality);
+  });
+}
+
+async function canvasToDataUrl(canvas, mimeType = 'image/png', quality = 0.92) {
+  const blob = await canvasToBlob(canvas, mimeType, quality);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to serialize image as data URL.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function buildVisionOcrFileFromCanvas(canvas, fileName = 'pdf-page.png') {
+  const blob = await canvasToBlob(canvas, 'image/png');
+  return new File([blob], fileName, { type: 'image/png' });
+}
+
+function getReadablePdfPageText(textContent) {
+  return (textContent?.items || [])
+    .map((item) => ('str' in item ? item.str : ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getObjectFromPdfStore(store, objectId) {
+  if (!store || !objectId) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timeoutId = window.setTimeout(() => {
+      finish(null);
+    }, 750);
+
+    const finish = (value) => {
+      if (resolved) return;
+      resolved = true;
+      window.clearTimeout(timeoutId);
+      resolve(value || null);
+    };
+
+    try {
+      const value = store.get(objectId, (data) => finish(data));
+      if (typeof value !== 'undefined') {
+        finish(value);
+      }
+    } catch (error) {
+      finish(null);
+    }
+  });
+}
+
+function createCanvasFromRawImageData(imageDataLike) {
+  if (!imageDataLike?.width || !imageDataLike?.height || !imageDataLike?.data) return null;
+
+  const width = Number(imageDataLike.width || 0);
+  const height = Number(imageDataLike.height || 0);
+  const source = imageDataLike.data;
+  const pixelCount = width * height;
+  const channelCount = pixelCount ? Math.floor(source.length / pixelCount) : 0;
+
+  if (!width || !height || !pixelCount || !channelCount) return null;
+
+  const rgba = new Uint8ClampedArray(pixelCount * 4);
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    const sourceOffset = index * channelCount;
+    const targetOffset = index * 4;
+
+    if (channelCount >= 4) {
+      rgba[targetOffset] = source[sourceOffset];
+      rgba[targetOffset + 1] = source[sourceOffset + 1];
+      rgba[targetOffset + 2] = source[sourceOffset + 2];
+      rgba[targetOffset + 3] = source[sourceOffset + 3];
+      continue;
+    }
+
+    if (channelCount === 3) {
+      rgba[targetOffset] = source[sourceOffset];
+      rgba[targetOffset + 1] = source[sourceOffset + 1];
+      rgba[targetOffset + 2] = source[sourceOffset + 2];
+      rgba[targetOffset + 3] = 255;
+      continue;
+    }
+
+    rgba[targetOffset] = source[sourceOffset];
+    rgba[targetOffset + 1] = source[sourceOffset];
+    rgba[targetOffset + 2] = source[sourceOffset];
+    rgba[targetOffset + 3] = 255;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  context.putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas;
+}
+
+async function normalizePdfImageAsset(imageLike, { pageNumber, index }) {
+  if (!imageLike) return null;
+
+  let canvas = null;
+  let width = 0;
+  let height = 0;
+
+  if (typeof HTMLCanvasElement !== 'undefined' && imageLike instanceof HTMLCanvasElement) {
+    canvas = imageLike;
+    width = canvas.width;
+    height = canvas.height;
+  } else if (typeof ImageBitmap !== 'undefined' && imageLike instanceof ImageBitmap) {
+    width = imageLike.width;
+    height = imageLike.height;
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.drawImage(imageLike, 0, 0);
+  } else if (typeof HTMLImageElement !== 'undefined' && imageLike instanceof HTMLImageElement) {
+    width = imageLike.naturalWidth || imageLike.width;
+    height = imageLike.naturalHeight || imageLike.height;
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.drawImage(imageLike, 0, 0, width, height);
+  } else if (imageLike?.bitmap) {
+    return normalizePdfImageAsset(imageLike.bitmap, { pageNumber, index });
+  } else if (imageLike?.data && imageLike?.width && imageLike?.height) {
+    canvas = createCanvasFromRawImageData(imageLike);
+    width = Number(imageLike.width || 0);
+    height = Number(imageLike.height || 0);
+  }
+
+  if (!canvas || !width || !height) return null;
+
+  return {
+    id: `pdf-page-${pageNumber}-image-${index + 1}`,
+    url: await canvasToDataUrl(canvas),
+    mimeType: 'image/png',
+    width,
+    height,
+  };
+}
+
+async function extractPdfPageImages({ page, pageNumber, pdfjs }) {
+  try {
+    const operatorList = await page.getOperatorList();
+    const imageOps = [];
+    const imageFnCodes = new Set([
+      pdfjs.OPS.paintImageXObject,
+      pdfjs.OPS.paintInlineImageXObject,
+      pdfjs.OPS.paintJpegXObject,
+    ]);
+
+    for (let index = 0; index < operatorList.fnArray.length; index += 1) {
+      const fn = operatorList.fnArray[index];
+      if (!imageFnCodes.has(fn)) continue;
+      imageOps.push({
+        fn,
+        args: operatorList.argsArray[index] || [],
+      });
+    }
+
+    const images = [];
+    const seenUrls = new Set();
+
+    for (let index = 0; index < imageOps.length; index += 1) {
+      const operation = imageOps[index];
+      let sourceImage = null;
+
+      if (operation.fn === pdfjs.OPS.paintInlineImageXObject) {
+        sourceImage = operation.args[0] || null;
+      } else {
+        const objectId = operation.args[0];
+        sourceImage = await getObjectFromPdfStore(page.objs, objectId);
+        if (!sourceImage) {
+          sourceImage = await getObjectFromPdfStore(page.commonObjs, objectId);
+        }
+      }
+
+      const normalizedAsset = await normalizePdfImageAsset(sourceImage, { pageNumber, index });
+      if (!normalizedAsset || seenUrls.has(normalizedAsset.url)) continue;
+      seenUrls.add(normalizedAsset.url);
+      images.push(normalizedAsset);
+    }
+
+    return images;
+  } catch (error) {
+    console.debug('[attachmentExtraction][pdf] page image extraction failed', {
+      pageNumber,
+      error: error?.message,
+    });
+    return [];
+  }
+}
+
+async function extractPdfPageWithVisionFallback({ file, page, pageNumber, pdfjs }) {
+  const textContent = await page.getTextContent();
+  const digitalText = getReadablePdfPageText(textContent);
+  const quality = isUsablePageText(digitalText);
+
+  console.debug('[attachmentExtraction][pdf] page evaluated', {
+    fileName: file?.name,
+    pageNumber,
+    digitalTextLength: quality.textLength,
+    extractionQuality: quality.extractionQuality,
+    isUsableDigitalText: quality.isUsable,
+  });
+
+  if (quality.isUsable) {
+    const images = await extractPdfPageImages({ page, pageNumber, pdfjs });
+    console.debug('[attachmentExtraction][pdf] page extracted', {
+      fileName: file?.name,
+      pageNumber,
+      extractionMethod: 'digital',
+      isUsableDigitalText: true,
+      ocrFallbackUsed: false,
+      imageCount: images.length,
+    });
+
+    return {
+      pageNumber,
+      extractionMethod: 'digital',
+      text: quality.extractedText,
+      extractedText: quality.extractedText,
+      textLength: quality.textLength,
+      extractionQuality: quality.extractionQuality,
+      isUsableDigitalText: true,
+      images,
+      success: Boolean(quality.textLength || images.length),
+      status: quality.textLength || images.length ? 'complete' : 'empty',
+    };
+  }
+
+  try {
+    const canvas = await renderPdfPageToCanvas(page);
+    const visionFile = await buildVisionOcrFileFromCanvas(canvas, `${file?.name || 'pdf'}-page-${pageNumber}.png`);
+    const ocrResult = await extractImageTextWithVision(visionFile);
+
+    console.debug('[attachmentExtraction][pdf] page extracted', {
+      fileName: file?.name,
+      pageNumber,
+      extractionMethod: 'vision_ocr',
+      isUsableDigitalText: false,
+      ocrFallbackUsed: true,
+      imageCount: 0,
+      ocrSuccess: ocrResult.success,
+      ocrTextLength: ocrResult.textLength,
+    });
+
+    return {
+      pageNumber,
+      extractionMethod: 'vision_ocr',
+      text: ocrResult.extractedText,
+      extractedText: ocrResult.extractedText,
+      textLength: ocrResult.textLength,
+      extractionQuality: ocrResult.success ? 'poor' : 'failed',
+      isUsableDigitalText: false,
+      images: [],
+      success: Boolean(ocrResult.success && ocrResult.textLength),
+      status: ocrResult.success && ocrResult.textLength ? 'complete' : 'failed',
+    };
+  } catch (error) {
+    console.debug('[attachmentExtraction][pdf] page OCR fallback failed', {
+      fileName: file?.name,
+      pageNumber,
+      error: error?.message,
+    });
+
+    return {
+      pageNumber,
+      extractionMethod: 'vision_ocr',
+      text: '',
+      extractedText: '',
+      textLength: 0,
+      extractionQuality: 'failed',
+      isUsableDigitalText: false,
+      images: [],
+      success: false,
+      status: 'failed',
+      error: error?.message || 'Vision OCR failed for page',
+    };
+  }
+}
+
+async function extractPdfPerPage(file) {
+  const pdfjs = await loadPdfJs();
+  const pdfData = await file.arrayBuffer();
+  const pdfDocument = await pdfjs.getDocument({ data: pdfData }).promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+    const page = await pdfDocument.getPage(pageNumber);
+    const pageResult = await extractPdfPageWithVisionFallback({
+      file,
+      page,
+      pageNumber,
+      pdfjs,
+    });
+    pages.push(pageResult);
+  }
+
+  const combinedText = pages
+    .map((page) => String(page?.text || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
+  const failedPages = pages.filter((page) => !page?.success);
+  const ocrPages = pages.filter((page) => page?.extractionMethod === 'vision_ocr');
+  const digitalPages = pages.filter((page) => page?.extractionMethod === 'digital');
+  const extractedImages = digitalPages.flatMap((page) => page.images || []);
+  const hasAnyText = Boolean(combinedText);
+  const allPagesSuccessful = failedPages.length === 0;
+
+  return {
+    pageCount: pdfDocument.numPages,
+    selectedPages: pages.map((page) => page.pageNumber),
+    pages,
+    extractedImages,
+    extractedText: combinedText,
+    text: combinedText,
+    textLength: combinedText.length,
+    success: hasAnyText || digitalPages.length > 0,
+    partialSuccess: !allPagesSuccessful && (hasAnyText || digitalPages.length > 0),
+    extractionQuality: allPagesSuccessful
+      ? (hasAnyText ? 'good' : 'failed')
+      : (hasAnyText ? 'poor' : 'failed'),
+    scannedPdfDetected: ocrPages.length > 0,
+    ocrStatus: ocrPages.length === 0
+      ? 'not_needed'
+      : (failedPages.length === 0 ? 'complete' : (hasAnyText ? 'partial' : 'failed')),
+    failedPageCount: failedPages.length,
+  };
 }
 
 function buildExtractionResult({
@@ -218,13 +485,22 @@ function buildExtractionResult({
   selectedPages = [],
   ocrStatus = 'not_needed',
   pageCount = null,
+  source = fileType,
+  pages = [],
+  extractedImages = [],
+  partialSuccess = false,
+  failedPageCount = 0,
+  text = extractedText,
 }) {
   return {
     fileName: file?.name || 'unknown-file',
+    source,
     fileType,
     extractionMethod,
     success,
+    partialSuccess,
     extractedText,
+    text,
     textLength,
     extractionQuality,
     scannedPdfDetected,
@@ -232,85 +508,10 @@ function buildExtractionResult({
     selectedPages,
     ocrStatus,
     pageCount,
+    pages,
+    extractedImages,
+    failedPageCount,
   };
-}
-
-async function runScannedPdfFullDocumentOcr(file) {
-  const pdfjs = await loadPdfJs();
-  const pdfData = await file.arrayBuffer();
-  const pdfDocument = await pdfjs.getDocument({ data: pdfData }).promise;
-
-  console.debug('[attachmentExtraction] OCR started for full scanned PDF', {
-    fileName: file?.name,
-    pageCount: pdfDocument.numPages,
-  });
-
-  const pageTexts = [];
-  const selectedPages = Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1);
-
-  for (let index = 0; index < selectedPages.length; index += 1) {
-    const pageNumber = selectedPages[index];
-    const page = await pdfDocument.getPage(pageNumber);
-    const canvas = await renderPdfPageToCanvas(page);
-    const pageText = await runOcrWithTesseract(canvas);
-    pageTexts.push(pageText);
-  }
-
-  const ocrResult = buildOcrResult(pageTexts.join('\n').trim());
-  console.debug('[attachmentExtraction] OCR completed for full scanned PDF', {
-    fileName: file?.name,
-    processedPages: selectedPages.length,
-    success: ocrResult.success,
-    textLength: ocrResult.textLength,
-  });
-
-  return buildExtractionResult({
-    file,
-    fileType: 'pdf',
-    extractionMethod: ocrResult.success ? 'ocr' : 'fallback',
-    extractedText: ocrResult.success ? ocrResult.extractedText : '',
-    textLength: ocrResult.success ? ocrResult.textLength : 0,
-    extractionQuality: ocrResult.success ? 'poor' : 'failed',
-    success: ocrResult.success,
-    scannedPdfDetected: true,
-    requiresPageSelection: false,
-    selectedPages,
-    ocrStatus: ocrResult.success ? 'complete' : 'fallback_needed',
-    pageCount: pdfDocument.numPages,
-  });
-}
-
-function buildPdfBestEffortResult({ file, pdfResult, ocrResult }) {
-  const hasDigitalText = Boolean(pdfResult?.textLength);
-  const hasOcrText = Boolean(ocrResult?.success && ocrResult?.textLength);
-
-  if (hasOcrText) {
-    return ocrResult;
-  }
-
-  if (hasDigitalText) {
-    console.debug('[attachmentExtraction] OCR fallback weak; using available digital PDF text instead', {
-      fileName: file?.name,
-      digitalTextLength: pdfResult?.textLength || 0,
-    });
-
-    return buildExtractionResult({
-      file,
-      fileType: 'pdf',
-      extractionMethod: 'pdf',
-      extractedText: pdfResult.extractedText,
-      textLength: pdfResult.textLength,
-      extractionQuality: pdfResult.extractionQuality || 'poor',
-      success: true,
-      scannedPdfDetected: true,
-      requiresPageSelection: false,
-      selectedPages: [],
-      ocrStatus: 'fallback_needed',
-      pageCount: pdfResult.pageCount || null,
-    });
-  }
-
-  return ocrResult;
 }
 
 export async function extractSingleAttachment(file) {
@@ -363,31 +564,34 @@ export async function extractSingleAttachment(file) {
   console.debug('[attachmentExtraction] extraction path chosen', { fileName: file.name, path: 'pdf->digital-first' });
 
   try {
-    const pdfResult = await extractPdfDigitalText(file);
-
-    if (pdfResult.isUsable) {
-      return buildExtractionResult({
-        file,
-        fileType,
-        extractionMethod: 'pdf',
-        extractedText: pdfResult.extractedText,
-        textLength: pdfResult.textLength,
-        extractionQuality: pdfResult.extractionQuality,
-        success: true,
-      });
-    }
-
-    console.debug('[attachmentExtraction] scanned PDF detected; full-document OCR fallback starting', {
+    const pdfResult = await extractPdfPerPage(file);
+    console.debug('[attachmentExtraction] pdf extraction completed', {
       fileName: file.name,
-      digitalTextLength: pdfResult.textLength,
+      textLength: pdfResult.textLength,
       pageCount: pdfResult.pageCount,
+      failedPageCount: pdfResult.failedPageCount,
+      ocrStatus: pdfResult.ocrStatus,
     });
 
-    const ocrResult = await runScannedPdfFullDocumentOcr(file);
-    return buildPdfBestEffortResult({
+    return buildExtractionResult({
       file,
-      pdfResult,
-      ocrResult,
+      fileType,
+      source: 'pdf',
+      extractionMethod: 'pdf',
+      extractedText: pdfResult.extractedText,
+      text: pdfResult.text,
+      textLength: pdfResult.textLength,
+      extractionQuality: pdfResult.extractionQuality,
+      success: pdfResult.success,
+      partialSuccess: pdfResult.partialSuccess,
+      scannedPdfDetected: pdfResult.scannedPdfDetected,
+      requiresPageSelection: false,
+      selectedPages: pdfResult.selectedPages,
+      ocrStatus: pdfResult.ocrStatus,
+      pageCount: pdfResult.pageCount,
+      pages: pdfResult.pages,
+      extractedImages: pdfResult.extractedImages,
+      failedPageCount: pdfResult.failedPageCount,
     });
   } catch (error) {
     console.debug('[attachmentExtraction] pdf extraction failed', { fileName: file.name, error: error?.message });

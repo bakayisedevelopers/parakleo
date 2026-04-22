@@ -10,6 +10,8 @@ const QUESTION_BLOCK_SPACING = 180;
 const LONG_BLOCK_EXTRA_SPACING = 90;
 const IMAGE_BLOCK_SPACING = 120;
 const IMAGE_STACK_SPACING = 36;
+const MAX_RENDER_IMAGE_WIDTH = 900;
+const MAX_RENDER_IMAGE_HEIGHT = 700;
 
 function normalizeQuestionText(question = {}) {
   const text = String(question?.text || '').trim();
@@ -57,17 +59,28 @@ export function prepareWhiteboardLayout(parsedQuestions = []) {
     }
 
     images.forEach((image, imageIndex) => {
+      const sourceWidth = Number(image?.width || 0) || DEFAULT_IMAGE_WIDTH;
+      const sourceHeight = Number(image?.height || 0) || DEFAULT_IMAGE_HEIGHT;
+      const scale = Math.min(
+        1,
+        MAX_RENDER_IMAGE_WIDTH / sourceWidth,
+        MAX_RENDER_IMAGE_HEIGHT / sourceHeight,
+      );
+      const width = Math.max(120, Math.round(sourceWidth * scale));
+      const height = Math.max(120, Math.round(sourceHeight * scale));
+
       elements.push({
         type: 'image',
         src: image.src,
         mimeType: image.mimeType || 'image/png',
         fileName: image.fileName || '',
+        imageId: image.id || '',
         position: { x: 48, y: currentY },
-        width: DEFAULT_IMAGE_WIDTH,
-        height: DEFAULT_IMAGE_HEIGHT,
+        width,
+        height,
       });
 
-      currentY += DEFAULT_IMAGE_HEIGHT;
+      currentY += height;
       if (imageIndex < images.length - 1) {
         currentY += IMAGE_STACK_SPACING;
       }
