@@ -62,6 +62,35 @@ function getAttachmentKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
+function truncateFileName(fileName, maxLength = 28) {
+  const normalizedFileName = String(fileName || '').trim();
+  if (!normalizedFileName) return 'Attachment';
+  if (normalizedFileName.length <= maxLength) return normalizedFileName;
+  return `${normalizedFileName.slice(0, maxLength)}...`;
+}
+
+function getExtractionStatusLabel(status = '') {
+  const normalizedStatus = String(status || '').toLowerCase();
+
+  if (normalizedStatus === 'extracting' || normalizedStatus === 'ocr processing') {
+    return 'Processing...';
+  }
+
+  if (normalizedStatus === 'text extracted') {
+    return 'Done';
+  }
+
+  if (normalizedStatus === 'fallback needed') {
+    return 'Needs extra processing';
+  }
+
+  if (normalizedStatus === 'extraction weak') {
+    return 'Low confidence';
+  }
+
+  return 'Queued';
+}
+
 function renderExtractionStatusIcon(status = '') {
   const normalizedStatus = String(status || '').toLowerCase();
 
@@ -175,6 +204,7 @@ export default function StudentDashboardPage() {
   const extractionRunCounterRef = useRef(0);
   const activeExtractionTokenByKeyRef = useRef({});
   const classificationRunCounterRef = useRef(0);
+  const extractionOverlayRedirectTimeoutRef = useRef(null);
 
   const [stage, setStage] = useState('input');
   const [advanceIntent, setAdvanceIntent] = useState('');
@@ -197,6 +227,9 @@ export default function StudentDashboardPage() {
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showExtractionOverlay, setShowExtractionOverlay] = useState(false);
+  const [showSlowExtractionMessage, setShowSlowExtractionMessage] = useState(false);
+  const [extractionOverlayState, setExtractionOverlayState] = useState('idle');
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
 
@@ -240,6 +273,7 @@ export default function StudentDashboardPage() {
     && Boolean(quote);
   const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && !isSubmitting;
   const isPricingQuoteError = /pricing quote/i.test(error);
+  const shouldShowExtractionOverlay = showExtractionOverlay && stage !== 'review';
 
   const resizeTextarea = () => {
     if (!textareaRef.current) return;
@@ -312,6 +346,9 @@ export default function StudentDashboardPage() {
     setStage('input');
     setAdvanceIntent('attachment');
     setError('');
+    setShowExtractionOverlay(true);
+    setShowSlowExtractionMessage(false);
+    setExtractionOverlayState('processing');
 
     const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
     attachmentsRef.current = nextAttachments;
@@ -597,9 +634,77 @@ export default function StudentDashboardPage() {
 
   useEffect(() => {
     if (!advanceIntent || !readyForReview) return;
+    if (shouldShowExtractionOverlay) return;
     maybeAdvanceToReview(advanceIntent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [advanceIntent, readyForReview, selectedSubject, flowState]);
+  }, [advanceIntent, readyForReview, selectedSubject, flowState, shouldShowExtractionOverlay]);
+
+  useEffect(() => {
+    if (!shouldShowExtractionOverlay || extractionOverlayState !== 'processing') {
+      setShowSlowExtractionMessage(false);
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setShowSlowExtractionMessage(true);
+    }, 5000);
+
+    return () => clearTimeout(timeoutId);
+  }, [shouldShowExtractionOverlay, extractionOverlayState]);
+
+  useEffect(() => {
+    if (!shouldShowExtractionOverlay) return undefined;
+    if (hasRunningExtraction) {
+      setExtractionOverlayState('processing');
+      return undefined;
+    }
+
+    setExtractionOverlayState('done');
+    setShowSlowExtractionMessage(false);
+    return undefined;
+  }, [shouldShowExtractionOverlay, hasRunningExtraction]);
+
+  useEffect(() => {
+    if (!shouldShowExtractionOverlay) return undefined;
+    if (hasRunningExtraction || !readyForReview) return undefined;
+
+    if (extractionOverlayRedirectTimeoutRef.current) {
+      clearTimeout(extractionOverlayRedirectTimeoutRef.current);
+    }
+
+    extractionOverlayRedirectTimeoutRef.current = setTimeout(() => {
+      maybeAdvanceToReview(advanceIntent || 'attachment');
+    }, 900);
+
+    return () => {
+      if (extractionOverlayRedirectTimeoutRef.current) {
+        clearTimeout(extractionOverlayRedirectTimeoutRef.current);
+        extractionOverlayRedirectTimeoutRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldShowExtractionOverlay, hasRunningExtraction, readyForReview, advanceIntent]);
+
+  useEffect(() => {
+    if (stage !== 'review') return undefined;
+
+    setShowExtractionOverlay(false);
+    setShowSlowExtractionMessage(false);
+    setExtractionOverlayState('idle');
+
+    if (extractionOverlayRedirectTimeoutRef.current) {
+      clearTimeout(extractionOverlayRedirectTimeoutRef.current);
+      extractionOverlayRedirectTimeoutRef.current = null;
+    }
+
+    return undefined;
+  }, [stage]);
+
+  useEffect(() => () => {
+    if (extractionOverlayRedirectTimeoutRef.current) {
+      clearTimeout(extractionOverlayRedirectTimeoutRef.current);
+    }
+  }, []);
 
   const handleDurationChange = (event) => {
     setHasManualDurationOverride(true);
@@ -619,7 +724,9 @@ export default function StudentDashboardPage() {
             {isImage ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-zinc-100">{file.name}</p>
+            <p className="truncate text-sm font-semibold text-zinc-100" title={file.name}>
+              {truncateFileName(file.name)}
+            </p>
           </div>
           {extractionStatusIcon}
           <button
@@ -718,15 +825,17 @@ export default function StudentDashboardPage() {
           <div className="relative space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Student request</p>
-                <h1 className="mt-2 text-[1.9rem] font-black leading-tight tracking-tight text-white">
-                  Hi {displayName.split(' ')[0]}, start with a picture.
-                </h1>
-                <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
-                </p>
                 {stage !== 'review' ? (
                   <>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200/80">Student request</p>
+                    <h1 className="mt-2 text-[1.9rem] font-black leading-tight tracking-tight text-transparent bg-gradient-to-r from-emerald-300 via-cyan-200 to-blue-300 bg-clip-text">
+                      Hi {displayName.split(' ')[0]}
+                    </h1>
+                    <p className="mt-2 text-base leading-7 text-zinc-200/95">
+                      <span className="bg-gradient-to-r from-zinc-100 via-emerald-100 to-cyan-100 bg-clip-text text-transparent">
+                        Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
+                      </span>
+                    </p>
                     <div className="mt-4 flex items-center gap-3">
                       <label className="inline-flex flex-1 cursor-pointer items-center justify-center rounded-2xl bg-brand px-6 py-3 text-sm font-bold text-white shadow-lg shadow-brand/30 transition hover:bg-brand-dark">
                         <Camera className="mr-2 h-4 w-4" />
@@ -742,11 +851,11 @@ export default function StudentDashboardPage() {
                       </label>
 
                       <label className="inline-flex flex-1 cursor-pointer items-center justify-center rounded-2xl border border-brand/30 bg-brand/10 px-6 py-3 text-sm font-bold text-brand transition hover:bg-brand/20">
-                        Upload PDF
+                        Upload
                         <ChevronRight className="ml-2 h-4 w-4" />
                         <input
                           type="file"
-                          accept="application/pdf"
+                          accept="image/*,application/pdf"
                           multiple
                           onChange={onFileChange}
                           className="hidden"
@@ -966,6 +1075,76 @@ export default function StudentDashboardPage() {
               >
                 Confirm subject
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {shouldShowExtractionOverlay ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[1.9rem] border border-white/10 bg-zinc-900 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.55)]">
+            <div className="flex flex-col items-center text-center">
+              <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
+                {extractionOverlayState === 'done' ? (
+                  <CheckCircle2 className="h-7 w-7" />
+                ) : (
+                  <RefreshCw className="h-7 w-7 animate-spin" />
+                )}
+              </div>
+
+              <h2 className="mt-4 text-xl font-black tracking-tight text-white">
+                {extractionOverlayState === 'done' ? 'Processing complete' : 'We are processing your file'}
+              </h2>
+              <p className="mt-2 text-sm text-zinc-300">
+                {extractionOverlayState === 'done'
+                  ? 'You are being redirected.'
+                  : 'Please wait while we scan and prepare your uploaded files.'}
+              </p>
+              {showSlowExtractionMessage ? (
+                <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  Your file is big, scanning your file is taking long, please bear with us.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {attachments.map((file, index) => {
+                const fileKey = getAttachmentKey(file);
+                const extractionStatus = attachmentExtractionStatusByKey[fileKey];
+                const statusIcon = renderExtractionStatusIcon(
+                  extractionOverlayState === 'done' && !hasRunningExtraction
+                    ? 'text extracted'
+                    : extractionStatus,
+                );
+
+                return (
+                  <div
+                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                    className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-zinc-950/80 text-zinc-200">
+                      {file.type.startsWith('image/') ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-sm font-semibold text-zinc-100" title={file.name}>
+                        {truncateFileName(file.name)}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {extractionOverlayState === 'done' && !hasRunningExtraction
+                          ? 'Done'
+                          : getExtractionStatusLabel(extractionStatus)}
+                      </p>
+                    </div>
+                    <div className="shrink-0">
+                      {statusIcon || (
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-zinc-400">
+                          <FileText className="h-4 w-4" />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
