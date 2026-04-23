@@ -63,11 +63,11 @@ function formatDuration(seconds) {
 
 function StageBadge({ icon: Icon, children, tone = 'default', className = '' }) {
   const toneClasses = {
-    default: 'border-white/10 bg-[#1f2430]/96 text-zinc-100',
-    info: 'border-sky-500/25 bg-sky-500/14 text-sky-200',
-    success: 'border-emerald-500/25 bg-emerald-500/14 text-emerald-200',
-    warning: 'border-amber-500/25 bg-amber-500/14 text-amber-200',
-    danger: 'border-rose-500/25 bg-rose-500/14 text-rose-200',
+    default: 'border-zinc-200 bg-white text-zinc-800',
+    info: 'border-sky-200 bg-sky-50 text-sky-700',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    warning: 'border-amber-200 bg-amber-50 text-amber-700',
+    danger: 'border-rose-200 bg-rose-50 text-rose-700',
   };
 
   return (
@@ -92,8 +92,8 @@ function RailButton({
   const classes = danger
     ? 'border-rose-500/20 bg-rose-500 text-white hover:bg-rose-600'
     : active
-      ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/20'
-      : 'border-white/10 bg-[#1f2430]/95 text-zinc-100 hover:bg-[#272d3a]';
+      ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+      : 'border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-100';
 
   return (
     <button
@@ -867,7 +867,7 @@ export default function SessionRoomPage() {
         showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
     >
-      <div className="rounded-[22px] border border-white/10 bg-[#161b25]/88 p-3 shadow-2xl backdrop-blur-md">
+      <div className="rounded-[22px] border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-2">
           <StageBadge icon={Clock3}>Call length {formatDuration(callSeconds)}</StageBadge>
 
@@ -902,7 +902,7 @@ export default function SessionRoomPage() {
   );
 
   const renderTutorStage = () => (
-    <div className="relative h-full w-full overflow-hidden bg-[#0f141d]">
+    <div className="relative h-full w-full overflow-hidden bg-white">
       {renderTutorStageHeader()}
       <div className="absolute inset-0">
         <TldrawSdkEmbed
@@ -943,12 +943,12 @@ export default function SessionRoomPage() {
         />
       ) : (
         <div className="flex h-full items-center justify-center p-6">
-          <div className="max-w-md rounded-[28px] border border-white/10 bg-[#161b25]/88 p-6 text-center shadow-2xl backdrop-blur-md">
+          <div className="max-w-md rounded-[28px] border border-zinc-200 bg-white p-6 text-center shadow-xl backdrop-blur-md">
             <Presentation className="mx-auto h-8 w-8 text-zinc-500" />
-            <p className="mt-4 text-base font-semibold text-zinc-100">
+            <p className="mt-4 text-base font-semibold text-zinc-900">
               No screen sharing has started yet.
             </p>
-            <p className="mt-2 text-sm text-zinc-400">
+            <p className="mt-2 text-sm text-zinc-600">
               The tutor’s shared screen will appear here once sharing starts.
             </p>
           </div>
@@ -959,9 +959,9 @@ export default function SessionRoomPage() {
 
   if (!session) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6">
-        <div className="w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-900 p-6 text-center shadow-2xl">
-          <p className="text-sm text-zinc-400">Session not found or no access.</p>
+      <div className="flex min-h-screen items-center justify-center bg-white p-6">
+        <div className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-xl">
+          <p className="text-sm text-zinc-600">Session not found or no access.</p>
           <Link
             to="/app"
             className="mt-4 inline-flex rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white"
@@ -974,12 +974,12 @@ export default function SessionRoomPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-[#0B0F19] text-white">
+    <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-white text-zinc-900">
       {isPortraitMobile ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/80 p-6 md:hidden">
-          <div className="max-w-sm rounded-3xl border border-zinc-800 bg-zinc-950 p-6 text-center shadow-2xl">
-            <p className="text-lg font-semibold text-zinc-100">Rotate your device</p>
-            <p className="mt-2 text-sm text-zinc-400">
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-white/85 p-6 backdrop-blur-sm md:hidden">
+          <div className="max-w-sm rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-xl">
+            <p className="text-lg font-semibold text-zinc-900">Rotate your device</p>
+            <p className="mt-2 text-sm text-zinc-600">
               This tutoring room is best viewed in landscape so the board or shared screen can fill the page clearly.
             </p>
           </div>
@@ -1007,7 +1007,7 @@ export default function SessionRoomPage() {
           } transition-opacity duration-200`}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="flex flex-col gap-2 rounded-[24px] border border-white/10 bg-[#161b25]/88 p-2 shadow-2xl backdrop-blur-md">
+          <div className="flex flex-col gap-2 rounded-[24px] border border-zinc-200 bg-white/95 p-2 shadow-xl backdrop-blur-md">
             <RailButton
               onClick={toggleMute}
               icon={isMuted ? MicOff : Mic}
@@ -1066,9 +1066,9 @@ export default function SessionRoomPage() {
       </div>
 
       {needsRating ? (
-        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_32%),linear-gradient(180deg,_#111827_0%,_#030712_100%)]">
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.12),_transparent_32%),linear-gradient(180deg,_#ffffff_0%,_#f8fafc_100%)]">
           <div className="min-h-screen w-full px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
-            <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col rounded-[32px] border border-white/10 bg-zinc-950/80 p-6 shadow-2xl backdrop-blur md:p-8 lg:p-10">
+            <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col rounded-[32px] border border-zinc-200 bg-white/95 p-6 shadow-xl backdrop-blur md:p-8 lg:p-10">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3">
@@ -1079,12 +1079,12 @@ export default function SessionRoomPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
                         Session feedback
                       </p>
-                      <h2 className="mt-2 text-2xl font-semibold text-zinc-100 sm:text-3xl lg:text-4xl">
+                      <h2 className="mt-2 text-2xl font-semibold text-zinc-900 sm:text-3xl lg:text-4xl">
                         Rate this session
                       </h2>
                     </div>
                   </div>
-                  <p className="mt-5 max-w-2xl text-sm text-zinc-400 sm:text-base">
+                  <p className="mt-5 max-w-2xl text-sm text-zinc-600 sm:text-base">
                     Tell us how this session went. Once you rate it or close this screen, it will not appear again.
                   </p>
                 </div>
@@ -1094,14 +1094,14 @@ export default function SessionRoomPage() {
                   onClick={closeRatingPrompt}
                   disabled={isSaving}
                   aria-label="Close rating prompt"
-                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
               <div className={`mt-10 flex flex-1 flex-col justify-center ${isSaving ? 'pointer-events-none' : ''}`}>
-                <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:p-10">
+                <div className="rounded-[28px] border border-zinc-200 bg-zinc-50 p-6 sm:p-8 lg:p-10">
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Overall rating</p>
                   <div
                     className="mt-6 flex flex-wrap items-center gap-3 sm:gap-4 lg:gap-5"
@@ -1128,10 +1128,10 @@ export default function SessionRoomPage() {
                   </div>
 
                   <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm font-medium text-zinc-400">
+                    <p className="text-sm font-medium text-zinc-600">
                       {isSaving ? 'Saving rating...' : 'Tap a star to submit automatically.'}
                     </p>
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                       {isSaving ? 'Saving' : 'Ready'}
                     </div>
                   </div>

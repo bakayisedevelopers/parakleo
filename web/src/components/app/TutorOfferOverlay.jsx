@@ -209,7 +209,7 @@ export default function TutorOfferOverlay() {
       : [];
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-zinc-950/80 p-4">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-white/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-3xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-2xl">
         <div className="mb-3 flex items-start justify-between gap-4">
           <div>

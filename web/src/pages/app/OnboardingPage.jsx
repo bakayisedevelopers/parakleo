@@ -146,7 +146,7 @@ export default function OnboardingPage() {
         <SectionCard title="Tutor setup" subtitle={tutorStatus.message}>
           <form className="grid gap-4 md:grid-cols-2" onSubmit={saveTutorProfile}>
             <div>
-              <label className="block text-sm font-semibold text-zinc-200">Highest grade result document</label>
+              <label className="block text-sm font-semibold text-zinc-700">Highest grade result document</label>
               <input
                 name="highestGradeResultFile"
                 type="file"
@@ -156,7 +156,7 @@ export default function OnboardingPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-zinc-200">Profile photo</label>
+              <label className="block text-sm font-semibold text-zinc-700">Profile photo</label>
               <input
                 name="profilePhotoFile"
                 type="file"

@@ -66,7 +66,7 @@ export default function TutorSessionsPage() {
                 role="tutor"
                 action={
                   editingId === session.id ? (
-                    <div className="space-y-3 rounded-2xl border border-zinc-700 bg-zinc-950/80 p-3">
+                    <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
                       <div className="grid gap-3 md:grid-cols-2">
                         <FormField label="Scheduled date" name="scheduledDate" type="date" value={form.scheduledDate} onChange={onChange} />
                         <FormField label="Scheduled time" name="scheduledTime" type="time" value={form.scheduledTime} onChange={onChange} />
@@ -101,7 +101,7 @@ export default function TutorSessionsPage() {
                         <button
                           type="button"
                           onClick={() => setEditingId(null)}
-                          className="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-300"
+                          className="rounded-2xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700"
                         >
                           Cancel
                         </button>
@@ -111,7 +111,7 @@ export default function TutorSessionsPage() {
                     <button
                       type="button"
                       onClick={() => startEditing(session)}
-                      className="rounded-2xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-brand/40"
+                      className="rounded-2xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:border-brand/40"
                     >
                       Manage Session
                     </button>

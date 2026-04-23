@@ -3,7 +3,7 @@ import { statusConfig } from '../../utils/requestStatus';
 export default function StatusBadge({ status }) {
   const config = statusConfig[status] || {
     label: status,
-    className: 'bg-zinc-500/10 text-zinc-300 border-zinc-500/30',
+    className: 'bg-zinc-100 text-zinc-700 border-zinc-200',
   };
 
   return (

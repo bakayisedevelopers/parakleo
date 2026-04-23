@@ -29,14 +29,14 @@ export default function AvailableRequestsPage() {
         description="Incoming offers are actionable from the live overlay only. This list is a realtime mirror for context."
       />
       {!canAccept ? (
-        <p className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+        <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
           You must be online with a completed tutor profile before accepting requests.
         </p>
       ) : null}
 
       <SectionCard>
         {requests.length ? (
-          <p className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+          <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
             Use the incoming offer overlay to accept or decline within {OFFER_TIMEOUT_SECONDS} seconds. Actions are disabled on this page to prevent duplicate submissions.
           </p>
         ) : null}
@@ -59,10 +59,10 @@ export default function AvailableRequestsPage() {
                   request={request}
                   action={
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold text-amber-200">
+                      <span className="text-xs font-semibold text-amber-700">
                         Expires at {expiryLabel}
                       </span>
-                      <span className="rounded-2xl border border-zinc-600 px-3 py-1 text-xs font-semibold text-zinc-300">
+                      <span className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
                         Respond in overlay
                       </span>
                     </div>

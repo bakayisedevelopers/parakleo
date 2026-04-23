@@ -718,13 +718,13 @@ export default function StudentDashboardPage() {
     const extractionStatus = attachmentExtractionStatusByKey[fileKey];
     const extractionStatusIcon = renderExtractionStatusIcon(extractionStatus);
     return (
-      <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2 rounded-3xl border border-white/10 bg-white/5 p-3">
+      <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
         <div className="flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-zinc-900 text-zinc-200">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-700">
             {isImage ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-zinc-100" title={file.name}>
+            <p className="truncate text-sm font-semibold text-zinc-900" title={file.name}>
               {truncateFileName(file.name)}
             </p>
           </div>
@@ -732,7 +732,7 @@ export default function StudentDashboardPage() {
           <button
             type="button"
             onClick={() => removeAttachment(index)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-zinc-900/80 text-zinc-300 transition hover:text-white"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-500 transition hover:text-zinc-900"
             aria-label={`Remove ${file.name}`}
           >
             <X className="h-4 w-4" />
@@ -747,10 +747,10 @@ export default function StudentDashboardPage() {
     return (
       <div className="space-y-4">
         <OnboardingStatusBanner user={currentUser || user} role="student" />
-        <div className="overflow-hidden rounded-[2rem] border border-amber-300/30 bg-zinc-900/75 p-5 shadow-[0_20px_70px_rgba(2,6,23,0.35)]">
+        <div className="overflow-hidden rounded-[2rem] border border-amber-200 bg-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)]">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-200/80">Complete setup first</p>
-          <h1 className="mt-3 text-2xl font-black tracking-tight text-white">Finish your student profile before requesting a class.</h1>
-          <p className="mt-2 text-sm text-zinc-300">{onboardingStatus.message}</p>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-zinc-900">Finish your student profile before requesting a class.</h1>
+          <p className="mt-2 text-sm text-zinc-600">{onboardingStatus.message}</p>
           <Link
             to="/app/onboarding?role=student"
             className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-amber-400 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-amber-300"
@@ -768,29 +768,29 @@ export default function StudentDashboardPage() {
 
     return (
       <div className="space-y-4">
-        <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/75 p-5 shadow-[0_20px_70px_rgba(2,6,23,0.35)]">
+        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)]">
           <div className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
             Continue current class
           </div>
-          <h1 className="mt-4 text-2xl font-black tracking-tight text-white">
+          <h1 className="mt-4 text-2xl font-black tracking-tight text-zinc-900">
             {showSession ? 'Your class is already in progress.' : 'You already have a request in progress.'}
           </h1>
-          <p className="mt-2 text-sm text-zinc-300">
+          <p className="mt-2 text-sm text-zinc-600">
             {showSession
               ? 'Jump back into the active session instead of starting a new intake.'
               : 'Open the current request status instead of creating another request.'}
           </p>
 
-          <div className="mt-5 rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+          <div className="mt-5 rounded-[1.75rem] border border-zinc-200 bg-zinc-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
               {showSession ? (latestOpenSession?.subject || 'Current class') : (activeOrOngoingRequest?.subject || 'Current request')}
             </p>
-            <p className="mt-2 text-lg font-bold text-white">
+            <p className="mt-2 text-lg font-bold text-zinc-900">
               {showSession
                 ? (latestOpenSession?.topic || 'Live class')
                 : (activeOrOngoingRequest?.topic || 'Live request')}
             </p>
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-1 text-sm text-zinc-500">
               {showSession
                 ? `${latestOpenSession?.duration || 'Live now'}`
                 : `${activeOrOngoingRequest?.statusDetail || 'Tutor matching is still running.'}`}
@@ -807,7 +807,7 @@ export default function StudentDashboardPage() {
             </Link>
             <Link
               to={showSession ? '/app/student/requests' : '/app/student/requests'}
-              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+              className="inline-flex items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Open my classes
             </Link>
@@ -819,7 +819,7 @@ export default function StudentDashboardPage() {
 
   return (
     <div className="space-y-4 pb-4">
-      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/75 shadow-[0_24px_80px_rgba(2,6,23,0.42)] backdrop-blur">
+      <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="relative overflow-hidden p-4 sm:p-5">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.14),_transparent_36%)]" />
           <div className="relative space-y-4">
@@ -831,8 +831,8 @@ export default function StudentDashboardPage() {
                     <h1 className="mt-2 text-[1.9rem] font-black leading-tight tracking-tight text-transparent bg-gradient-to-r from-emerald-300 via-cyan-200 to-blue-300 bg-clip-text">
                       Hi {displayName.split(' ')[0]}
                     </h1>
-                    <p className="mt-2 text-base leading-7 text-zinc-200/95">
-                      <span className="bg-gradient-to-r from-zinc-100 via-emerald-100 to-cyan-100 bg-clip-text text-transparent">
+                    <p className="mt-2 text-base leading-7 text-zinc-700">
+                      <span className="bg-gradient-to-r from-zinc-700 via-emerald-700 to-cyan-700 bg-clip-text text-transparent">
                         Snap homework, upload a worksheet, or describe what you need help with. We&apos;ll estimate the session length, detect the subject, and let you review before confirming.
                       </span>
                     </p>
@@ -873,31 +873,31 @@ export default function StudentDashboardPage() {
                       <button
                         type="button"
                         onClick={() => setIsTextEntryOpen((current) => !current)}
-                        className="flex w-full items-center justify-between rounded-[1.5rem] border border-white/10 bg-zinc-950/45 px-4 py-3 text-left transition hover:bg-zinc-950/60"
+                        className="flex w-full items-center justify-between rounded-[1.5rem] border border-zinc-200 bg-zinc-50 px-4 py-3 text-left transition hover:bg-zinc-100"
                         aria-expanded={isTextEntryOpen}
                       >
-                        <span className="text-sm font-semibold text-white">Or describe what you need help with</span>
-                        <ChevronRight className={`h-4 w-4 text-zinc-300 transition ${isTextEntryOpen ? 'rotate-90' : ''}`} />
+                        <span className="text-sm font-semibold text-zinc-900">Or describe what you need help with</span>
+                        <ChevronRight className={`h-4 w-4 text-zinc-500 transition ${isTextEntryOpen ? 'rotate-90' : ''}`} />
                       </button>
 
                       {isTextEntryOpen ? (
-                        <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/55 p-4">
+                        <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">
                           <textarea
                             ref={textareaRef}
                             value={topic}
                             onChange={onTopicChange}
                             placeholder="Type here..."
                             rows={1}
-                            className="max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-white/10 bg-transparent p-3 text-sm leading-6 text-zinc-100 placeholder:text-zinc-500 outline-none"
+                            className="max-h-[200px] min-h-[64px] w-full resize-none overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 text-sm leading-6 text-zinc-900 placeholder:text-zinc-400 outline-none"
                           />
                           <div className="mt-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
                               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Detected subject</p>
-                              <p className="mt-1 text-sm text-zinc-200">
+                              <p className="mt-1 text-sm text-zinc-700">
                                 {selectedSubject || 'Waiting for subject confirmation'}
                               </p>
                               {classificationStatus ? (
-                                <p className="mt-1 text-xs text-zinc-400">{classificationStatus}</p>
+                                <p className="mt-1 text-xs text-zinc-500">{classificationStatus}</p>
                               ) : null}
                             </div>
                             <button
@@ -916,7 +916,7 @@ export default function StudentDashboardPage() {
                                 key={option.label}
                                 type="button"
                                 onClick={() => applySuggestion(option.value)}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-300/40 hover:bg-emerald-500/10"
+                                className="rounded-full border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50"
                               >
                                 {option.label}
                               </button>
@@ -932,18 +932,18 @@ export default function StudentDashboardPage() {
 
             <div className="grid gap-3">
               {stage === 'review' ? (
-                <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+                <div className="rounded-[1.75rem] border border-zinc-200 bg-zinc-50 p-4">
                   <div>
-                    <h2 className="text-2xl font-black tracking-tight text-white">Review and confirm</h2>
+                    <h2 className="text-2xl font-black tracking-tight text-zinc-900">Review and confirm</h2>
                   </div>
 
-                  <div className="mt-4 space-y-3 text-sm text-zinc-200">
+                  <div className="mt-4 space-y-3 text-sm text-zinc-700">
                     <label className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Time</span>
                       <select
                         value={durationMinutes}
                         onChange={handleDurationChange}
-                        className="bg-transparent text-right text-sm font-semibold text-white outline-none"
+                        className="bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
                       >
                         {durationOptions.map((option) => (
                           <option key={option} value={option}>
@@ -955,34 +955,34 @@ export default function StudentDashboardPage() {
 
                     <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Minutes</span>
-                      <span className="text-right font-semibold text-white">
+                      <span className="text-right font-semibold text-zinc-900">
                         {durationMinutes} selected • {freeMinutesRemaining.toFixed(2)} free
                       </span>
                     </div>
 
                     <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Subject</span>
-                      <span className="text-right font-semibold text-white">{selectedSubject || 'Select subject'}</span>
+                      <span className="text-right font-semibold text-zinc-900">{selectedSubject || 'Select subject'}</span>
                     </div>
 
                     <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Topic</span>
-                      <span className="text-right font-semibold text-white">{reviewTopic || 'Not set'}</span>
+                      <span className="text-right font-semibold text-zinc-900">{reviewTopic || 'Not set'}</span>
                     </div>
 
                     <div className="space-y-3 rounded-2xl border border-brand/20 bg-brand/5 p-4">
                       <div className="flex w-full items-center justify-between gap-3">
                         <span className="font-semibold text-brand">Base price</span>
-                        <span className="text-right font-semibold text-white">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
+                        <span className="text-right font-semibold text-zinc-900">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
                       </div>
                       <div className="flex w-full items-center justify-between gap-3">
                         <span className="font-semibold text-brand">Per minute</span>
-                        <span className="text-right font-semibold text-white">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
+                        <span className="text-right font-semibold text-zinc-900">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
                       </div>
                       {pricingPreview ? (
                         <div className="flex w-full items-center justify-between gap-3">
                           <span className="font-semibold text-brand">Due now</span>
-                          <span className="text-right font-semibold text-white">{formatRand(pricingPreview.finalPrice)}</span>
+                          <span className="text-right font-semibold text-zinc-900">{formatRand(pricingPreview.finalPrice)}</span>
                         </div>
                       ) : null}
                       <label className="flex w-full items-center justify-between gap-3">
@@ -993,7 +993,7 @@ export default function StudentDashboardPage() {
                         <select
                           value={cardId}
                           onChange={(event) => setCardId(event.target.value)}
-                          className="max-w-[180px] bg-transparent text-right text-sm font-semibold text-white outline-none"
+                          className="max-w-[180px] bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
                         >
                           <option value="">Select card</option>
                           {paymentMethods.map((card) => (
@@ -1021,7 +1021,7 @@ export default function StudentDashboardPage() {
                     <button
                       type="button"
                       onClick={() => setStage('input')}
-                      className="inline-flex h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/10"
+                      className="inline-flex h-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
                     >
                       Back
                     </button>
@@ -1034,10 +1034,10 @@ export default function StudentDashboardPage() {
       </section>
 
       {showSubjectFallback ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/75 px-4">
-          <div className="w-full max-w-md rounded-[1.75rem] border border-white/10 bg-zinc-900 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.55)]">
-            <p className="text-lg font-bold text-white">Choose subject before review</p>
-            <p className="mt-2 text-sm text-zinc-400">We couldn&apos;t confidently resolve a supported subject from the request details.</p>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-white/75 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
+            <p className="text-lg font-bold text-zinc-900">Choose subject before review</p>
+            <p className="mt-2 text-sm text-zinc-600">We couldn&apos;t confidently resolve a supported subject from the request details.</p>
 
             <select
               value={selectedSubject}
@@ -1046,7 +1046,7 @@ export default function StudentDashboardPage() {
                 isManualSubjectRef.current = Boolean(nextSubject);
                 setSelectedSubject(nextSubject);
               }}
-              className="mt-4 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-3 py-3 text-sm text-white outline-none"
+              className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-900 outline-none"
             >
               <option value="">Select subject</option>
               {SUBJECT_OPTIONS.map((subject) => (
@@ -1060,7 +1060,7 @@ export default function StudentDashboardPage() {
               <button
                 type="button"
                 onClick={() => setShowSubjectFallback(false)}
-                className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-zinc-200"
+                className="rounded-2xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700"
               >
                 Cancel
               </button>
@@ -1081,8 +1081,8 @@ export default function StudentDashboardPage() {
       ) : null}
 
       {shouldShowExtractionOverlay ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[1.9rem] border border-white/10 bg-zinc-900 p-5 shadow-[0_24px_70px_rgba(2,6,23,0.55)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[1.9rem] border border-zinc-200 bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
             <div className="flex flex-col items-center text-center">
               <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
                 {extractionOverlayState === 'done' ? (
@@ -1092,16 +1092,16 @@ export default function StudentDashboardPage() {
                 )}
               </div>
 
-              <h2 className="mt-4 text-xl font-black tracking-tight text-white">
+              <h2 className="mt-4 text-xl font-black tracking-tight text-zinc-900">
                 {extractionOverlayState === 'done' ? 'Processing complete' : 'We are processing your file'}
               </h2>
-              <p className="mt-2 text-sm text-zinc-300">
+              <p className="mt-2 text-sm text-zinc-600">
                 {extractionOverlayState === 'done'
                   ? 'You are being redirected.'
                   : 'Please wait while we scan and prepare your uploaded files.'}
               </p>
               {showSlowExtractionMessage ? (
-                <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <p className="mt-3 rounded-2xl border border-amber-300/60 bg-amber-100 px-4 py-3 text-sm text-zinc-900">
                   Your file is big, scanning your file is taking long, please bear with us.
                 </p>
               ) : null}
@@ -1120,16 +1120,16 @@ export default function StudentDashboardPage() {
                 return (
                   <div
                     key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                    className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                    className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-zinc-950/80 text-zinc-200">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700">
                       {file.type.startsWith('image/') ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                     </div>
                     <div className="min-w-0 flex-1 text-left">
-                      <p className="truncate text-sm font-semibold text-zinc-100" title={file.name}>
+                      <p className="truncate text-sm font-semibold text-zinc-900" title={file.name}>
                         {truncateFileName(file.name)}
                       </p>
-                      <p className="mt-1 text-xs text-zinc-400">
+                      <p className="mt-1 text-xs text-zinc-500">
                         {extractionOverlayState === 'done' && !hasRunningExtraction
                           ? 'Done'
                           : getExtractionStatusLabel(extractionStatus)}

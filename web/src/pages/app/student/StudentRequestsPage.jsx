@@ -52,7 +52,7 @@ export default function StudentRequestsPage() {
                 >
                   <RequestCard request={request} relatedSession={session} />
                 </button>
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
                   <p className="font-semibold">{statusLabel(request.status)}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1">
@@ -60,7 +60,7 @@ export default function StudentRequestsPage() {
                       {request.duration || session?.duration || 'Per-minute'}
                     </span>
                     {session?.id ? (
-                      <Link to={`/app/session/${session.id}`} className="inline-flex items-center gap-1 font-semibold text-emerald-300 hover:underline">
+                      <Link to={`/app/session/${session.id}`} className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline">
                         Join / Re-open class <ArrowRight className="h-3.5 w-3.5" />
                       </Link>
                     ) : null}

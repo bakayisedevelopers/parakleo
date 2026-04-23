@@ -89,7 +89,7 @@ export default function SessionRatingPrompt() {
   const statusCopy = target.status === SESSION_STATUS.COMPLETED ? 'Session ended' : 'Session canceled';
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-zinc-950/90 p-4">
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-white/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>

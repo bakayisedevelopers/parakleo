@@ -201,7 +201,7 @@ export default function StudentRequestStatusPage() {
         description="Simple live status for your class request."
       />
 
-      <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-900/70 shadow-[0_20px_70px_rgba(2,6,23,0.4)] backdrop-blur-xl">
+      <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl">
         <div className={`relative overflow-hidden bg-gradient-to-r ${tone.gradient} px-6 py-8 text-white md:px-8 md:py-10`}>
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(255,255,255,0.22),_transparent_35%)]" />
           <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
@@ -235,19 +235,19 @@ export default function StudentRequestStatusPage() {
         <SectionCard title="Request overview" subtitle="Essential details only. Open full details when needed.">
           <div className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900/70 p-4">
+              <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Topic</p>
-                <p className="mt-2 break-words text-lg font-bold text-zinc-100">{topic}</p>
+                <p className="mt-2 break-words text-lg font-bold text-zinc-900">{topic}</p>
               </div>
 
-              <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900/70 p-4">
+              <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Duration</p>
-                <p className="mt-2 text-lg font-bold text-zinc-100">{duration}</p>
+                <p className="mt-2 text-lg font-bold text-zinc-900">{duration}</p>
               </div>
 
-              <div className="rounded-[1.5rem] border border-white/10 bg-zinc-900/70 p-4">
+              <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Payment method</p>
-                <p className="mt-2 text-sm font-bold text-zinc-100">{request?.selectedCardId || 'Selected card on file'}</p>
+                <p className="mt-2 text-sm font-bold text-zinc-900">{request?.selectedCardId || 'Selected card on file'}</p>
               </div>
             </div>
 
@@ -281,7 +281,7 @@ export default function StudentRequestStatusPage() {
             {canJoin ? (
               <Link
                 to={matchingSession?.id ? `/app/session/${matchingSession.id}` : '/app/student/requests'}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-zinc-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-zinc-800"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-dark"
               >
                 Join session
                 <ArrowRight className="h-4 w-4" />
@@ -290,8 +290,8 @@ export default function StudentRequestStatusPage() {
 
             <Link
               to={`/app/student/requests/${requestId}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-zinc-800 px-4 py-3 text-sm font-bold text-zinc-100 transition hover:bg-zinc-700"
-              >
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-bold text-zinc-800 transition hover:bg-zinc-100"
+            >
               View full request details
             </Link>
 
@@ -308,7 +308,7 @@ export default function StudentRequestStatusPage() {
         </SectionCard>
       </div>
       {showCancelModal ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/70 p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
             <p className="text-lg font-black text-zinc-900">Cancel request</p>
             <p className="mt-1 text-sm text-zinc-600">Please provide a reason. This helps us improve matching quality.</p>

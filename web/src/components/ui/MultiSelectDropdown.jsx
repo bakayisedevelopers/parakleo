@@ -28,7 +28,7 @@ export default function MultiSelectDropdown({
 
   return (
     <div className="space-y-1">
-      <label className="block text-sm font-semibold text-zinc-200">{label}</label>
+      <label className="block text-sm font-semibold text-zinc-700">{label}</label>
       <input type="hidden" name={name} value={value.join(',')} required={required && !value.length} />
       <div className="relative">
         <button
@@ -55,7 +55,7 @@ export default function MultiSelectDropdown({
           </div>
         ) : null}
       </div>
-      {helperText ? <p className="text-xs text-zinc-400">{helperText}</p> : null}
+      {helperText ? <p className="text-xs text-zinc-500">{helperText}</p> : null}
     </div>
   );
 }
