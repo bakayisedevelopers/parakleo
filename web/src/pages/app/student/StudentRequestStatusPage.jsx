@@ -11,8 +11,10 @@ import { cancelClassRequest } from '../../../services/classRequestService';
 import { getUserProfile } from '../../../services/userService';
 
 function getStatusCopy(status) {
-  if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING, REQUEST_STATUSES.OFFERED].includes(status)) return 'Searching for a tutor';
-  if ([REQUEST_STATUSES.ACCEPTED, REQUEST_STATUSES.WAITING_STUDENT, REQUEST_STATUSES.IN_PROGRESS, REQUEST_STATUSES.IN_SESSION].includes(status)) return 'Tutor found';
+  if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING].includes(status)) return 'Searching for a tutor';
+  if (status === REQUEST_STATUSES.OFFERED) return 'Waiting for tutor to accept';
+  if (status === REQUEST_STATUSES.ACCEPTED) return 'Tutor found';
+  if ([REQUEST_STATUSES.WAITING_STUDENT, REQUEST_STATUSES.IN_PROGRESS, REQUEST_STATUSES.IN_SESSION].includes(status)) return 'Class ready';
   if (status === REQUEST_STATUSES.NO_TUTOR_AVAILABLE) return 'No tutor available';
   if (status === REQUEST_STATUSES.COMPLETED) return 'Class completed';
   if ([REQUEST_STATUSES.CANCELED, REQUEST_STATUSES.CANCELED_DURING, REQUEST_STATUSES.EXPIRED].includes(status)) return 'Request closed';
@@ -20,7 +22,7 @@ function getStatusCopy(status) {
 }
 
 function getStatusMeta(status) {
-  if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING, REQUEST_STATUSES.OFFERED].includes(status)) {
+  if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING].includes(status)) {
     return {
       label: 'Searching for tutor',
       tone: 'emerald',
@@ -29,12 +31,30 @@ function getStatusMeta(status) {
     };
   }
 
-  if ([REQUEST_STATUSES.ACCEPTED, REQUEST_STATUSES.WAITING_STUDENT, REQUEST_STATUSES.IN_PROGRESS, REQUEST_STATUSES.IN_SESSION].includes(status)) {
+  if (status === REQUEST_STATUSES.OFFERED) {
+    return {
+      label: 'Waiting for tutor to accept',
+      tone: 'violet',
+      icon: CheckCircle2,
+      badge: 'Tutor found • waiting for acceptance',
+    };
+  }
+
+  if (status === REQUEST_STATUSES.ACCEPTED) {
     return {
       label: 'Tutor found',
       tone: 'violet',
       icon: CheckCircle2,
       badge: 'Tutor accepted your request',
+    };
+  }
+
+  if ([REQUEST_STATUSES.WAITING_STUDENT, REQUEST_STATUSES.IN_PROGRESS, REQUEST_STATUSES.IN_SESSION].includes(status)) {
+    return {
+      label: 'Class ready',
+      tone: 'violet',
+      icon: CheckCircle2,
+      badge: 'Tutor accepted • session is ready',
     };
   }
 
@@ -144,7 +164,7 @@ export default function StudentRequestStatusPage() {
   );
   const shouldAutoOpenSession = canJoin && Boolean(matchingSession?.id);
   const isWaitingTutorAcceptance = currentStatus === REQUEST_STATUSES.OFFERED;
-  const offeredTutorId = request?.currentOfferTutorId || request?.tutorId || null;
+  const offeredTutorId = isWaitingTutorAcceptance ? (request?.currentOfferTutorId || request?.tutorId || null) : null;
 
   useEffect(() => {
     if (!shouldAutoOpenSession) return;
