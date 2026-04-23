@@ -7,6 +7,13 @@ function buildReferralLink(referralSlug) {
   return `${window.location.origin}/signup?ref=${encodeURIComponent(safeSlug)}`;
 }
 
+function buildReferralPreview(referralLink, maxLength = 42) {
+  const normalizedLink = String(referralLink || '').trim();
+  if (!normalizedLink) return '';
+  if (normalizedLink.length <= maxLength) return normalizedLink;
+  return `${normalizedLink.slice(0, maxLength)}...`;
+}
+
 export default function ReferralShareButton({
   referralSlug,
   className = '',
@@ -15,6 +22,7 @@ export default function ReferralShareButton({
   const [feedback, setFeedback] = useState('');
   const feedbackTimerRef = useRef(null);
   const referralLink = useMemo(() => buildReferralLink(referralSlug), [referralSlug]);
+  const referralPreview = useMemo(() => buildReferralPreview(referralLink), [referralLink]);
 
   if (!referralLink) return null;
 
@@ -85,7 +93,7 @@ export default function ReferralShareButton({
       </p>
       <div className="mt-3 rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Referral link</p>
-        <p className="mt-2 truncate text-sm font-medium text-zinc-700">{referralLink}</p>
+        <p className="mt-2 break-all text-sm font-medium text-zinc-700">{referralPreview}</p>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
