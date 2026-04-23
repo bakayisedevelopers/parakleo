@@ -197,12 +197,11 @@ export default function ProfilePage() {
       ) : null}
 
       {(user?.activeRole || user?.role) === 'student' ? (
-        <SectionCard title="Free minutes & referrals" subtitle="Share your code to earn +30 free minutes when a referred student completes signup and verifies email.">
+        <SectionCard title="Free minutes & referrals" subtitle="Share your referral link to earn +30 free minutes when a referred student completes their student profile.">
           <div className="space-y-2 text-sm text-zinc-700">
             <p><span className="font-semibold">Free minutes remaining:</span> {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</p>
-            <p><span className="font-semibold">Referral code:</span> {user?.referralCode || 'Not assigned yet'}</p>
             <p className="text-xs text-zinc-500">
-              Share link: {`${window.location.origin}/signup?ref=${encodeURIComponent(user?.referralCode || '')}`}
+              Share link: {`${window.location.origin}/signup?ref=${encodeURIComponent(user?.referralSlug || user?.referralCode || '')}`}
             </p>
           </div>
         </SectionCard>

@@ -14,6 +14,7 @@ import {
   TUTOR_VERIFICATION_STATUSES,
 } from '../../utils/onboarding';
 import PaymentMethodsManager from '../../components/app/PaymentMethodsManager';
+import { syncStudentGrowth } from '../../services/studentGrowthService';
 
 export default function OnboardingPage() {
   const { user, setUser } = useAuth();
@@ -46,8 +47,9 @@ export default function OnboardingPage() {
       },
       subjects: studentSubjects.length ? studentSubjects : DEFAULT_SUBJECTS,
     });
+    const syncedProfile = await syncStudentGrowth().catch(() => null);
 
-    setUser((prev) => ({ ...prev, ...profile }));
+    setUser((prev) => ({ ...prev, ...profile, ...(syncedProfile || {}) }));
     setStatusMessage('Student profile details saved.');
   };
 

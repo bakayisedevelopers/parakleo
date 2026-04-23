@@ -3,13 +3,14 @@ import { GraduationCap, LogOut, ShieldCheck, UserCircle2, X } from 'lucide-react
 import { useAuth } from '../../hooks/useAuth';
 import { useAdmin } from '../../hooks/useAdmin';
 import { getRoleNavigation } from '../../constants/navigation';
+import ReferralShareButton from './ReferralShareButton';
 
 const baseClass = 'group flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold transition-all';
 
 export default function Sidebar({ role, onNavigate, mobile = false }) {
   const { isAdmin } = useAdmin();
   const links = getRoleNavigation(role, { includeAdmin: isAdmin });
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -75,6 +76,12 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
       </div>
 
       <div className="mt-auto border-t border-zinc-200 pt-4">
+        {role === 'student' ? (
+          <ReferralShareButton
+            referralSlug={user?.referralSlug || user?.referralCode}
+            className="mb-3"
+          />
+        ) : null}
         <NavLink
           to="/app/profile"
           onClick={onNavigate}

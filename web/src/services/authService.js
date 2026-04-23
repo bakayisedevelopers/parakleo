@@ -106,7 +106,7 @@ export async function loginWithEmail({ email, password }) {
   });
 }
 
-export async function signupWithEmail({ name, email, password, role, referralCode = '' }) {
+export async function signupWithEmail({ name, email, password, role, referralSlug = '' }) {
   const clients = await getFirebaseClients();
 
   if (!clients) {
@@ -132,7 +132,7 @@ export async function signupWithEmail({ name, email, password, role, referralCod
       email,
       displayName: name,
       role,
-      pendingReferralCode: String(referralCode || '').trim().toUpperCase() || null,
+      pendingReferralSlug: String(referralSlug || '').trim().toLowerCase() || null,
     });
   } catch (error) {
     console.warn('Failed to create Firestore profile during signup. Falling back to auth user.', error);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { setDefaultPaymentMethod, removePaymentMethod } from '../../services/paymentMethodService';
 import { initializeCardAuthorization, verifyCardAuthorization } from '../../services/paystackService';
+import { syncStudentGrowth } from '../../services/studentGrowthService';
 
 export default function PaymentMethodsManager({ user, setUser, onMessage }) {
   const [isAuthorizingCard, setIsAuthorizingCard] = useState(false);
@@ -9,6 +10,12 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
     if (onMessage) {
       onMessage(message);
     }
+  };
+
+  const syncGrowthState = async () => {
+    const syncedProfile = await syncStudentGrowth().catch(() => null);
+    if (!syncedProfile) return;
+    setUser((prev) => ({ ...prev, ...syncedProfile }));
   };
 
   const addCard = async () => {
@@ -28,6 +35,7 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
                 paymentMethods: alreadyExists ? existingMethods : [...existingMethods, result.card],
               };
             });
+            await syncGrowthState();
 
             setMessage(
               result.refunded
@@ -54,12 +62,14 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
   const handleSetDefault = async (cardId) => {
     const next = await setDefaultPaymentMethod(user, cardId);
     setUser((prev) => ({ ...prev, ...next }));
+    await syncGrowthState();
     setMessage('Primary card updated.');
   };
 
   const handleRemoveCard = async (cardId) => {
     const next = await removePaymentMethod(user, cardId);
     setUser((prev) => ({ ...prev, ...next }));
+    await syncGrowthState();
     setMessage('Card removed.');
   };
 

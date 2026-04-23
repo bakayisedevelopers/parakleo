@@ -1,16 +1,20 @@
 import { getFirebaseClients } from '../firebase/config';
 import { DEFAULT_SUBJECTS } from '../constants/subjects';
 
-const DEFAULT_STUDENT_FREE_MINUTES = 90;
+const DEFAULT_STUDENT_FREE_MINUTES = 30;
 const MOCK_USER_KEY = 'claxi_mock_user';
 
-function buildReferralCode(uid) {
-  return `CLX-${String(uid || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`;
+function buildReferralSlug() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `clx-${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+  }
+
+  return `clx-${Math.random().toString(36).slice(2, 22)}`;
 }
 
-function buildDefaultProfile({ uid, email, displayName, role, referralCode, referredBy = null, pendingReferralCode = null }) {
+function buildDefaultProfile({ uid, email, displayName, role, referralSlug, referredBy = null, pendingReferralSlug = null }) {
   const normalizedRole = role || 'student';
-  const safeReferralCode = String(referralCode || buildReferralCode(uid)).trim().toUpperCase();
+  const safeReferralSlug = String(referralSlug || buildReferralSlug()).trim().toLowerCase();
 
   return {
     uid,
@@ -49,15 +53,16 @@ function buildDefaultProfile({ uid, email, displayName, role, referralCode, refe
       updatedAt: new Date().toISOString(),
     },
     freeMinutesRemaining: normalizedRole === 'student' ? DEFAULT_STUDENT_FREE_MINUTES : 0,
-    referralCode: safeReferralCode,
+    referralSlug: safeReferralSlug,
     referredBy,
-    pendingReferralCode: pendingReferralCode || null,
+    pendingReferralSlug: pendingReferralSlug || null,
     referralRewardCount: 0,
     totalFreeMinutesEarned: normalizedRole === 'student' ? DEFAULT_STUDENT_FREE_MINUTES : 0,
     totalFreeMinutesUsed: 0,
     growth: {
       completionRequirements: {
         emailVerified: false,
+        studentProfileComplete: false,
         phoneVerified: false,
       },
       accountCompletionRewardProcessed: false,
@@ -66,19 +71,27 @@ function buildDefaultProfile({ uid, email, displayName, role, referralCode, refe
   };
 }
 
-export async function upsertUserProfile({ uid, email, displayName, role, pendingReferralCode = null }) {
+export async function upsertUserProfile({ uid, email, displayName, role, pendingReferralSlug = null }) {
   const clients = await getFirebaseClients();
 
-  const profileShape = buildDefaultProfile({ uid, email, displayName, role, pendingReferralCode });
-
   if (!clients) {
-    return profileShape;
+    return buildDefaultProfile({ uid, email, displayName, role, pendingReferralSlug });
   }
 
   const { db, firestoreModule } = clients;
   const { doc, getDoc, serverTimestamp, setDoc } = firestoreModule;
   const userRef = doc(db, 'users', uid);
   const existing = await getDoc(userRef);
+  const existingData = existing.exists() ? existing.data() : {};
+  const profileShape = buildDefaultProfile({
+    uid,
+    email,
+    displayName,
+    role,
+    referralSlug: existingData.referralSlug || existingData.referralCode,
+    referredBy: existingData.referredBy || null,
+    pendingReferralSlug: pendingReferralSlug || existingData.pendingReferralSlug || null,
+  });
 
   await setDoc(
     userRef,

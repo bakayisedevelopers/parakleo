@@ -22,7 +22,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [searchParams] = useSearchParams();
-  const [referralCode, setReferralCode] = useState(() => String(searchParams.get('ref') || '').trim().toUpperCase());
+  const referralSlug = String(searchParams.get('ref') || '').trim().toLowerCase();
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { signup } = useAuth();
@@ -34,7 +34,7 @@ export default function SignupPage() {
 
     try {
       setIsSubmitting(true);
-      const user = await signup({ name, email, password, role, referralCode });
+      const user = await signup({ name, email, password, role, referralSlug });
       navigate(user.role === 'tutor' ? '/app/tutor' : '/app/student');
     } catch (submissionError) {
       setError(submissionError.message || 'Unable to create account right now.');
@@ -141,20 +141,11 @@ export default function SignupPage() {
               </div>
             </div>
 
-            <div>
-              <label htmlFor="referralCode" className="mb-2 block text-sm font-bold text-zinc-900">
-                Referral code (optional)
-              </label>
-              <input
-                id="referralCode"
-                name="referralCode"
-                type="text"
-                value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value.toUpperCase().trim())}
-                className="block w-full rounded-2xl border border-zinc-300 bg-zinc-50 py-3 px-4 text-zinc-900 placeholder-zinc-400 transition-all focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-                placeholder="CLX-XXXXXX"
-              />
-            </div>
+            {referralSlug ? (
+              <p className="rounded-2xl border border-brand/20 bg-brand/5 p-3 text-sm text-zinc-700">
+                This signup is linked to a student referral. Complete your student profile to activate the referral reward.
+              </p>
+            ) : null}
 
             <div>
               <label htmlFor="password" className="mb-2 block text-sm font-bold text-zinc-900">

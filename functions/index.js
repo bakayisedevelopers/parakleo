@@ -45,7 +45,7 @@ const DEFAULT_RATING = 4.5;
 const DEFAULT_AVG_RESPONSE_SECONDS = 30;
 const DEFAULT_CANCELLATION_RATE = 0.08;
 const FAIRNESS_WORKLOAD_CAP = 10;
-const DEFAULT_STUDENT_FREE_MINUTES = 90;
+const DEFAULT_STUDENT_FREE_MINUTES = 30;
 const REFERRAL_REWARD_MINUTES = 30;
 const REQUEST_STATUS = {
   PENDING: 'pending',
@@ -170,6 +170,18 @@ function normalizePositiveNumber(value, fallback) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return fallback;
   return numeric;
+}
+
+function hasCompletedStudentProfile(user = {}) {
+  const studentProfile = user?.studentProfile || {};
+  const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
+
+  return Boolean(
+    studentProfile.grade
+      && String(studentProfile.curriculum || '').trim()
+      && String(studentProfile.discoverySource || '').trim()
+      && paymentMethods.length > 0,
+  );
 }
 
 function isTruthyFlag(value) {
@@ -859,11 +871,13 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
 
     const baseUpdates = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      referralSlug: userData.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
       growth: {
         ...(userData.growth || {}),
         completionRequirements: {
           ...((userData.growth || {}).completionRequirements || {}),
           emailVerified,
+          studentProfileComplete: isStudent ? hasCompletedStudentProfile(userData) : false,
           phoneVerified: Boolean(((userData.growth || {}).completionRequirements || {}).phoneVerified || false),
         },
         lastGrowthSyncedAt: new Date().toISOString(),
@@ -890,11 +904,14 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
     }, { merge: true });
 
     const alreadyProcessed = Boolean((userData.growth || {}).accountCompletionRewardProcessed);
-    if (!emailVerified || alreadyProcessed) return;
+    const studentProfileComplete = hasCompletedStudentProfile(userData);
+    if (!studentProfileComplete || alreadyProcessed) return;
 
-    const pendingReferralCode = String(userData.pendingReferralCode || '').trim().toUpperCase();
-    if (!pendingReferralCode) {
+    const pendingReferralSlug = String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim();
+    if (!pendingReferralSlug) {
       transaction.set(userRef, {
+        pendingReferralSlug: null,
+        pendingReferralCode: null,
         growth: {
           ...(userData.growth || {}),
           accountCompletionRewardProcessed: true,
@@ -904,12 +921,24 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
       return;
     }
 
-    const referrerQuery = db.collection('users').where('referralCode', '==', pendingReferralCode).limit(1);
-    const referrerQuerySnap = await transaction.get(referrerQuery);
-    const referrerDoc = referrerQuerySnap.docs[0];
+    let referrerDoc = null;
+    const referrerSlugQuery = db.collection('users').where('referralSlug', '==', pendingReferralSlug).limit(1);
+    const referrerSlugSnap = await transaction.get(referrerSlugQuery);
+    referrerDoc = referrerSlugSnap.docs[0] || null;
+
+    if (!referrerDoc) {
+      const legacyReferrerQuery = db.collection('users').where('referralCode', '==', pendingReferralSlug.toUpperCase()).limit(1);
+      const legacyReferrerSnap = await transaction.get(legacyReferrerQuery);
+      referrerDoc = legacyReferrerSnap.docs[0] || null;
+    }
+
     const referrerId = referrerDoc?.id || null;
-    if (!referrerId || referrerId === decoded.uid) {
+    const referrerData = referrerDoc?.data() || {};
+    const referrerIsStudent = (referrerData.activeRole || referrerData.role || '').toLowerCase() === 'student';
+
+    if (!referrerId || referrerId === decoded.uid || !referrerIsStudent) {
       transaction.set(userRef, {
+        pendingReferralSlug: null,
         pendingReferralCode: null,
         growth: {
           ...(userData.growth || {}),
@@ -927,7 +956,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
     transaction.set(referralRef, {
       referrerId,
       referredUserId: decoded.uid,
-      referralCode: pendingReferralCode,
+      referralSlug: pendingReferralSlug,
       status: 'completed',
       rewardGranted: true,
       rewardMinutesGranted: REFERRAL_REWARD_MINUTES,
@@ -948,6 +977,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
 
     transaction.set(userRef, {
       referredBy: referrerId,
+      pendingReferralSlug: null,
       pendingReferralCode: null,
       growth: {
         ...(userData.growth || {}),

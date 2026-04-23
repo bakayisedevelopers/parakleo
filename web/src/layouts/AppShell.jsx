@@ -61,6 +61,7 @@ export default function AppShell() {
             <Topbar
               name={user?.fullName || user?.displayName || 'Claxi User'}
               role={activeRole}
+              referralSlug={user?.referralSlug || user?.referralCode}
               onOpenNav={() => setIsNavOpen(true)}
               showMenuButton={useBottomNav}
             />

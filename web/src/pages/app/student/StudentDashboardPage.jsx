@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import OnboardingStatusBanner from '../../../components/app/OnboardingStatusBanner';
+import ReferralShareButton from '../../../components/app/ReferralShareButton';
 import { useAuth } from '../../../hooks/useAuth';
 import { useLiveUserProfile } from '../../../hooks/useLiveUserProfile';
 import { useStudentRequests } from '../../../hooks/useClassRequests';
@@ -879,6 +880,11 @@ export default function StudentDashboardPage() {
                         <span className="text-sm font-semibold text-zinc-900">Or describe what you need help with</span>
                         <ChevronRight className={`h-4 w-4 text-zinc-500 transition ${isTextEntryOpen ? 'rotate-90' : ''}`} />
                       </button>
+
+                      <ReferralShareButton
+                        referralSlug={user?.referralSlug || user?.referralCode}
+                        className="mt-4"
+                      />
 
                       {isTextEntryOpen ? (
                         <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">

@@ -1,8 +1,11 @@
 import { Bell, Menu, UserCircle2 } from 'lucide-react';
+import ReferralShareButton from './ReferralShareButton';
 
 export default function Topbar({
   onOpenNav,
   name,
+  role,
+  referralSlug,
   showMenuButton = true,
 }) {
   return (
@@ -22,6 +25,12 @@ export default function Topbar({
         </div>
 
         <div className="flex items-center gap-2 md:gap-3">
+          {role === 'student' ? (
+            <ReferralShareButton
+              referralSlug={referralSlug}
+              variant="icon"
+            />
+          ) : null}
           <button
             type="button"
             className="relative rounded-2xl border border-zinc-200 bg-zinc-50 p-2.5 text-zinc-700 transition hover:bg-zinc-100"
