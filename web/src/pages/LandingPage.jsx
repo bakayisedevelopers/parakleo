@@ -1,7 +1,8 @@
 import { motion } from 'motion/react';
 import { ArrowRight, Calendar, CheckCircle2, Globe, ShieldCheck, Sparkles, Zap } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
+import { useAuth } from '../hooks/useAuth';
 
 function CTAButton({ children, variant = 'primary', ...props }) {
   const styles =
@@ -33,6 +34,12 @@ function FeatureCard({ icon: Icon, title, description }) {
 }
 
 export default function LandingPage() {
+  const { user, isInitializing, rememberMe } = useAuth();
+
+  if (!isInitializing && user && rememberMe) {
+    return <Navigate to="/app" replace />;
+  }
+
   return (
     <MainLayout>
       <div className="bg-gradient-to-b from-emerald-50 via-zinc-50 to-white pb-20">

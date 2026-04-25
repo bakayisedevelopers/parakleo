@@ -21,7 +21,7 @@ export function getRoleNavigation(role, options = {}) {
   } else {
     links = [
       { to: '/app/student', label: 'Home', icon: Home, end: true },
-      { to: '/app/student/requests', label: 'My Classes', icon: BookOpen },
+      { to: '/app/student/requests', label: 'Classes', icon: BookOpen },
       { to: '/app/student/payment', label: 'Payment', icon: Wallet },
     ];
   }

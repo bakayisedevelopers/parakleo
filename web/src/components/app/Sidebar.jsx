@@ -70,16 +70,19 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
         ))}
       </nav>
 
-      <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
-        <p className="font-semibold">Tip</p>
-        <p className="mt-1 leading-relaxed">Keep your profile and availability up to date for a smoother matching experience.</p>
-      </div>
+      {!mobile ? (
+        <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+          <p className="font-semibold">Tip</p>
+          <p className="mt-1 leading-relaxed">Keep your profile and availability up to date for a smoother matching experience.</p>
+        </div>
+      ) : null}
 
       <div className="mt-auto border-t border-zinc-200 pt-4">
         {role === 'student' ? (
           <ReferralShareButton
             referralSlug={user?.referralSlug || user?.referralCode}
             className="mb-3"
+            showIntro={!mobile}
           />
         ) : null}
         <NavLink

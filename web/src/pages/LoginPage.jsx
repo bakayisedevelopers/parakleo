@@ -19,11 +19,12 @@ function Button({ type = 'button', children, className = '', ...props }) {
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, setRememberMePreference } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -31,6 +32,7 @@ export default function LoginPage() {
 
     try {
       setIsSubmitting(true);
+      setRememberMePreference(rememberMe);
       const user = await login({ email, password });
       const fallbackPath = String(user?.activeRole || user?.role || 'student').toLowerCase() === 'tutor' ? '/app/tutor' : '/app/student';
       navigate(location.state?.from || fallbackPath);
@@ -111,7 +113,12 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-sm text-zinc-600">
-                <input type="checkbox" className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-brand focus:ring-brand" />
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.target.checked)}
+                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-brand focus:ring-brand"
+                />
                 Remember me
               </label>
               <a href="#" className="text-sm font-bold text-brand hover:underline">

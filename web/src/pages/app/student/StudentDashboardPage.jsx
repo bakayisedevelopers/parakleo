@@ -881,11 +881,6 @@ export default function StudentDashboardPage() {
                         <ChevronRight className={`h-4 w-4 text-zinc-500 transition ${isTextEntryOpen ? 'rotate-90' : ''}`} />
                       </button>
 
-                      <ReferralShareButton
-                        referralSlug={user?.referralSlug || user?.referralCode}
-                        className="mt-4"
-                      />
-
                       {isTextEntryOpen ? (
                         <div className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-4">
                           <textarea
@@ -930,6 +925,11 @@ export default function StudentDashboardPage() {
                           </div>
                         </div>
                       ) : null}
+
+                      <ReferralShareButton
+                        referralSlug={user?.referralSlug || user?.referralCode}
+                        className="mt-4"
+                      />
                     </div>
                   </>
                 ) : null}
@@ -987,7 +987,7 @@ export default function StudentDashboardPage() {
                       </div>
                       {pricingPreview ? (
                         <div className="flex w-full items-center justify-between gap-3">
-                          <span className="font-semibold text-brand">Due now</span>
+                          <span className="font-semibold text-brand">Due after {durationMinutes} min</span>
                           <span className="text-right font-semibold text-zinc-900">{formatRand(pricingPreview.finalPrice)}</span>
                         </div>
                       ) : null}

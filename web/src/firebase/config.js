@@ -1,5 +1,16 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut, deleteUser } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  getAuth,
+  onAuthStateChanged,
+  setPersistence,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut,
+  deleteUser,
+} from 'firebase/auth';
 import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, onSnapshot, query, where, orderBy, runTransaction, writeBatch } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -51,7 +62,10 @@ function initializeFirebase() {
       storage: getStorage(app),
       // Auth module functions
       authModule: {
+        browserLocalPersistence,
+        browserSessionPersistence,
         onAuthStateChanged,
+        setPersistence,
         signInWithEmailAndPassword,
         createUserWithEmailAndPassword,
         updateProfile,

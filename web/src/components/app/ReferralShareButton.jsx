@@ -18,6 +18,7 @@ export default function ReferralShareButton({
   referralSlug,
   className = '',
   variant = 'card',
+  showIntro = true,
 }) {
   const [feedback, setFeedback] = useState('');
   const feedbackTimerRef = useRef(null);
@@ -88,10 +89,12 @@ export default function ReferralShareButton({
 
   return (
     <div className={`rounded-[1.5rem] border border-emerald-200 bg-emerald-50/80 p-4 ${className}`}>
-      <p className="text-sm font-bold leading-6 text-zinc-900">
-        Get free 30 minutes when a student joins and completes their profile using your link.
-      </p>
-      <div className="mt-3 rounded-2xl border border-emerald-200/70 bg-white/80 p-3">
+      {showIntro ? (
+        <p className="text-sm font-bold leading-6 text-zinc-900">
+          Get free 30 minutes when a student joins and completes their profile using your link.
+        </p>
+      ) : null}
+      <div className={`${showIntro ? 'mt-3' : ''} rounded-2xl border border-emerald-200/70 bg-white/80 p-3`}>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Referral link</p>
         <p className="mt-2 break-all text-sm font-medium text-zinc-700">{referralPreview}</p>
       </div>

@@ -4,6 +4,59 @@ import { syncStudentGrowth } from './studentGrowthService';
 import { deleteUserProfile, getUserProfile, upsertUserProfile } from './userService';
 
 const MOCK_USER_KEY = 'claxi_mock_user';
+const REMEMBER_ME_KEY = 'claxi_remember_me';
+
+function getStorage(type) {
+  if (typeof window === 'undefined') return null;
+  if (type === 'session') return window.sessionStorage;
+  return window.localStorage;
+}
+
+function readRememberMePreference() {
+  const storage = getStorage('local');
+  return storage?.getItem(REMEMBER_ME_KEY) === 'true';
+}
+
+function persistRememberMePreference(rememberMe) {
+  const storage = getStorage('local');
+  if (!storage) return;
+  storage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
+}
+
+function clearRememberMePreference() {
+  const storage = getStorage('local');
+  storage?.removeItem(REMEMBER_ME_KEY);
+}
+
+function getStoredMockUser() {
+  const localUser = getStorage('local')?.getItem(MOCK_USER_KEY);
+  if (localUser) return JSON.parse(localUser);
+
+  const sessionUser = getStorage('session')?.getItem(MOCK_USER_KEY);
+  if (sessionUser) return JSON.parse(sessionUser);
+
+  return null;
+}
+
+function persistMockUser(user, rememberMe) {
+  const localStorageRef = getStorage('local');
+  const sessionStorageRef = getStorage('session');
+  const payload = JSON.stringify(user);
+
+  if (rememberMe) {
+    localStorageRef?.setItem(MOCK_USER_KEY, payload);
+    sessionStorageRef?.removeItem(MOCK_USER_KEY);
+    return;
+  }
+
+  sessionStorageRef?.setItem(MOCK_USER_KEY, payload);
+  localStorageRef?.removeItem(MOCK_USER_KEY);
+}
+
+function clearStoredMockUser() {
+  getStorage('local')?.removeItem(MOCK_USER_KEY);
+  getStorage('session')?.removeItem(MOCK_USER_KEY);
+}
 
 function normalizeRole(role) {
   const normalized = String(role || '').toLowerCase();
@@ -40,8 +93,7 @@ export function subscribeToAuthChanges(callback) {
 
   getFirebaseClients().then((clients) => {
     if (!clients) {
-      const saved = localStorage.getItem(MOCK_USER_KEY);
-      callback(saved ? JSON.parse(saved) : null);
+      callback(getStoredMockUser());
       return;
     }
 
@@ -71,6 +123,7 @@ export function subscribeToAuthChanges(callback) {
 }
 
 export async function loginWithEmail({ email, password }) {
+  const rememberMe = readRememberMePreference();
   const clients = await getFirebaseClients();
 
   if (!clients) {
@@ -81,11 +134,15 @@ export async function loginWithEmail({ email, password }) {
       displayName: email.split('@')[0],
       role: 'student',
     };
-    localStorage.setItem(MOCK_USER_KEY, JSON.stringify(mockUser));
+    persistMockUser(mockUser, rememberMe);
     return normalizeUserProfile(mockUser, mockUser);
   }
 
   const { auth, authModule } = clients;
+  const persistence = rememberMe
+    ? authModule.browserLocalPersistence
+    : authModule.browserSessionPersistence;
+  await authModule.setPersistence(auth, persistence);
   const credential = await authModule.signInWithEmailAndPassword(auth, email, password);
   await syncStudentGrowth().catch(() => null);
 
@@ -104,6 +161,14 @@ export async function loginWithEmail({ email, password }) {
     role: profile?.role || 'student',
     ...profile,
   });
+}
+
+export function setRememberMePreference(rememberMe) {
+  persistRememberMePreference(Boolean(rememberMe));
+}
+
+export function getRememberMePreference() {
+  return readRememberMePreference();
 }
 
 export async function signupWithEmail({ name, email, password, role, referralSlug = '' }) {
@@ -168,18 +233,21 @@ export async function logoutUser() {
   const clients = await getFirebaseClients();
 
   if (!clients) {
-    localStorage.removeItem(MOCK_USER_KEY);
+    clearStoredMockUser();
+    clearRememberMePreference();
     return;
   }
 
   await clients.authModule.signOut(clients.auth);
+  clearRememberMePreference();
 }
 
 export async function deleteAccount(user) {
   const clients = await getFirebaseClients();
 
   if (!clients) {
-    localStorage.removeItem(MOCK_USER_KEY);
+    clearStoredMockUser();
+    clearRememberMePreference();
     localStorage.removeItem('claxi_mock_requests');
     localStorage.removeItem('claxi_mock_sessions');
     localStorage.removeItem('claxi_mock_notifications');
@@ -193,4 +261,5 @@ export async function deleteAccount(user) {
 
   await deleteUserProfile(user.uid);
   await clients.authModule.deleteUser(authUser);
+  clearRememberMePreference();
 }
