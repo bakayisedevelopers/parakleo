@@ -13,6 +13,7 @@
     "@google-cloud/vision": "^5.2.0",
     "firebase-admin": "^12.1.1",
     "firebase-functions": "^5.1.0",
+    "pdf-parse": "^1.1.1",
     "resend": "^4.1.2"
   }
 }

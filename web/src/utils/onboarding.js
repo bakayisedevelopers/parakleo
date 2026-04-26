@@ -54,10 +54,12 @@ export function getStudentOnboardingStatus(user) {
 
 export function getTutorOnboardingStatus(user) {
   const tutorProfile = user?.tutorProfile || {};
-  const hasQualification = Boolean(tutorProfile.highestGradeResultUrl && typeof tutorProfile.mathScore === 'number');
-  const qualified = hasQualification && tutorProfile.mathScore >= 60;
+  const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
+  const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+  const hasQualification = qualifiedSubjects.length > 0;
+  const qualified = hasQualification;
   const hasPayout = Boolean(tutorProfile.payout?.bankName && tutorProfile.payout?.accountNumber && tutorProfile.payout?.accountHolder);
-  const hasProfile = Boolean(user?.profilePhoto && tutorProfile.gradesToTutor?.length && (user?.subjects || []).length);
+  const hasProfile = Boolean(user?.selfieVerified && user?.selfieUrl && tutorProfile.gradesToTutor?.length && activeSubjects.length);
   if (qualified && hasPayout && hasProfile) {
     return {
       complete: true,
@@ -73,7 +75,7 @@ export function getTutorOnboardingStatus(user) {
       complete: false,
       step: TUTOR_PROFILE_STEPS.QUALIFICATIONS,
       title: 'Upload and pass qualification check',
-      message: 'Math score must be at least 60% to tutor on Claxi.',
+      message: 'Upload results so Claxi can verify subjects with marks of at least 60%.',
     };
   }
 
@@ -88,9 +90,9 @@ export function getTutorOnboardingStatus(user) {
 
   return {
     complete: false,
-    step: TUTOR_PROFILE_STEPS.PROFILE,
-    title: 'Complete tutor profile',
-      message: 'Add profile photo, grades, and subjects to finish setup.',
+      step: TUTOR_PROFILE_STEPS.PROFILE,
+      title: 'Complete tutor profile',
+      message: 'Capture a live selfie, add grades, and choose active subjects to finish setup.',
   };
 }
 

@@ -18,6 +18,7 @@ import { useLiveUserProfile } from '../../../hooks/useLiveUserProfile';
 import { useStudentRequests } from '../../../hooks/useClassRequests';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
+import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
 import {
   extractAttachments,
 } from '../../../services/attachmentExtractionService';
@@ -233,6 +234,7 @@ export default function StudentDashboardPage() {
   const [extractionOverlayState, setExtractionOverlayState] = useState('idle');
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
+  const { subjectOptions } = useSubjectCatalog();
 
   const onboardingStatus = getStudentOnboardingStatus(currentUser || user);
   const activeOrOngoingRequest = requests.find((request) => [
@@ -282,10 +284,10 @@ export default function StudentDashboardPage() {
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
   };
 
-  const refreshQuote = async (minutes) => {
+  const refreshQuote = async (minutes, subject = selectedSubject) => {
     const nextQuote = await fetchPricingQuote({
       durationMinutes: minutes,
-      subject: 'Mathematics',
+      subject: subject || 'Mathematics',
     });
     setQuote(nextQuote);
     return nextQuote;
@@ -309,7 +311,7 @@ export default function StudentDashboardPage() {
     setAdvanceIntent('');
     setError('');
     if (!isManualSubjectRef.current) {
-      setSelectedSubject(resolveSubjectFromText(nextTopic, SUBJECT_OPTIONS));
+      setSelectedSubject(resolveSubjectFromText(nextTopic, subjectOptions));
     }
     resizeTextarea();
   };
@@ -321,7 +323,7 @@ export default function StudentDashboardPage() {
     setAdvanceIntent('');
     setError('');
     if (!isManualSubjectRef.current) {
-      setSelectedSubject(resolveSubjectFromText(value, SUBJECT_OPTIONS));
+      setSelectedSubject(resolveSubjectFromText(value, subjectOptions));
     }
     setTimeout(() => resizeTextarea(), 0);
   };
@@ -588,7 +590,7 @@ export default function StudentDashboardPage() {
       try {
         const result = await classifySubjectFromText({
           inputText: combinedText,
-          supportedSubjects: SUBJECT_OPTIONS,
+          supportedSubjects: subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS,
         });
 
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
@@ -623,7 +625,7 @@ export default function StudentDashboardPage() {
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [topic, attachmentExtractionByKey, hasManualDurationOverride]);
+  }, [topic, attachmentExtractionByKey, hasManualDurationOverride, subjectOptions]);
 
   useEffect(() => {
     if (!onboardingStatus.complete) return;
@@ -631,7 +633,7 @@ export default function StudentDashboardPage() {
       setError(quoteError.message || 'Unable to refresh pricing quote.');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [durationMinutes]);
+  }, [durationMinutes, selectedSubject]);
 
   useEffect(() => {
     if (!advanceIntent || !readyForReview) return;
@@ -710,6 +712,13 @@ export default function StudentDashboardPage() {
   const handleDurationChange = (event) => {
     setHasManualDurationOverride(true);
     setDurationMinutes(Number(event.target.value || DEFAULT_LESSON_DURATION));
+    setError('');
+  };
+
+  const handleSubjectChange = (event) => {
+    isManualSubjectRef.current = true;
+    setSelectedSubject(event.target.value);
+    setQuote(null);
     setError('');
   };
 
@@ -966,10 +975,21 @@ export default function StudentDashboardPage() {
                       </span>
                     </div>
 
-                    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
+                    <label className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Subject</span>
-                      <span className="text-right font-semibold text-zinc-900">{selectedSubject || 'Select subject'}</span>
-                    </div>
+                      <select
+                        value={selectedSubject}
+                        onChange={handleSubjectChange}
+                        className="max-w-[190px] bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
+                      >
+                        <option value="">Select subject</option>
+                        {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
+                          <option key={subject.value} value={subject.value}>
+                            {subject.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
                     <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Topic</span>
@@ -1055,7 +1075,7 @@ export default function StudentDashboardPage() {
               className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-900 outline-none"
             >
               <option value="">Select subject</option>
-              {SUBJECT_OPTIONS.map((subject) => (
+              {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
                 <option key={subject.value} value={subject.value}>
                   {subject.label}
                 </option>

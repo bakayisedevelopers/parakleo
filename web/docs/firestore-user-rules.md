@@ -1,6 +1,6 @@
-# Firestore rules for protecting user documents (development template)
+# Firestore rules for protecting user and tutor verification documents
 
-Use this pattern so each signed-in user can only read/write their own `users/{uid}` document.
+This repo does not include deployable `firestore.rules` or `storage.rules` files. Use this as the recommended production rule shape so users can manage their own basic data while Cloud Functions own verified qualification fields.
 
 ```firestore
 rules_version = '2';
@@ -14,12 +14,36 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Each user can only access their own profile document.
-    match /users/{userId} {
-      allow read, write: if isSelf(userId);
+    function protectedTutorFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'qualifiedSubjects',
+        'tutorProfile.verificationStatus'
+      ]);
     }
 
-    // Keep everything else locked by default and open explicitly as needed.
+    match /users/{userId} {
+      allow read: if isSelf(userId);
+      allow create: if isSelf(userId);
+      allow update: if isSelf(userId)
+        && protectedTutorFieldsUnchanged();
+    }
+
+    match /tutorDocuments/{docId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'UPLOADED'
+        && request.resource.data.extractedText == ''
+        && request.resource.data.extractedSubjects == []
+        && request.resource.data.qualifiedSubjects == [];
+      allow update, delete: if false;
+    }
+
+    match /system/subjects {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
@@ -27,4 +51,25 @@ service cloud.firestore {
 }
 ```
 
-> Note: Cloud Functions using Admin SDK bypass Firestore security rules.
+Recommended Storage rules for the new files:
+
+```firestore
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /tutorSelfies/{userId}/{fileName} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /tutorDocuments/{userId}/{docId}/{fileName} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
+```
+
+Cloud Functions using the Admin SDK bypass Firestore and Storage security rules.

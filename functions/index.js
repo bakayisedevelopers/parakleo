@@ -6,6 +6,7 @@ const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
 const { randomUUID } = require('crypto');
+const pdfParse = require('pdf-parse');
 const {
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
@@ -14,6 +15,10 @@ const {
   loadPricingConfig,
   sanitizePricingSnapshot,
 } = require('./pricingEngine');
+const {
+  normalizeSubjectName,
+  extractSubjectsAndMarks,
+} = require('./subjectExtraction');
 
 admin.initializeApp();
 
@@ -195,7 +200,7 @@ function isTruthyFlag(value) {
 }
 
 function isTutorDispatchEligible(tutor = {}, subjectKey) {
-  const normalizedSubjects = (tutor.subjects || []).map((entry) => String(entry || '').trim().toLowerCase());
+  const normalizedSubjects = (tutor.activeSubjects || tutor.subjects || []).map((entry) => String(entry || '').trim().toLowerCase());
   const isDispatchPaused = isTruthyFlag(
     tutor.dispatchPaused
       ?? tutor.isDispatchPaused
@@ -235,6 +240,173 @@ function getRecentAssignmentsCount(tutor = {}) {
 
 function randomIndex(max) {
   return Math.floor(Math.random() * Math.max(1, max));
+}
+
+function hasArrayChanged(before = [], after = []) {
+  return JSON.stringify(before || []) !== JSON.stringify(after || []);
+}
+
+function normalizeActiveSubjects(values = []) {
+  const seen = new Set();
+  return values
+    .map((value) => normalizeSubjectName(value) || String(value || '').trim())
+    .filter(Boolean)
+    .filter((subject) => {
+      const key = subject.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+async function extractImageTextWithVision(buffer) {
+  const [result] = await getVisionClient().documentTextDetection({ image: { content: buffer } });
+  return result?.fullTextAnnotation?.text || '';
+}
+
+async function extractPdfTextWithVision({ bucket, filePath, docId }) {
+  const outputPrefix = `visionOcr/tutorDocuments/${docId}/`;
+  const request = {
+    requests: [
+      {
+        inputConfig: {
+          gcsSource: { uri: `gs://${bucket.name}/${filePath}` },
+          mimeType: 'application/pdf',
+        },
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+        outputConfig: {
+          gcsDestination: { uri: `gs://${bucket.name}/${outputPrefix}` },
+          batchSize: 5,
+        },
+      },
+    ],
+  };
+
+  const [operation] = await getVisionClient().asyncBatchAnnotateFiles(request);
+  await operation.promise();
+  const [files] = await bucket.getFiles({ prefix: outputPrefix });
+  const textParts = [];
+
+  await Promise.all(files.map(async (file) => {
+    const [contents] = await file.download();
+    const payload = JSON.parse(contents.toString('utf8'));
+    (payload.responses || []).forEach((response) => {
+      if (response.fullTextAnnotation?.text) {
+        textParts.push(response.fullTextAnnotation.text);
+      }
+    });
+    await file.delete().catch(() => {});
+  }));
+
+  return textParts.join('\n').trim();
+}
+
+async function extractDocumentText({ filePath, contentType, docId }) {
+  const bucket = admin.storage().bucket();
+  const file = bucket.file(filePath);
+  const [buffer] = await file.download();
+  const normalizedType = String(contentType || '').toLowerCase();
+
+  if (normalizedType.includes('pdf') || filePath.toLowerCase().endsWith('.pdf')) {
+    let text = '';
+    try {
+      const parsed = await pdfParse(buffer);
+      text = String(parsed?.text || '').trim();
+    } catch (error) {
+      logger.warn('PDF text extraction failed, falling back to OCR.', {
+        docId,
+        error: error.message,
+      });
+    }
+
+    if (text.replace(/\s/g, '').length >= 40) {
+      return text;
+    }
+
+    return extractPdfTextWithVision({ bucket, filePath, docId });
+  }
+
+  return extractImageTextWithVision(buffer);
+}
+
+function buildQualifiedSubjects(extractedSubjects = []) {
+  return extractedSubjects.filter((item) => Number(item.mark) >= 60);
+}
+
+async function mergeTutorQualifiedSubjects({ uid, docId, qualifiedSubjects }) {
+  const userRef = db.collection('users').doc(uid);
+  await db.runTransaction(async (transaction) => {
+    const userSnap = await transaction.get(userRef);
+    const user = userSnap.exists ? userSnap.data() : {};
+    const existingQualified = Array.isArray(user.qualifiedSubjects) ? user.qualifiedSubjects : [];
+    const bySubject = new Map();
+    const now = new Date().toISOString();
+
+    existingQualified.forEach((item) => {
+      if (!item?.subject) return;
+      bySubject.set(item.subject, item);
+    });
+
+    qualifiedSubjects.forEach((item) => {
+      const subject = normalizeSubjectName(item.subject) || item.subject;
+      const mark = Number(item.mark || 0);
+      const existing = bySubject.get(subject);
+      if (!existing || mark > Number(existing.mark || 0)) {
+        bySubject.set(subject, {
+          subject,
+          mark,
+          sourceDocumentId: docId,
+          updatedAt: now,
+        });
+      }
+    });
+
+    const nextQualifiedSubjects = [...bySubject.values()].sort((a, b) => a.subject.localeCompare(b.subject));
+    const qualifiedNames = nextQualifiedSubjects.map((item) => item.subject);
+    const existingActive = normalizeActiveSubjects(user.activeSubjects || user.subjects || []);
+    const nextActiveSubjects = normalizeActiveSubjects([...existingActive, ...qualifiedSubjects.map((item) => item.subject)])
+      .filter((subject) => qualifiedNames.includes(subject));
+
+    transaction.set(userRef, {
+      qualifiedSubjects: nextQualifiedSubjects,
+      activeSubjects: nextActiveSubjects,
+      subjects: nextActiveSubjects,
+      tutorProfile: {
+        ...(user.tutorProfile || {}),
+        verificationStatus: nextQualifiedSubjects.length ? 'verified' : 'pending',
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+}
+
+async function refreshGlobalSubjects() {
+  const tutorsSnap = await db.collection('users').where('activeRole', '==', 'tutor').get();
+  const counts = new Map();
+
+  tutorsSnap.docs.forEach((docSnap) => {
+    const activeSubjects = normalizeActiveSubjects(docSnap.data().activeSubjects || []);
+    const uniqueSubjects = [...new Set(activeSubjects)];
+    uniqueSubjects.forEach((subject) => {
+      counts.set(subject, (counts.get(subject) || 0) + 1);
+    });
+  });
+
+  const subjects = [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, tutorCount]) => ({
+      name,
+      tutorCount,
+      updatedAt: new Date().toISOString(),
+    }));
+
+  await db.collection('system').doc('subjects').set({
+    subjects,
+    subjectNames: subjects.map((subject) => subject.name),
+    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return subjects;
 }
 
 function rankTutorsWithFairness(candidates = []) {
@@ -380,6 +552,86 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   });
+});
+
+exports.processTutorDocument = onDocumentCreated('tutorDocuments/{docId}', async (event) => {
+  const docId = event.params.docId;
+  const docRef = db.collection('tutorDocuments').doc(docId);
+  const data = event.data?.data() || {};
+
+  if (!data.uid || !data.filePath) {
+    await docRef.set({
+      status: 'FAILED',
+      error: 'Document record is missing uid or filePath.',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return;
+  }
+
+  await docRef.set({
+    status: 'PROCESSING',
+    error: null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  try {
+    const extractedText = await extractDocumentText({
+      filePath: data.filePath,
+      contentType: data.contentType,
+      docId,
+    });
+    const extractedSubjects = extractSubjectsAndMarks(extractedText);
+    const qualifiedSubjects = buildQualifiedSubjects(extractedSubjects);
+
+    await docRef.set({
+      extractedText,
+      extractedSubjects,
+      qualifiedSubjects,
+      status: 'VERIFIED',
+      error: null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    await mergeTutorQualifiedSubjects({
+      uid: data.uid,
+      docId,
+      qualifiedSubjects,
+    });
+    await refreshGlobalSubjects();
+
+    logger.info('Tutor document processed.', {
+      docId,
+      uid: data.uid,
+      extractedSubjectCount: extractedSubjects.length,
+      qualifiedSubjectCount: qualifiedSubjects.length,
+    });
+  } catch (error) {
+    logger.error('Tutor document processing failed.', {
+      docId,
+      uid: data.uid,
+      error: error.message,
+    });
+    await docRef.set({
+      status: 'FAILED',
+      error: error.message || 'Document processing failed.',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+});
+
+exports.refreshGlobalSubjectsOnTutorChange = onDocumentWritten('users/{uid}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.exists ? event.data.after.data() : {};
+  const wasTutor = before.activeRole === 'tutor' || (before.roles || []).includes('tutor');
+  const isTutor = after.activeRole === 'tutor' || (after.roles || []).includes('tutor');
+
+  if (!wasTutor && !isTutor) return;
+
+  const changed = hasArrayChanged(before.activeSubjects, after.activeSubjects)
+    || hasArrayChanged(before.qualifiedSubjects, after.qualifiedSubjects);
+  if (!changed) return;
+
+  await refreshGlobalSubjects();
 });
 
 function sanitizeCloudflareIceServers(iceServers) {

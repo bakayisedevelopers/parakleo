@@ -25,8 +25,12 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
     activeRole: normalizedRole,
     roles: normalizedRole === 'tutor' ? ['tutor'] : ['student'],
     profilePhoto: '',
+    selfieUrl: '',
+    selfieVerified: false,
     phoneNumber: '',
     subjects: DEFAULT_SUBJECTS,
+    activeSubjects: normalizedRole === 'tutor' ? [] : DEFAULT_SUBJECTS,
+    qualifiedSubjects: [],
     bio: '',
     availability: '',
     onlineStatus: 'offline',
@@ -229,7 +233,7 @@ export async function getTutorCandidatesForRequest({ subject }) {
     .filter((tutor) => {
       const tutorProfile = tutor.tutorProfile || {};
       const isVerified = tutorProfile.verificationStatus === 'verified';
-      const normalizedSubjects = (tutor.subjects || []).map((item) => String(item || '').trim().toLowerCase());
+      const normalizedSubjects = (tutor.activeSubjects || tutor.subjects || []).map((item) => String(item || '').trim().toLowerCase());
       const requestSubject = String(subject || 'Mathematics').trim().toLowerCase();
       return isVerified && normalizedSubjects.includes(requestSubject) && !tutor.activeSessionId;
     })

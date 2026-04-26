@@ -4,16 +4,24 @@ import SectionCard from '../../components/ui/SectionCard';
 import PageHeader from '../../components/ui/PageHeader';
 import FormField from '../../components/ui/FormField';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
+import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
+import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
+import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
 import { useAuth } from '../../hooks/useAuth';
+import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { getStudentOnboardingStatus, getTutorOnboardingStatus } from '../../utils/onboarding';
 import { getUserProfile, updateUserProfile } from '../../services/userService';
-import { DEFAULT_SUBJECTS, SUBJECT_OPTIONS, normalizeSubjectList } from '../../constants/subjects';
+import { DEFAULT_SUBJECTS, normalizeSubjectList } from '../../constants/subjects';
+import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 
 export default function ProfilePage() {
   const { user, logout, deleteAccount, setUser } = useAuth();
+  const { profile: liveProfile } = useLiveUserProfile(user?.uid);
+  const currentUser = liveProfile || user;
   const navigate = useNavigate();
-  const studentStatus = getStudentOnboardingStatus(user);
-  const tutorStatus = getTutorOnboardingStatus(user);
+  const studentStatus = getStudentOnboardingStatus(currentUser);
+  const tutorStatus = getTutorOnboardingStatus(currentUser);
+  const { subjectOptions } = useSubjectCatalog();
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState('');
@@ -31,6 +39,9 @@ export default function ProfilePage() {
 
     getUserProfile(user.uid).then((profile) => {
       const profileData = profile || user;
+      if (profile) {
+        setUser((prev) => ({ ...prev, ...profile }));
+      }
       setForm({
         fullName: profileData.fullName || profileData.displayName || '',
         phoneNumber: profileData.phoneNumber || '',
@@ -39,7 +50,7 @@ export default function ProfilePage() {
         availability: profileData.availability || '',
       });
     });
-  }, [user]);
+  }, [setUser, user]);
 
   const handleLogout = async () => {
     await logout();
@@ -70,22 +81,27 @@ export default function ProfilePage() {
 
     setIsSaving(true);
     setMessage('');
-    const profile = await updateUserProfile(user.uid, {
+    const updates = {
       fullName: form.fullName,
       displayName: form.fullName,
       phoneNumber: form.phoneNumber,
       bio: form.bio,
       availability: form.availability,
-      subjects: normalizeSubjectList(form.subjects).length ? normalizeSubjectList(form.subjects) : DEFAULT_SUBJECTS,
-    });
+    };
+
+    if (!isTutorRole) {
+      updates.subjects = normalizeSubjectList(form.subjects).length ? normalizeSubjectList(form.subjects) : DEFAULT_SUBJECTS;
+    }
+
+    const profile = await updateUserProfile(user.uid, updates);
 
     setUser((prev) => ({ ...prev, ...profile }));
     setMessage('Profile details saved.');
     setIsSaving(false);
   };
 
-  const isTutorRole = (user?.activeRole || user?.role) === 'tutor';
-  const tutorProfileData = user?.tutorProfile || {};
+  const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
+  const tutorProfileData = currentUser?.tutorProfile || {};
   const formatPercent = (value) => `${(Math.max(0, Number(value || 0) <= 1 ? Number(value || 0) * 100 : Number(value || 0))).toFixed(1)}%`;
   const formatDateTime = (value) => {
     if (!value) return 'Not available yet';
@@ -98,10 +114,10 @@ export default function ProfilePage() {
     <div className="space-y-6">
       <PageHeader title="Profile & Settings" description="Manage your account, profile details, and onboarding progress in one place." />
 
-      {!studentStatus.complete || (user?.roles || []).includes('tutor') && !tutorStatus.complete ? (
+      {!studentStatus.complete || (currentUser?.roles || []).includes('tutor') && !tutorStatus.complete ? (
         <SectionCard title="Complete profile">
           <p className="text-sm text-zinc-700">Finish required onboarding details before requesting classes or teaching online.</p>
-          <Link to={`/app/onboarding?role=${(user?.activeRole || user?.role || 'student').toLowerCase()}`} className="mt-3 inline-flex rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white">
+          <Link to={`/app/onboarding?role=${(currentUser?.activeRole || currentUser?.role || 'student').toLowerCase()}`} className="mt-3 inline-flex rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white">
             Open complete profile
           </Link>
         </SectionCard>
@@ -114,14 +130,15 @@ export default function ProfilePage() {
             <FormField label="Phone number" name="phoneNumber" value={form.phoneNumber} onChange={(event) => setForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} />
           </div>
           <FormField label="Bio" name="bio" as="textarea" rows={3} value={form.bio} onChange={(event) => setForm((prev) => ({ ...prev, bio: event.target.value }))} />
-          <MultiSelectDropdown
-            label="Subjects"
-            name="subjects"
-            options={SUBJECT_OPTIONS}
-            value={form.subjects}
-            onChange={(subjects) => setForm((prev) => ({ ...prev, subjects }))}
-            helperText="Currently only Mathematics is available."
-          />
+          {!isTutorRole ? (
+            <MultiSelectDropdown
+              label="Subjects"
+              name="subjects"
+              options={subjectOptions}
+              value={form.subjects}
+              onChange={(subjects) => setForm((prev) => ({ ...prev, subjects }))}
+            />
+          ) : null}
           {isTutorRole ? (
             <>
               <FormField label="Availability" name="availability" value={form.availability} onChange={(event) => setForm((prev) => ({ ...prev, availability: event.target.value }))} placeholder="Weekdays after 5pm" />
@@ -136,16 +153,34 @@ export default function ProfilePage() {
 
       <SectionCard action={<button type="button" onClick={handleLogout} className="rounded-xl border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">Log out</button>}>
         <dl className="grid gap-6 sm:grid-cols-2 text-zinc-800">
-          <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Email</dt><dd className="mt-1 text-lg font-semibold">{user?.email}</dd></div>
-          <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Role</dt><dd className="mt-1 text-lg font-semibold capitalize">{user?.activeRole || user?.role}</dd></div>
+          <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Email</dt><dd className="mt-1 text-lg font-semibold">{currentUser?.email}</dd></div>
+          <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Role</dt><dd className="mt-1 text-lg font-semibold capitalize">{currentUser?.activeRole || currentUser?.role}</dd></div>
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Student onboarding</dt><dd className="mt-1 text-sm">{studentStatus.complete ? 'Complete' : studentStatus.message}</dd></div>
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? 'Complete' : tutorStatus.message}</dd></div>
         </dl>
       </SectionCard>
 
       {isTutorRole ? (
-        <SectionCard title="Dispatch metrics" subtitle="These values are used when ranking tutors for incoming requests.">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <>
+          <SectionCard title="Tutor verification" subtitle="Capture a live selfie and upload results so Claxi can verify your subject eligibility.">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div>
+                <h3 className="mb-2 text-sm font-bold text-zinc-800">Live selfie</h3>
+                <LiveSelfieCapture user={currentUser} setUser={setUser} onMessage={setMessage} />
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-bold text-zinc-800">Result documents</h3>
+                <TutorDocumentsManager user={currentUser} onMessage={setMessage} />
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Subjects you qualify to tutor" subtitle="Choose which verified subjects you want active for tutor matching.">
+            <QualifiedSubjectsManager user={currentUser} setUser={setUser} onMessage={setMessage} />
+          </SectionCard>
+
+          <SectionCard title="Dispatch metrics" subtitle="These values are used when ranking tutors for incoming requests.">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Acceptance rate</p>
               <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.acceptanceRate ?? user?.acceptanceRate)}</p>
@@ -192,16 +227,17 @@ export default function ProfilePage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last offer received</p>
               <p className="mt-1 text-sm font-semibold text-zinc-900">{formatDateTime(tutorProfileData.lastOfferAt || user?.lastOfferAt)}</p>
             </div>
-          </div>
-        </SectionCard>
+            </div>
+          </SectionCard>
+        </>
       ) : null}
 
-      {(user?.activeRole || user?.role) === 'student' ? (
+      {(currentUser?.activeRole || currentUser?.role) === 'student' ? (
         <SectionCard title="Free minutes & referrals" subtitle="Share your referral link to earn +30 free minutes when a referred student completes their student profile.">
           <div className="space-y-2 text-sm text-zinc-700">
-            <p><span className="font-semibold">Free minutes remaining:</span> {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</p>
+            <p><span className="font-semibold">Free minutes remaining:</span> {Number(currentUser?.freeMinutesRemaining || 0).toFixed(2)} min</p>
             <p className="text-xs text-zinc-500">
-              Share link: {`${window.location.origin}/signup?ref=${encodeURIComponent(user?.referralSlug || user?.referralCode || '')}`}
+              Share link: {`${window.location.origin}/signup?ref=${encodeURIComponent(currentUser?.referralSlug || currentUser?.referralCode || '')}`}
             </p>
           </div>
         </SectionCard>

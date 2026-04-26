@@ -4,10 +4,14 @@ import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
 import FormField from '../../components/ui/FormField';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
+import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
+import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
+import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
 import { useAuth } from '../../hooks/useAuth';
+import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { updateUserProfile } from '../../services/userService';
-import { uploadUserFile } from '../../services/storageService';
-import { DEFAULT_SUBJECTS, SUBJECT_OPTIONS, normalizeSubjectList } from '../../constants/subjects';
+import { DEFAULT_SUBJECTS, normalizeSubjectList } from '../../constants/subjects';
+import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import {
   getStudentOnboardingStatus,
   getTutorOnboardingStatus,
@@ -18,22 +22,23 @@ import { syncStudentGrowth } from '../../services/studentGrowthService';
 
 export default function OnboardingPage() {
   const { user, setUser } = useAuth();
+  const { profile: liveProfile } = useLiveUserProfile(user?.uid);
+  const currentUser = liveProfile || user;
   const [searchParams] = useSearchParams();
   const queryRole = searchParams.get('role');
   const role = queryRole === 'tutor' ? 'tutor' : 'student';
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavingTutorProfile, setIsSavingTutorProfile] = useState(false);
-  const [studentSubjects, setStudentSubjects] = useState(normalizeSubjectList(user?.subjects || DEFAULT_SUBJECTS));
-  const [tutorSubjects, setTutorSubjects] = useState(normalizeSubjectList(user?.subjects || DEFAULT_SUBJECTS));
+  const [studentSubjects, setStudentSubjects] = useState(normalizeSubjectList(currentUser?.subjects || DEFAULT_SUBJECTS));
+  const { subjectOptions } = useSubjectCatalog();
 
   useEffect(() => {
-    const nextSubjects = normalizeSubjectList(user?.subjects || DEFAULT_SUBJECTS);
+    const nextSubjects = normalizeSubjectList(currentUser?.subjects || DEFAULT_SUBJECTS);
     setStudentSubjects(nextSubjects);
-    setTutorSubjects(nextSubjects);
-  }, [user?.subjects]);
+  }, [currentUser?.subjects]);
 
-  const studentStatus = useMemo(() => getStudentOnboardingStatus(user), [user]);
-  const tutorStatus = useMemo(() => getTutorOnboardingStatus(user), [user]);
+  const studentStatus = useMemo(() => getStudentOnboardingStatus(currentUser), [currentUser]);
+  const tutorStatus = useMemo(() => getTutorOnboardingStatus(currentUser), [currentUser]);
 
   const saveStudentProfile = async (event) => {
     event.preventDefault();
@@ -56,47 +61,29 @@ export default function OnboardingPage() {
   const saveTutorProfile = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const mathScore = Number(formData.get('mathScore'));
-    const profilePhotoFile = formData.get('profilePhotoFile');
-    const highestGradeResultFile = formData.get('highestGradeResultFile');
-
-    if (!(profilePhotoFile instanceof File) || !profilePhotoFile.size) {
-      setStatusMessage('Please upload a profile photo file.');
-      return;
-    }
-
-    if (!(highestGradeResultFile instanceof File) || !highestGradeResultFile.size) {
-      setStatusMessage('Please upload your highest grade result document.');
+    if (!currentUser?.selfieVerified || !currentUser?.selfieUrl) {
+      setStatusMessage('Please capture and save a live selfie before saving tutor setup.');
       return;
     }
 
     try {
       setIsSavingTutorProfile(true);
 
-      const [photoUpload, resultUpload] = await Promise.all([
-        uploadUserFile({ userId: user.uid, file: profilePhotoFile, pathPrefix: 'tutor-profile-photos' }),
-        uploadUserFile({ userId: user.uid, file: highestGradeResultFile, pathPrefix: 'tutor-grade-results' }),
-      ]);
-
       const profile = await updateUserProfile(user.uid, {
-        profilePhoto: photoUpload.downloadUrl,
         tutorProfile: {
           ...(user?.tutorProfile || {}),
-          highestGradeResultUrl: resultUpload.downloadUrl,
-          mathScore,
           gradesToTutor: (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean),
-          verificationStatus: mathScore >= 60 ? TUTOR_VERIFICATION_STATUSES.VERIFIED : TUTOR_VERIFICATION_STATUSES.REJECTED,
+          verificationStatus: (currentUser?.qualifiedSubjects || []).length ? TUTOR_VERIFICATION_STATUSES.VERIFIED : TUTOR_VERIFICATION_STATUSES.PENDING,
           payout: {
             bankName: formData.get('bankName')?.toString().trim() || '',
             accountNumber: formData.get('accountNumber')?.toString().trim() || '',
             accountHolder: formData.get('accountHolder')?.toString().trim() || '',
           },
         },
-        subjects: tutorSubjects.length ? tutorSubjects : DEFAULT_SUBJECTS,
       });
 
       setUser((prev) => ({ ...prev, ...profile }));
-      setStatusMessage(mathScore >= 60 ? 'Tutor profile submitted and auto-verified for MVP.' : 'Tutor profile saved, score below 60% threshold.');
+      setStatusMessage('Tutor profile details saved.');
     } catch (error) {
       setStatusMessage(error.message || 'Unable to upload documents and save tutor profile.');
     } finally {
@@ -114,12 +101,12 @@ export default function OnboardingPage() {
         <>
           <SectionCard title="Student setup" subtitle={studentStatus.message}>
             <form className="grid gap-4 md:grid-cols-3" onSubmit={saveStudentProfile}>
-              <FormField label="Grade" name="grade" type="number" min="1" max="12" defaultValue={user?.studentProfile?.grade ?? ''} placeholder="11" required />
-              <FormField label="Curriculum" name="curriculum" defaultValue={user?.studentProfile?.curriculum || ''} placeholder="CAPS" required />
+              <FormField label="Grade" name="grade" type="number" min="1" max="12" defaultValue={currentUser?.studentProfile?.grade ?? ''} placeholder="11" required />
+              <FormField label="Curriculum" name="curriculum" defaultValue={currentUser?.studentProfile?.curriculum || ''} placeholder="CAPS" required />
               <FormField
                 label="How did you hear about us?"
                 name="discoverySource"
-                defaultValue={user?.studentProfile?.discoverySource || ''}
+                defaultValue={currentUser?.studentProfile?.discoverySource || ''}
                 placeholder="Instagram"
                 required
               />
@@ -127,10 +114,9 @@ export default function OnboardingPage() {
                 <MultiSelectDropdown
                   label="Subjects"
                   name="studentSubjects"
-                  options={SUBJECT_OPTIONS}
+                  options={subjectOptions}
                   value={studentSubjects}
                   onChange={setStudentSubjects}
-                  helperText="Currently only Mathematics is available."
                   required
                 />
               </div>
@@ -147,48 +133,28 @@ export default function OnboardingPage() {
       ) : (
         <SectionCard title="Tutor setup" subtitle={tutorStatus.message}>
           <form className="grid gap-4 md:grid-cols-2" onSubmit={saveTutorProfile}>
-            <div>
-              <label className="block text-sm font-semibold text-zinc-700">Highest grade result document</label>
-              <input
-                name="highestGradeResultFile"
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                required
-                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-zinc-800"
-              />
+            <div className="md:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-zinc-700">Live selfie verification</label>
+              <LiveSelfieCapture user={currentUser} setUser={setUser} onMessage={setStatusMessage} />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-zinc-700">Profile photo</label>
-              <input
-                name="profilePhotoFile"
-                type="file"
-                accept="image/*"
-                required
-                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-zinc-800"
-              />
+            <div className="md:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-zinc-700">Result documents</label>
+              <TutorDocumentsManager user={currentUser} onMessage={setStatusMessage} />
             </div>
-            <FormField label="Math score %" name="mathScore" type="number" defaultValue={user?.tutorProfile?.mathScore ?? ''} required />
             <FormField
               label="Grades to tutor (comma separated)"
               name="gradesToTutor"
-              defaultValue={(user?.tutorProfile?.gradesToTutor || []).join(', ')}
+              defaultValue={(currentUser?.tutorProfile?.gradesToTutor || []).join(', ')}
               placeholder="Grade 8, Grade 9"
               required
             />
             <div className="md:col-span-2">
-              <MultiSelectDropdown
-                label="Subjects"
-                name="tutorSubjects"
-                options={SUBJECT_OPTIONS}
-                value={tutorSubjects}
-                onChange={setTutorSubjects}
-                helperText="Currently only Mathematics is available."
-                required
-              />
+              <label className="mb-2 block text-sm font-semibold text-zinc-700">Subjects you qualify to tutor</label>
+              <QualifiedSubjectsManager user={currentUser} setUser={setUser} onMessage={setStatusMessage} />
             </div>
-            <FormField label="Bank name" name="bankName" defaultValue={user?.tutorProfile?.payout?.bankName || ''} required />
-            <FormField label="Account number" name="accountNumber" defaultValue={user?.tutorProfile?.payout?.accountNumber || ''} required />
-            <FormField label="Account holder" name="accountHolder" defaultValue={user?.tutorProfile?.payout?.accountHolder || ''} required />
+            <FormField label="Bank name" name="bankName" defaultValue={currentUser?.tutorProfile?.payout?.bankName || ''} required />
+            <FormField label="Account number" name="accountNumber" defaultValue={currentUser?.tutorProfile?.payout?.accountNumber || ''} required />
+            <FormField label="Account holder" name="accountHolder" defaultValue={currentUser?.tutorProfile?.payout?.accountHolder || ''} required />
             <div className="md:col-span-2">
               <button type="submit" disabled={isSavingTutorProfile} className="rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
                 {isSavingTutorProfile ? 'Uploading files...' : 'Save tutor profile'}
