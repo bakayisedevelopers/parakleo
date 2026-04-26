@@ -15,7 +15,7 @@ export default function MainLayout({ children }) {
               <h4 className="mb-4 font-bold text-zinc-900">Product</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
                 <li><a href="#features" className="transition-colors hover:text-zinc-900">Features</a></li>
-                <li><a href="#" className="transition-colors hover:text-zinc-900">Pricing</a></li>
+                <li><Link to="/payment-pricing-policy" className="transition-colors hover:text-zinc-900">Pricing</Link></li>
                 <li><a href="#" className="transition-colors hover:text-zinc-900">Security</a></li>
               </ul>
             </div>
@@ -32,6 +32,9 @@ export default function MainLayout({ children }) {
               <ul className="space-y-2 text-sm text-zinc-600">
                 <li><Link to="/privacy-policy" className="transition-colors hover:text-zinc-900">Privacy Policy</Link></li>
                 <li><Link to="/terms" className="transition-colors hover:text-zinc-900">Terms of Service</Link></li>
+                <li><Link to="/payment-pricing-policy" className="transition-colors hover:text-zinc-900">Payment and Pricing</Link></li>
+                <li><Link to="/refund-policy" className="transition-colors hover:text-zinc-900">Refund Policy</Link></li>
+                <li><Link to="/data-voice-policy" className="transition-colors hover:text-zinc-900">Data and Voice Handling</Link></li>
               </ul>
             </div>
             <div>
@@ -43,7 +46,7 @@ export default function MainLayout({ children }) {
             </div>
           </div>
           <div className="flex items-center justify-between border-t border-zinc-200 pt-8">
-            <p className="text-sm text-zinc-600">© 2025 Claxi. All rights reserved.</p>
+            <p className="text-sm text-zinc-600">&copy; 2026 Claxi. All rights reserved.</p>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center">
                 <span className="text-white font-black text-sm">C</span>

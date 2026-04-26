@@ -55,10 +55,10 @@ export default function LandingPage() {
 
             <p className="text-xs font-bold uppercase tracking-[0.3em] text-brand">Student Portal</p>
             <h1 className="mt-4 max-w-3xl text-5xl font-black leading-[0.95] text-zinc-900 md:text-7xl">
-              Effective on request sessions <span className="text-brand">Math</span>.
+              Effective on request sessions.
             </h1>
             <p className="mt-6 max-w-2xl text-lg text-zinc-600">
-              Discover verified tutors, request a session in minutes, and learn with confidence through a polished, reliable flow.
+              <span className="text-green-500">Discover</span> verified tutors, request a session in minutes, and learn with confidence through a polished, reliable flow.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -87,8 +87,9 @@ export default function LandingPage() {
 
             <p className="mt-6 text-xs text-zinc-600">
               By continuing, you agree to our{' '}
-              <Link to="/terms" className="font-bold text-brand underline">Terms of Service</Link> and{' '}
-              <Link to="/privacy-policy" className="font-bold text-brand underline">Privacy Policy</Link>.
+              <Link to="/terms" className="font-bold text-brand underline">Terms of Service</Link>,{' '}
+              <Link to="/privacy-policy" className="font-bold text-brand underline">Privacy Policy</Link>, and{' '}
+              <Link to="/payment-pricing-policy" className="font-bold text-brand underline">Payment Policy</Link>.
             </p>
           </motion.div>
         </section>

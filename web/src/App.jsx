@@ -23,6 +23,9 @@ import AdminTutorsPage from './pages/app/admin/AdminTutorsPage';
 import AdminPaymentsPage from './pages/app/admin/AdminPaymentsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsPage from './pages/TermsPage';
+import RefundPolicyPage from './pages/RefundPolicyPage';
+import PaymentPricingPolicyPage from './pages/PaymentPricingPolicyPage';
+import DataVoicePolicyPage from './pages/DataVoicePolicyPage';
 import StudentRequestsPage from './pages/app/student/StudentRequestsPage';
 import StudentRequestDetailsPage from './pages/app/student/StudentRequestDetailsPage';
 
@@ -35,6 +38,9 @@ export default function App() {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        <Route path="/refund-policy" element={<RefundPolicyPage />} />
+        <Route path="/payment-pricing-policy" element={<PaymentPricingPolicyPage />} />
+        <Route path="/data-voice-policy" element={<DataVoicePolicyPage />} />
 
         <Route
           path="/app"

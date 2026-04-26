@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CalendarClock } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
@@ -245,6 +246,14 @@ export default function TutorPaymentsPage() {
             })}
           </div>
         ) : null}
+      </SectionCard>
+
+      <SectionCard title="Payout policies" subtitle="Review tutor payout, platform fee, refund, and dispute rules.">
+        <div className="flex flex-wrap gap-3 text-sm font-semibold">
+          <Link to="/payment-pricing-policy" className="text-brand underline">Payment and Pricing Policy</Link>
+          <Link to="/refund-policy" className="text-brand underline">Refund Policy</Link>
+          <Link to="/terms" className="text-brand underline">Terms of Service</Link>
+        </div>
       </SectionCard>
     </div>
   );

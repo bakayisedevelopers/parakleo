@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
 import SelectField from '../../../components/ui/SelectField';
@@ -72,6 +73,14 @@ export default function StudentWalletPage() {
 
       <SectionCard title="Payment cards">
         <PaymentMethodsManager user={user} setUser={setUser} onMessage={setMessage} />
+      </SectionCard>
+
+      <SectionCard title="Payment policies" subtitle="Review billing, pricing, refund, and card handling terms.">
+        <div className="flex flex-wrap gap-3 text-sm font-semibold">
+          <Link to="/payment-pricing-policy" className="text-brand underline">Payment and Pricing Policy</Link>
+          <Link to="/refund-policy" className="text-brand underline">Refund Policy</Link>
+          <Link to="/privacy-policy" className="text-brand underline">Privacy Policy</Link>
+        </div>
       </SectionCard>
     </div>
   );

@@ -37,6 +37,7 @@ function resolveViewportMode() {
     };
   }
 
+  const shouldUseCompactNav = window.matchMedia('(max-width: 1023px)').matches;
   const isPortrait = window.matchMedia('(orientation: portrait)').matches;
   const { isMobileDevice, isTabletDevice } = resolveDeviceType();
   const isTabletPortrait = isTabletDevice && isPortrait;
@@ -47,7 +48,7 @@ function resolveViewportMode() {
     isTabletDevice,
     isTabletPortrait,
     isTabletLandscape,
-    useBottomNav: isMobileDevice || isTabletPortrait,
+    useBottomNav: shouldUseCompactNav,
   };
 }
 

@@ -19,6 +19,10 @@ admin.initializeApp();
 
 const db = admin.firestore();
 
+const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
+const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
+const CLAXI_REALTIME_SECRETS = defineSecret('CLAXI_REALTIME_SECRETS');
+
 const PAYSTACK_SECRET_KEY = defineSecret('PAYSTACK_SECRET_KEY');
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
 const EMAIL_FROM = defineSecret('EMAIL_FROM');
@@ -611,20 +615,100 @@ function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
 
-function getSafeSecretPreview(value) {
-  if (!value || typeof value !== 'string') {
-    return {
-      exists: false,
-      prefix: null,
-      length: 0,
-    };
+function parseGroupedSecretJson(name, rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) {
+    return {};
   }
 
-  return {
-    exists: true,
-    prefix: value.slice(0, 10),
-    length: value.length,
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Grouped secret JSON must be an object.');
+    }
+    return parsed;
+  } catch (error) {
+    logger.warn('Grouped secret JSON is missing or invalid; falling back to legacy secrets.', {
+      secretName: name,
+      error: error.message,
+    });
+    return {};
+  }
+}
+
+function pickSecretValue(groupedSecrets, key, fallbackSecret) {
+  const groupedValue = groupedSecrets?.[key];
+  if (typeof groupedValue === 'string' && groupedValue.trim()) {
+    return groupedValue.trim();
+  }
+
+  const fallbackValue = fallbackSecret.value();
+  if (typeof fallbackValue === 'string' && fallbackValue.trim()) {
+    return fallbackValue.trim();
+  }
+
+  return '';
+}
+
+function assertRequiredSecrets(groupName, secrets, requiredKeys) {
+  const missingKeys = requiredKeys.filter((key) => !secrets[key]);
+  if (missingKeys.length) {
+    throw new Error(`${groupName} is missing required field(s): ${missingKeys.join(', ')}`);
+  }
+}
+
+function getPaymentsSecrets() {
+  const groupedSecrets = parseGroupedSecretJson(
+    'CLAXI_PAYMENTS_SECRETS',
+    CLAXI_PAYMENTS_SECRETS.value(),
+  );
+  const secrets = {
+    PAYSTACK_SECRET_KEY: pickSecretValue(groupedSecrets, 'PAYSTACK_SECRET_KEY', PAYSTACK_SECRET_KEY),
   };
+
+  assertRequiredSecrets('CLAXI_PAYMENTS_SECRETS', secrets, ['PAYSTACK_SECRET_KEY']);
+  return secrets;
+}
+
+function getEmailSecrets() {
+  const groupedSecrets = parseGroupedSecretJson('CLAXI_EMAIL_SECRETS', CLAXI_EMAIL_SECRETS.value());
+  const secrets = {
+    RESEND_API_KEY: pickSecretValue(groupedSecrets, 'RESEND_API_KEY', RESEND_API_KEY),
+    EMAIL_FROM: pickSecretValue(groupedSecrets, 'EMAIL_FROM', EMAIL_FROM),
+  };
+
+  assertRequiredSecrets('CLAXI_EMAIL_SECRETS', secrets, ['RESEND_API_KEY', 'EMAIL_FROM']);
+  return secrets;
+}
+
+function getRealtimeSecrets() {
+  const groupedSecrets = parseGroupedSecretJson(
+    'CLAXI_REALTIME_SECRETS',
+    CLAXI_REALTIME_SECRETS.value(),
+  );
+  const secrets = {
+    CLOUDFLARE_TURN_KEY_ID: pickSecretValue(
+      groupedSecrets,
+      'CLOUDFLARE_TURN_KEY_ID',
+      CLOUDFLARE_TURN_KEY_ID,
+    ),
+    CLOUDFLARE_TURN_API_TOKEN: pickSecretValue(
+      groupedSecrets,
+      'CLOUDFLARE_TURN_API_TOKEN',
+      CLOUDFLARE_TURN_API_TOKEN,
+    ),
+    CLOUDFLARE_TURN_TTL_SECONDS: pickSecretValue(
+      groupedSecrets,
+      'CLOUDFLARE_TURN_TTL_SECONDS',
+      CLOUDFLARE_TURN_TTL_SECONDS,
+    ),
+  };
+
+  assertRequiredSecrets('CLAXI_REALTIME_SECRETS', secrets, [
+    'CLOUDFLARE_TURN_KEY_ID',
+    'CLOUDFLARE_TURN_API_TOKEN',
+  ]);
+  return secrets;
 }
 
 function applyFreeMinuteDiscount({ originalPrice, durationMinutes, freeMinutesRemaining }) {
@@ -995,6 +1079,7 @@ exports.getIceConfig = onRequest(
   {
     cors: true,
     secrets: [
+      CLAXI_REALTIME_SECRETS,
       CLOUDFLARE_TURN_KEY_ID,
       CLOUDFLARE_TURN_API_TOKEN,
       CLOUDFLARE_TURN_TTL_SECONDS,
@@ -1023,14 +1108,12 @@ exports.getIceConfig = onRequest(
       return;
     }
 
-    const turnKeyId = CLOUDFLARE_TURN_KEY_ID.value();
-    const turnApiToken = CLOUDFLARE_TURN_API_TOKEN.value();
-    const ttl = parseTurnTtlSeconds(CLOUDFLARE_TURN_TTL_SECONDS.value());
-
-    if (!turnKeyId || !turnApiToken) {
-      logger.error('Cloudflare TURN secrets missing.', {
-        hasTurnKeyId: Boolean(turnKeyId),
-        hasTurnApiToken: Boolean(turnApiToken),
+    let realtimeSecrets;
+    try {
+      realtimeSecrets = getRealtimeSecrets();
+    } catch (error) {
+      logger.error('Cloudflare TURN configuration is unavailable.', {
+        error: error.message,
       });
       res.status(500).json({
         success: false,
@@ -1038,6 +1121,10 @@ exports.getIceConfig = onRequest(
       });
       return;
     }
+
+    const turnKeyId = realtimeSecrets.CLOUDFLARE_TURN_KEY_ID;
+    const turnApiToken = realtimeSecrets.CLOUDFLARE_TURN_API_TOKEN;
+    const ttl = parseTurnTtlSeconds(realtimeSecrets.CLOUDFLARE_TURN_TTL_SECONDS);
 
     try {
       const cfResponse = await fetch(
@@ -1060,7 +1147,6 @@ exports.getIceConfig = onRequest(
         logger.error('Cloudflare TURN credential generation failed.', {
           uid: decodedToken.uid,
           status: cfResponse.status,
-          payload: cfPayload || null,
         });
 
         res.status(500).json({
@@ -1097,8 +1183,6 @@ exports.getIceConfig = onRequest(
           (sum, server) => sum + (Array.isArray(server.urls) ? server.urls.length : 1),
           0,
         ),
-        turnHasUsername: turnServers.some((server) => Boolean(server.username)),
-        turnHasCredential: turnServers.some((server) => Boolean(server.credential)),
       });
 
       res.status(200).json({
@@ -1120,29 +1204,31 @@ exports.getIceConfig = onRequest(
   },
 );
 
-exports.verifyPaystack = onRequest({ cors: true, secrets: [PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
   }
 
-  logger.info('verifyPaystack request body received.', { body: req.body || null });
-
-  const paystackSecretKey = PAYSTACK_SECRET_KEY.value();
-  const paystackSecretPreview = getSafeSecretPreview(paystackSecretKey);
-
-  logger.info('Paystack secret loaded.', {
-    exists: paystackSecretPreview.exists,
-    prefix: paystackSecretPreview.prefix,
-    length: paystackSecretPreview.length,
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  logger.info('verifyPaystack request received.', {
+    hasReference: Boolean(body.reference),
+    hasUserId: Boolean(body.userId),
+    hasNickname: Boolean(body.nickname),
   });
 
-  if (!paystackSecretKey) {
-    logger.error('PAYSTACK_SECRET_KEY missing.');
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('Payment configuration is unavailable.', {
+      error: error.message,
+    });
     res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
     return;
   }
 
+  const paystackSecretKey = paymentsSecrets.PAYSTACK_SECRET_KEY;
   const token = getBearerToken(req);
   if (!token) {
     res.status(401).json({ success: false, message: 'Unauthorized request.' });
@@ -1160,7 +1246,6 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [PAYSTACK_SECRET_KEY] 
     return;
   }
 
-  const body = req.body && typeof req.body === 'object' ? req.body : {};
   const uid = decodedToken.uid;
   const providedUserId = body.userId?.toString().trim();
   const nickname = body.nickname?.toString().trim();
@@ -1403,7 +1488,7 @@ async function chargeAuthorizationWithPaystack({ paystackSecretKey, email, amoun
   };
 }
 
-exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -1515,14 +1600,27 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
     || paymentMethods[0]
     || null;
 
-  const charge = totalAmount <= 0
-    ? { ok: true, reason: null, transactionId: 'free-minutes-covered' }
-    : await chargeAuthorizationWithPaystack({
-        paystackSecretKey: PAYSTACK_SECRET_KEY.value(),
-        email: studentData.email || session.studentEmail || '',
-        amount: totalAmount,
-        authorizationCode: selectedCard?.paystackAuthorizationCode || '',
+  let charge = { ok: true, reason: null, transactionId: 'free-minutes-covered' };
+  if (totalAmount > 0) {
+    let paymentsSecrets;
+    try {
+      paymentsSecrets = getPaymentsSecrets();
+    } catch (error) {
+      logger.error('Payment configuration is unavailable during session billing.', {
+        sessionId,
+        error: error.message,
       });
+      res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
+      return;
+    }
+
+    charge = await chargeAuthorizationWithPaystack({
+      paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+      email: studentData.email || session.studentEmail || '',
+      amount: totalAmount,
+      authorizationCode: selectedCard?.paystackAuthorizationCode || '',
+    });
+  }
 
   const paymentStatus = charge.ok ? 'paid' : 'wallet_debt_recorded';
   const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
@@ -1637,7 +1735,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PAYSTACK_SECR
 exports.sendEmailFromQueue = onDocumentCreated(
   {
     document: 'emailEvents/{eventId}',
-    secrets: [RESEND_API_KEY, EMAIL_FROM],
+    secrets: [CLAXI_EMAIL_SECRETS, RESEND_API_KEY, EMAIL_FROM],
   },
   async (event) => {
     const data = event.data?.data();
@@ -1649,32 +1747,28 @@ exports.sendEmailFromQueue = onDocumentCreated(
     }
 
     const eventRef = db.collection('emailEvents').doc(event.params.eventId);
-    const resendApiKey = RESEND_API_KEY.value();
-    const emailFrom = EMAIL_FROM.value() || 'noreply@claxi.app';
-
-    const resendPreview = getSafeSecretPreview(resendApiKey);
-
-    logger.info('Email secret/config loaded.', {
-      resendKeyExists: resendPreview.exists,
-      resendKeyPrefix: resendPreview.prefix,
-      resendKeyLength: resendPreview.length,
-      emailFrom,
-      eventId: event.params.eventId,
-      eventType: data.eventType || null,
-    });
-
-    if (!resendApiKey) {
-      logger.warn('RESEND_API_KEY missing. Skipping email send.');
+    let emailSecrets;
+    try {
+      emailSecrets = getEmailSecrets();
+    } catch (error) {
+      logger.warn('Email configuration is unavailable. Skipping email send.', {
+        eventId: event.params.eventId,
+        eventType: data.eventType || null,
+        error: error.message,
+      });
       await eventRef.set(
         {
           status: 'skipped',
-          reason: 'missing_resend_api_key',
+          reason: 'missing_email_configuration',
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
       );
       return;
     }
+
+    const resendApiKey = emailSecrets.RESEND_API_KEY;
+    const emailFrom = emailSecrets.EMAIL_FROM;
 
     const resend = new Resend(resendApiKey);
     const emailPayload = buildEmailPayload(data.eventType, data.payload);
@@ -1701,7 +1795,6 @@ exports.sendEmailFromQueue = onDocumentCreated(
       eventType: data.eventType,
       to: emailPayload.to,
       subject: emailPayload.subject,
-      from: emailFrom,
     });
 
     try {

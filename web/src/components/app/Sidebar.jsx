@@ -78,6 +78,13 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
       ) : null}
 
       <div className="mt-auto border-t border-zinc-200 pt-4">
+        <div className="mb-3 grid grid-cols-2 gap-2 px-1 text-[11px] font-semibold text-zinc-500">
+          <Link to="/terms" onClick={onNavigate} className="hover:text-zinc-900">Terms</Link>
+          <Link to="/privacy-policy" onClick={onNavigate} className="hover:text-zinc-900">Privacy</Link>
+          <Link to="/payment-pricing-policy" onClick={onNavigate} className="hover:text-zinc-900">Payments</Link>
+          <Link to="/refund-policy" onClick={onNavigate} className="hover:text-zinc-900">Refunds</Link>
+          <Link to="/data-voice-policy" onClick={onNavigate} className="col-span-2 hover:text-zinc-900">Data and voice handling</Link>
+        </div>
         {role === 'student' ? (
           <ReferralShareButton
             referralSlug={user?.referralSlug || user?.referralCode}

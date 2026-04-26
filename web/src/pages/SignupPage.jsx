@@ -171,8 +171,10 @@ export default function SignupPage() {
 
             <p className="rounded-2xl border border-brand/20 bg-brand/5 p-3 text-xs text-zinc-700">
               By signing up, you agree to our{' '}
-              <Link to="/terms" className="font-bold text-brand underline">Terms of Service</Link> and{' '}
-              <Link to="/privacy-policy" className="font-bold text-brand underline">Privacy Policy</Link>.
+              <Link to="/terms" className="font-bold text-brand underline">Terms of Service</Link>,{' '}
+              <Link to="/privacy-policy" className="font-bold text-brand underline">Privacy Policy</Link>,{' '}
+              <Link to="/payment-pricing-policy" className="font-bold text-brand underline">Payment Policy</Link>, and{' '}
+              <Link to="/data-voice-policy" className="font-bold text-brand underline">Data and Voice Policy</Link>.
             </p>
 
             {error ? <p className="text-sm text-rose-500">{error}</p> : null}
