@@ -25,3 +25,33 @@ test('extracts subjects and percentage marks from result text', () => {
     { subject: 'Physical Sciences', mark: 65 },
   ]);
 });
+
+test('maps common subject variations into normalized tutor subjects', () => {
+  const result = extractSubjectsAndMarks(`
+    Physics 74%
+    Chemistry 69%
+    Xitsonga Home Language 81%
+    Zulu Home Language 66%
+  `);
+
+  assert.deepEqual(result, [
+    { subject: 'IsiZulu', mark: 66 },
+    { subject: 'Physical Sciences', mark: 74 },
+    { subject: 'XiTsonga', mark: 81 },
+  ]);
+});
+
+test('prefers the trailing tabular mark for subject rows', () => {
+  const result = extractSubjectsAndMarks(`
+    Mathematics 123456 7 78
+    English Home Language 99887 5 70
+    Life Sciences
+    64
+  `);
+
+  assert.deepEqual(result, [
+    { subject: 'English', mark: 70 },
+    { subject: 'Life Sciences', mark: 64 },
+    { subject: 'Mathematics', mark: 78 },
+  ]);
+});

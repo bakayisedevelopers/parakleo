@@ -9,8 +9,8 @@ const SUBJECT_ALIASES = [
   ['Life Orientation', ['life orientation', 'lo']],
   ['Mathematics', ['mathematics', 'maths', 'math', 'algebra', 'geometry']],
   ['English', ['english', 'english home language', 'english first additional language', 'eng']],
-  ['IsiZulu', ['isizulu', 'zulu', 'isi zulu']],
-  ['XiTsonga', ['xitsonga', 'xi tsonga', 'tsonga']],
+  ['IsiZulu', ['isizulu', 'isi zulu', 'zulu', 'zulu home language', 'zulu first additional language']],
+  ['XiTsonga', ['xitsonga', 'xi tsonga', 'tsonga', 'xitsonga home language', 'tsonga home language']],
   ['Afrikaans', ['afrikaans']],
   ['Geography', ['geography', 'geo']],
   ['History', ['history']],
@@ -21,13 +21,29 @@ const SUBJECT_ALIASES = [
 
 const SUBJECT_NAMES = SUBJECT_ALIASES.map(([subject]) => subject);
 
+function normalizeForMatch(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function escapeRegex(value = '') {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function containsAlias(text = '', alias = '') {
+  const normalizedText = normalizeForMatch(text);
+  const normalizedAlias = normalizeForMatch(alias);
+  if (!normalizedText || !normalizedAlias) return false;
+  const pattern = new RegExp(`(^|\\s)${escapeRegex(normalizedAlias)}(?=\\s|$)`, 'i');
+  return pattern.test(normalizedText);
+}
+
 function normalizeSubjectName(value = '') {
-  const normalized = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalized = normalizeForMatch(value);
   if (!normalized) return '';
 
   const match = SUBJECT_ALIASES.find(([, aliases]) => aliases.some((alias) => {
-    const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    return normalized === normalizedAlias || normalized.includes(normalizedAlias);
+    const normalizedAlias = normalizeForMatch(alias);
+    return normalized === normalizedAlias || containsAlias(normalized, normalizedAlias);
   }));
 
   return match?.[0] || '';
@@ -39,7 +55,6 @@ function extractMarkNearSubject(line, subjectIndex) {
     /\b(\d{1,3})(?:\s*\/\s*100|\s*%)\b/g,
     /\blevel\s*[1-7]\s*\/\s*(\d{1,3})\b/gi,
     /\b(?:mark|percentage|result|score)\s*[:=-]?\s*(\d{1,3})\b/gi,
-    /\b(\d{1,3})\b/g,
   ];
 
   for (const pattern of markPatterns) {
@@ -50,28 +65,48 @@ function extractMarkNearSubject(line, subjectIndex) {
     if (valid !== undefined) return valid;
   }
 
+  const numericMatches = [...afterSubject.matchAll(/\b(\d{1,3})\b/g)]
+    .map((match) => Number(match[1]))
+    .filter((mark) => Number.isFinite(mark) && mark >= 0 && mark <= 100);
+
+  if (numericMatches.length) {
+    return numericMatches[numericMatches.length - 1];
+  }
+
   return null;
 }
 
 function extractSubjectsAndMarks(text = '') {
-  const lines = String(text || '')
+  const normalizedText = String(text || '')
+    .replace(/[|]/g, ' ')
+    .replace(/[•·]/g, ' ')
+    .replace(/\bO\b/g, '0');
+
+  const rawLines = normalizedText
     .split(/\r?\n|;/)
     .map((line) => line.replace(/\s+/g, ' ').trim())
     .filter(Boolean);
+  const lines = rawLines.flatMap((line) => line.split(/\s{2,}/).map((segment) => segment.trim()).filter(Boolean));
   const bySubject = new Map();
 
-  lines.forEach((line) => {
+  lines.forEach((line, index) => {
     const lowerLine = line.toLowerCase();
+    const nextLine = lines[index + 1] || '';
 
     SUBJECT_ALIASES.forEach(([subject, aliases]) => {
       const subjectIndex = aliases.reduce((best, alias) => {
-        const index = lowerLine.indexOf(alias.toLowerCase());
+        const pattern = new RegExp(`(^|\\b)${escapeRegex(alias.toLowerCase())}(?=\\b|$)`, 'i');
+        const match = lowerLine.match(pattern);
+        const index = match ? match.index : -1;
         if (index < 0) return best;
         return best < 0 ? index : Math.min(best, index);
       }, -1);
 
       if (subjectIndex < 0) return;
-      const mark = extractMarkNearSubject(line, subjectIndex);
+      let mark = extractMarkNearSubject(line, subjectIndex);
+      if (mark === null && nextLine) {
+        mark = extractMarkNearSubject(`${line} ${nextLine}`, subjectIndex);
+      }
       if (mark === null) return;
 
       const existing = bySubject.get(subject);

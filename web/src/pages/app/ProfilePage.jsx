@@ -11,8 +11,10 @@ import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { getStudentOnboardingStatus, getTutorOnboardingStatus } from '../../utils/onboarding';
 import { getUserProfile, updateUserProfile } from '../../services/userService';
-import { DEFAULT_SUBJECTS, normalizeSubjectList } from '../../constants/subjects';
+import { normalizeSubjectList } from '../../constants/subjects';
 import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
+
+const EMPTY_SUBJECTS = [];
 
 export default function ProfilePage() {
   const { user, logout, deleteAccount, setUser } = useAuth();
@@ -30,7 +32,7 @@ export default function ProfilePage() {
     fullName: '',
     phoneNumber: '',
     bio: '',
-    subjects: DEFAULT_SUBJECTS,
+    subjects: EMPTY_SUBJECTS,
     availability: '',
   });
 
@@ -46,7 +48,7 @@ export default function ProfilePage() {
         fullName: profileData.fullName || profileData.displayName || '',
         phoneNumber: profileData.phoneNumber || '',
         bio: profileData.bio || '',
-        subjects: normalizeSubjectList(profileData.subjects || DEFAULT_SUBJECTS),
+        subjects: normalizeSubjectList(profileData.subjects || EMPTY_SUBJECTS),
         availability: profileData.availability || '',
       });
     });
@@ -90,7 +92,7 @@ export default function ProfilePage() {
     };
 
     if (!isTutorRole) {
-      updates.subjects = normalizeSubjectList(form.subjects).length ? normalizeSubjectList(form.subjects) : DEFAULT_SUBJECTS;
+      updates.subjects = normalizeSubjectList(form.subjects);
     }
 
     const profile = await updateUserProfile(user.uid, updates);

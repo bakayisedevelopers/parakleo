@@ -10,7 +10,7 @@ import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
 import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { updateUserProfile } from '../../services/userService';
-import { DEFAULT_SUBJECTS, normalizeSubjectList } from '../../constants/subjects';
+import { normalizeSubjectList } from '../../constants/subjects';
 import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import {
   getStudentOnboardingStatus,
@@ -19,6 +19,8 @@ import {
 } from '../../utils/onboarding';
 import PaymentMethodsManager from '../../components/app/PaymentMethodsManager';
 import { syncStudentGrowth } from '../../services/studentGrowthService';
+
+const EMPTY_SUBJECTS = [];
 
 export default function OnboardingPage() {
   const { user, setUser } = useAuth();
@@ -29,11 +31,11 @@ export default function OnboardingPage() {
   const role = queryRole === 'tutor' ? 'tutor' : 'student';
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavingTutorProfile, setIsSavingTutorProfile] = useState(false);
-  const [studentSubjects, setStudentSubjects] = useState(normalizeSubjectList(currentUser?.subjects || DEFAULT_SUBJECTS));
+  const [studentSubjects, setStudentSubjects] = useState(normalizeSubjectList(currentUser?.subjects || EMPTY_SUBJECTS));
   const { subjectOptions } = useSubjectCatalog();
 
   useEffect(() => {
-    const nextSubjects = normalizeSubjectList(currentUser?.subjects || DEFAULT_SUBJECTS);
+    const nextSubjects = normalizeSubjectList(currentUser?.subjects || EMPTY_SUBJECTS);
     setStudentSubjects(nextSubjects);
   }, [currentUser?.subjects]);
 
@@ -50,7 +52,7 @@ export default function OnboardingPage() {
         curriculum: formData.get('curriculum')?.toString().trim() || '',
         discoverySource: formData.get('discoverySource')?.toString().trim() || '',
       },
-      subjects: studentSubjects.length ? studentSubjects : DEFAULT_SUBJECTS,
+      subjects: studentSubjects,
     });
     const syncedProfile = await syncStudentGrowth().catch(() => null);
 

@@ -385,8 +385,10 @@ async function refreshGlobalSubjects() {
   const counts = new Map();
 
   tutorsSnap.docs.forEach((docSnap) => {
-    const activeSubjects = normalizeActiveSubjects(docSnap.data().activeSubjects || []);
-    const uniqueSubjects = [...new Set(activeSubjects)];
+    const qualifiedSubjects = Array.isArray(docSnap.data().qualifiedSubjects)
+      ? docSnap.data().qualifiedSubjects.map((item) => item?.subject || '')
+      : [];
+    const uniqueSubjects = [...new Set(normalizeActiveSubjects(qualifiedSubjects))];
     uniqueSubjects.forEach((subject) => {
       counts.set(subject, (counts.get(subject) || 0) + 1);
     });
@@ -554,10 +556,8 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
   });
 });
 
-exports.processTutorDocument = onDocumentCreated('tutorDocuments/{docId}', async (event) => {
-  const docId = event.params.docId;
+async function processTutorDocumentRecord({ docId, data = {} }) {
   const docRef = db.collection('tutorDocuments').doc(docId);
-  const data = event.data?.data() || {};
 
   if (!data.uid || !data.filePath) {
     await docRef.set({
@@ -617,9 +617,28 @@ exports.processTutorDocument = onDocumentCreated('tutorDocuments/{docId}', async
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   }
+}
+
+exports.processTutorDocument = onDocumentCreated('tutorDocuments/{docId}', async (event) => {
+  const docId = event.params.docId;
+  const data = event.data?.data() || {};
+  await processTutorDocumentRecord({ docId, data });
 });
 
-exports.refreshGlobalSubjectsOnTutorChange = onDocumentWritten('users/{uid}', async (event) => {
+exports.retryTutorDocumentProcessing = onDocumentWritten('tutorDocuments/{docId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!before || !after) return;
+  if (String(after.status || '').toUpperCase() !== 'UPLOADED') return;
+  if (String(before.status || '').toUpperCase() === 'UPLOADED') return;
+
+  await processTutorDocumentRecord({
+    docId: event.params.docId,
+    data: after,
+  });
+});
+
+exports.updateGlobalSubjects = onDocumentWritten('users/{uid}', async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : {};
   const after = event.data.after.exists ? event.data.after.data() : {};
   const wasTutor = before.activeRole === 'tutor' || (before.roles || []).includes('tutor');
@@ -633,6 +652,8 @@ exports.refreshGlobalSubjectsOnTutorChange = onDocumentWritten('users/{uid}', as
 
   await refreshGlobalSubjects();
 });
+
+exports.refreshGlobalSubjectsOnTutorChange = exports.updateGlobalSubjects;
 
 function sanitizeCloudflareIceServers(iceServers) {
   if (!Array.isArray(iceServers)) return [];

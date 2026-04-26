@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FileText, Upload } from 'lucide-react';
-import { normalizeDocumentStatus, subscribeToTutorDocuments, uploadTutorDocument } from '../../services/tutorDocumentService';
+import { FileText, RefreshCw, Upload } from 'lucide-react';
+import {
+  normalizeDocumentStatus,
+  retryTutorDocument,
+  subscribeToTutorDocuments,
+  uploadTutorDocument,
+} from '../../services/tutorDocumentService';
 
 const STATUS_STYLES = {
   UPLOADED: 'border-sky-200 bg-sky-50 text-sky-700',
@@ -9,10 +14,35 @@ const STATUS_STYLES = {
   FAILED: 'border-rose-200 bg-rose-50 text-rose-700',
 };
 
+function getDocumentSummary(document) {
+  const status = normalizeDocumentStatus(document.status);
+  const qualifiedSubjects = Array.isArray(document.qualifiedSubjects) ? document.qualifiedSubjects : [];
+  const extractedSubjects = Array.isArray(document.extractedSubjects) ? document.extractedSubjects : [];
+
+  if (status === 'FAILED') {
+    return 'Document processing failed. Upload another file or try again later.';
+  }
+
+  if (status === 'UPLOADED' || status === 'PROCESSING') {
+    return 'Waiting for subject verification';
+  }
+
+  if (qualifiedSubjects.length) {
+    return `${qualifiedSubjects.length} qualified subject(s)`;
+  }
+
+  if (extractedSubjects.length) {
+    return 'Processed, but no subjects at 60% or higher were found.';
+  }
+
+  return 'Processed, but no supported subjects were detected.';
+}
+
 export default function TutorDocumentsManager({ user, onMessage }) {
   const [documents, setDocuments] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
+  const [retryingDocumentId, setRetryingDocumentId] = useState('');
 
   useEffect(() => {
     if (!user?.uid) return undefined;
@@ -33,6 +63,19 @@ export default function TutorDocumentsManager({ user, onMessage }) {
       setError(uploadError.message || 'Unable to upload result document.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleRetry = async (documentId) => {
+    setRetryingDocumentId(documentId);
+    setError('');
+    try {
+      await retryTutorDocument(documentId);
+      onMessage?.('Document queued for subject verification again.');
+    } catch (retryError) {
+      setError(retryError.message || 'Unable to retry document processing.');
+    } finally {
+      setRetryingDocumentId('');
     }
   };
 
@@ -67,16 +110,26 @@ export default function TutorDocumentsManager({ user, onMessage }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-zinc-900">{document.fileName}</p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {(document.qualifiedSubjects || []).length
-                        ? `${document.qualifiedSubjects.length} qualified subject(s)`
-                        : 'Waiting for subject verification'}
+                      {getDocumentSummary(document)}
                     </p>
                     {document.error ? <p className="mt-1 text-xs text-rose-600">{document.error}</p> : null}
                   </div>
                 </div>
-                <span className={`shrink-0 rounded-full border px-2 py-1 text-[11px] font-bold ${STATUS_STYLES[status]}`}>
-                  {status}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRetry(document.id)}
+                    disabled={status === 'PROCESSING' || retryingDocumentId === document.id}
+                    className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Retry subject and mark detection"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${retryingDocumentId === document.id ? 'animate-spin' : ''}`} />
+                    Retry
+                  </button>
+                  <span className={`shrink-0 rounded-full border px-2 py-1 text-[11px] font-bold ${STATUS_STYLES[status]}`}>
+                    {status}
+                  </span>
+                </div>
               </div>
             </div>
           );

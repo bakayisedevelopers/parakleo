@@ -15,6 +15,7 @@ function buildReferralSlug() {
 function buildDefaultProfile({ uid, email, displayName, role, referralSlug, referredBy = null, pendingReferralSlug = null }) {
   const normalizedRole = role || 'student';
   const safeReferralSlug = String(referralSlug || buildReferralSlug()).trim().toLowerCase();
+  const defaultSubjects = normalizedRole === 'student' ? [] : DEFAULT_SUBJECTS;
 
   return {
     uid,
@@ -28,8 +29,8 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
     selfieUrl: '',
     selfieVerified: false,
     phoneNumber: '',
-    subjects: DEFAULT_SUBJECTS,
-    activeSubjects: normalizedRole === 'tutor' ? [] : DEFAULT_SUBJECTS,
+    subjects: defaultSubjects,
+    activeSubjects: normalizedRole === 'tutor' ? [] : defaultSubjects,
     qualifiedSubjects: [],
     bio: '',
     availability: '',

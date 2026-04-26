@@ -111,3 +111,23 @@ export function normalizeDocumentStatus(status) {
   const normalized = String(status || '').toUpperCase();
   return DOCUMENT_STATUSES.has(normalized) ? normalized : 'UPLOADED';
 }
+
+export async function retryTutorDocument(documentId) {
+  if (!documentId) throw new Error('Missing document id.');
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    return { id: documentId, status: 'UPLOADED' };
+  }
+
+  const { db, firestoreModule } = clients;
+  const { doc, serverTimestamp, updateDoc } = firestoreModule;
+
+  await updateDoc(doc(db, 'tutorDocuments', documentId), {
+    status: 'UPLOADED',
+    error: null,
+    updatedAt: serverTimestamp(),
+  });
+
+  return { id: documentId, status: 'UPLOADED' };
+}

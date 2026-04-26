@@ -10,6 +10,7 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
   const [capturedFile, setCapturedFile] = useState(null);
   const [capturedUrl, setCapturedUrl] = useState(user?.selfieUrl || '');
   const [isSaving, setIsSaving] = useState(false);
+  const hasCameraApi = Boolean(navigator.mediaDevices?.getUserMedia);
 
   const stopCamera = () => {
     streamRef.current?.getTracks?.().forEach((track) => track.stop());
@@ -71,9 +72,15 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
       URL.revokeObjectURL(capturedUrl);
     }
     setCapturedFile(null);
-    setCapturedUrl('');
+    setCapturedUrl(user?.selfieUrl || '');
     startCamera();
   };
+
+  useEffect(() => () => {
+    if (capturedUrl && capturedUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(capturedUrl);
+    }
+  }, [capturedUrl]);
 
   const saveSelfie = async () => {
     if (!capturedFile || !user?.uid) return;
@@ -108,7 +115,21 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
         {capturedUrl ? (
           <img src={capturedUrl} alt="Captured tutor selfie" className="aspect-video w-full object-cover" />
         ) : (
-          <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full object-cover" />
+          <div className="relative aspect-video w-full">
+            <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+            {cameraError ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 p-4 text-center text-sm text-zinc-100">
+                <div className="space-y-2">
+                  <p className="font-semibold">Camera preview unavailable</p>
+                  <p className="text-xs text-zinc-300">
+                    {hasCameraApi
+                      ? 'Allow camera access, then retry the live selfie capture.'
+                      : 'This browser does not support live camera capture.'}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 
@@ -127,10 +148,25 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
             </button>
           </>
         ) : (
-          <button type="button" onClick={captureSelfie} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white">
-            <Camera className="h-4 w-4" />
-            Capture selfie
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={captureSelfie}
+              disabled={!hasCameraApi || Boolean(cameraError && !streamRef.current)}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+            >
+              <Camera className="h-4 w-4" />
+              Capture selfie
+            </button>
+            <button
+              type="button"
+              onClick={startCamera}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry camera
+            </button>
+          </>
         )}
       </div>
     </div>
