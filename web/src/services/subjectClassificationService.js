@@ -1,7 +1,6 @@
-import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai';
 import { getFirebaseClients } from '../firebase/config';
 
-const CLASSIFICATION_MODEL = import.meta.env.VITE_FIREBASE_AI_SUBJECT_MODEL || 'gemini-2.5-flash';
+const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT || '/classify-subject';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 
 function buildFallbackClassification(supportedSubjects = []) {
@@ -78,28 +77,6 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
   };
 }
 
-function buildClassificationPrompt({ supportedSubjects = [], inputText = '' }) {
-  const supportedList = supportedSubjects.map((subject) => subject.value).filter(Boolean);
-  return [
-    'You classify tutoring request text.',
-    `Supported subjects: ${supportedList.join(', ')}`,
-    'Return JSON only with keys: subject, topic, estimatedMinutes, subjectConfidence, needsManualSubjectSelection.',
-    'Rules:',
-    '- subject must be one of the supported subjects above or empty string.',
-    '- topic must be a short optional string or empty string.',
-    '- estimatedMinutes must be an integer from 10 to 90.',
-    '- estimatedMinutes should reflect likely tutoring workload visible in the text, including question count, text volume, and diagram or multi-step complexity when implied.',
-    '- Treat estimatedMinutes as a suggestion, not a fixed booking length.',
-    "- subjectConfidence must be one of: 'high', 'low', 'unknown'.",
-    '- needsManualSubjectSelection must be true when subject is unclear, unsupported, or ambiguous.',
-    '- If text does not clearly indicate a supported subject, set subject to empty string, subjectConfidence to unknown, needsManualSubjectSelection to true.',
-    '- Do not infer beyond the provided text.',
-    '',
-    'Input text:',
-    inputText,
-  ].join('\n');
-}
-
 export async function classifySubjectFromText({ inputText = '', supportedSubjects = [] } = {}) {
   const normalizedInput = normalizeText(inputText);
   if (!normalizedInput) {
@@ -107,34 +84,31 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
   }
 
   try {
-    await getFirebaseClients();
+    const clients = await getFirebaseClients();
+    const idToken = await clients?.auth?.currentUser?.getIdToken?.();
 
-    const ai = getAI(undefined, { backend: new GoogleAIBackend() });
-    const model = getGenerativeModel(ai, {
-      model: CLASSIFICATION_MODEL,
-      generationConfig: {
-        temperature: 0,
-        topK: 1,
-        topP: 0.1,
-        maxOutputTokens: 200,
-        responseMimeType: 'application/json',
+    if (!idToken) {
+      throw new Error('You must be signed in before classifying a request.');
+    }
+
+    const response = await fetch(CLASSIFY_SUBJECT_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
       },
+      body: JSON.stringify({
+        inputText: normalizedInput,
+        supportedSubjects,
+      }),
     });
 
-    const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
-    console.info('[subjectClassification] prompt', {
-      model: CLASSIFICATION_MODEL,
-      prompt,
-    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.success !== true || !payload?.classification) {
+      throw new Error(payload?.message || 'Subject classification failed.');
+    }
 
-    const response = await model.generateContent(prompt);
-    const rawText = response?.response?.text?.() || '';
-    const text = normalizeText(rawText);
-    console.info('[subjectClassification] response', {
-      model: CLASSIFICATION_MODEL,
-      rawText,
-    });
-    const parsed = JSON.parse(text);
+    const parsed = payload.classification;
 
     const fallbackClassification = buildFallbackClassification(supportedSubjects);
     const supportedSubject = normalizeSubjectToSupported(parsed?.subject, supportedSubjects) || fallbackClassification.subject;

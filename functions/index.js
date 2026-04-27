@@ -6,7 +6,6 @@ const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
 const { randomUUID } = require('crypto');
-const pdfParse = require('pdf-parse');
 const {
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
@@ -17,8 +16,12 @@ const {
 } = require('./pricingEngine');
 const {
   normalizeSubjectName,
-  extractSubjectsAndMarks,
 } = require('./subjectExtraction');
+const {
+  convertPdfToImages,
+  extractSubjectsWithAI,
+  classifySubjectWithAI,
+} = require('./aiSubjectExtraction');
 
 admin.initializeApp();
 
@@ -257,76 +260,6 @@ function normalizeActiveSubjects(values = []) {
       seen.add(key);
       return true;
     });
-}
-
-async function extractImageTextWithVision(buffer) {
-  const [result] = await getVisionClient().documentTextDetection({ image: { content: buffer } });
-  return result?.fullTextAnnotation?.text || '';
-}
-
-async function extractPdfTextWithVision({ bucket, filePath, docId }) {
-  const outputPrefix = `visionOcr/tutorDocuments/${docId}/`;
-  const request = {
-    requests: [
-      {
-        inputConfig: {
-          gcsSource: { uri: `gs://${bucket.name}/${filePath}` },
-          mimeType: 'application/pdf',
-        },
-        features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
-        outputConfig: {
-          gcsDestination: { uri: `gs://${bucket.name}/${outputPrefix}` },
-          batchSize: 5,
-        },
-      },
-    ],
-  };
-
-  const [operation] = await getVisionClient().asyncBatchAnnotateFiles(request);
-  await operation.promise();
-  const [files] = await bucket.getFiles({ prefix: outputPrefix });
-  const textParts = [];
-
-  await Promise.all(files.map(async (file) => {
-    const [contents] = await file.download();
-    const payload = JSON.parse(contents.toString('utf8'));
-    (payload.responses || []).forEach((response) => {
-      if (response.fullTextAnnotation?.text) {
-        textParts.push(response.fullTextAnnotation.text);
-      }
-    });
-    await file.delete().catch(() => {});
-  }));
-
-  return textParts.join('\n').trim();
-}
-
-async function extractDocumentText({ filePath, contentType, docId }) {
-  const bucket = admin.storage().bucket();
-  const file = bucket.file(filePath);
-  const [buffer] = await file.download();
-  const normalizedType = String(contentType || '').toLowerCase();
-
-  if (normalizedType.includes('pdf') || filePath.toLowerCase().endsWith('.pdf')) {
-    let text = '';
-    try {
-      const parsed = await pdfParse(buffer);
-      text = String(parsed?.text || '').trim();
-    } catch (error) {
-      logger.warn('PDF text extraction failed, falling back to OCR.', {
-        docId,
-        error: error.message,
-      });
-    }
-
-    if (text.replace(/\s/g, '').length >= 40) {
-      return text;
-    }
-
-    return extractPdfTextWithVision({ bucket, filePath, docId });
-  }
-
-  return extractImageTextWithVision(buffer);
 }
 
 function buildQualifiedSubjects(extractedSubjects = []) {
@@ -575,16 +508,26 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
   }, { merge: true });
 
   try {
-    const extractedText = await extractDocumentText({
-      filePath: data.filePath,
-      contentType: data.contentType,
-      docId,
-    });
-    const extractedSubjects = extractSubjectsAndMarks(extractedText);
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(data.filePath);
+    const [documentBuffer] = await file.download();
+    const images = await convertPdfToImages(documentBuffer);
+    const extractedSubjects = await extractSubjectsWithAI(images);
+
+    if (!extractedSubjects.length) {
+      await docRef.set({
+        extractedSubjects: [],
+        qualifiedSubjects: [],
+        status: 'FAILED',
+        error: 'No subjects detected',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
     const qualifiedSubjects = buildQualifiedSubjects(extractedSubjects);
 
     await docRef.set({
-      extractedText,
       extractedSubjects,
       qualifiedSubjects,
       status: 'VERIFIED',
@@ -1194,6 +1137,71 @@ exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
       extractionMethod: 'ocr',
       provider: 'google-vision',
       message: 'Image OCR failed.',
+    });
+  }
+});
+
+exports.classifySubject = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const inputText = normalizeExtractedText(req.body?.inputText || '');
+  const supportedSubjects = Array.isArray(req.body?.supportedSubjects)
+    ? req.body.supportedSubjects
+      .map((subject) => ({
+        value: normalizeExtractedText(subject?.value || subject),
+        label: normalizeExtractedText(subject?.label || subject?.value || subject),
+      }))
+      .filter((subject) => subject.value)
+      .slice(0, 50)
+    : [];
+
+  if (!inputText) {
+    res.status(400).json({ success: false, message: 'Missing text to classify.' });
+    return;
+  }
+
+  try {
+    const classification = await classifySubjectWithAI({
+      inputText,
+      supportedSubjects,
+    });
+
+    logger.info('subject_classification_completed', {
+      uid: decoded.uid,
+      provider: 'vertex-gemini',
+      subject: classification.subject || '',
+      subjectConfidence: classification.subjectConfidence,
+      needsManualSubjectSelection: classification.needsManualSubjectSelection,
+    });
+
+    res.status(200).json({
+      success: true,
+      classification,
+      provider: 'vertex-gemini',
+    });
+  } catch (error) {
+    logger.error('subject_classification_failed', {
+      uid: decoded.uid,
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Subject classification failed.',
     });
   }
 });

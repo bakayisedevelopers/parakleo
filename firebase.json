@@ -36,6 +36,10 @@
         "function": "extractImageOcr"
       },
       {
+        "source": "/classify-subject",
+        "function": "classifySubject"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
