@@ -131,3 +131,29 @@ export async function retryTutorDocument(documentId) {
 
   return { id: documentId, status: 'UPLOADED' };
 }
+
+export async function deleteTutorDocument(documentRecord) {
+  const documentId = documentRecord?.id;
+  if (!documentId) throw new Error('Missing document id.');
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    return { id: documentId, deleted: true };
+  }
+
+  const { db, storage, firestoreModule, storageModule } = clients;
+  const { deleteDoc, doc } = firestoreModule;
+
+  if (documentRecord.filePath && storage && storageModule?.deleteObject) {
+    try {
+      await storageModule.deleteObject(storageModule.ref(storage, documentRecord.filePath));
+    } catch (error) {
+      if (error?.code !== 'storage/object-not-found') {
+        throw error;
+      }
+    }
+  }
+
+  await deleteDoc(doc(db, 'tutorDocuments', documentId));
+  return { id: documentId, deleted: true };
+}

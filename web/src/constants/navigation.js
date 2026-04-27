@@ -10,6 +10,7 @@ export function getRoleNavigation(role, options = {}) {
     links = [
       { to: '/app/admin', label: 'Home', icon: Home, end: true },
       { to: '/app/admin/tutors', label: 'Tutors', icon: ShieldCheck },
+      { to: '/app/admin/requested-subjects', label: 'Subject demand', icon: BookOpen },
       { to: '/app/admin/payments', label: 'Payouts', icon: Wallet },
     ];
   } else if (normalized === 'tutor') {

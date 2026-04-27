@@ -3,15 +3,34 @@ const { getAI, getGenerativeModel, GoogleAIBackend } = require('firebase/ai');
 const { pdfToPng } = require('pdf-to-png-converter');
 const { normalizeSubjectName } = require('./subjectExtraction');
 
-const MAX_PDF_PAGES = 5;
+const DEFAULT_MAX_PDF_PAGES = 8;
 const MAX_IMAGE_BYTES = 19 * 1024 * 1024;
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_CLASSIFICATION_TIMEOUT_MS = 12 * 1000;
 
-function getGeminiConfig() {
+function getGeminiConfig(overrides = {}) {
   return {
-    model: process.env.GEMINI_MODEL || process.env.FIREBASE_AI_MODEL || DEFAULT_GEMINI_MODEL,
+    model: overrides.GEMINI_MODEL
+      || overrides.FIREBASE_AI_MODEL
+      || process.env.GEMINI_MODEL
+      || process.env.FIREBASE_AI_MODEL
+      || DEFAULT_GEMINI_MODEL,
+    visionModel: overrides.GEMINI_VISION_MODEL
+      || overrides.GEMINI_MODEL
+      || overrides.FIREBASE_AI_MODEL
+      || process.env.GEMINI_VISION_MODEL
+      || process.env.GEMINI_MODEL
+      || process.env.FIREBASE_AI_MODEL
+      || DEFAULT_GEMINI_MODEL,
+    classificationModel: overrides.GEMINI_CLASSIFICATION_MODEL
+      || overrides.GEMINI_MODEL
+      || overrides.FIREBASE_AI_MODEL
+      || process.env.GEMINI_CLASSIFICATION_MODEL
+      || process.env.GEMINI_MODEL
+      || process.env.FIREBASE_AI_MODEL
+      || DEFAULT_GEMINI_MODEL,
     backend: 'firebase-ai-logic-google-ai',
   };
 }
@@ -43,15 +62,31 @@ function getFirebaseAiModel(options = {}) {
   const ai = getAI(app, { backend: new GoogleAIBackend() });
 
   return getGenerativeModel(ai, {
-    model: options.model || getGeminiConfig().model,
+    model: options.model || getGeminiConfig(options.firebaseConfig || {}).model,
     generationConfig: options.generationConfig,
   });
+}
+
+function getMaxPdfPages(overrides = {}) {
+  const numeric = Number(overrides.MAX_PDF_PAGES || process.env.MAX_PDF_PAGES || DEFAULT_MAX_PDF_PAGES);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_MAX_PDF_PAGES;
+  return Math.min(10, Math.max(1, Math.round(numeric)));
 }
 
 function getGeminiTimeoutMs() {
   const numeric = Number(process.env.GEMINI_TIMEOUT_MS || DEFAULT_GEMINI_TIMEOUT_MS);
   if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_GEMINI_TIMEOUT_MS;
   return Math.min(120000, Math.max(5000, Math.round(numeric)));
+}
+
+function getClassificationTimeoutMs(overrides = {}) {
+  const numeric = Number(
+    overrides.GEMINI_CLASSIFICATION_TIMEOUT_MS
+      || process.env.GEMINI_CLASSIFICATION_TIMEOUT_MS
+      || DEFAULT_CLASSIFICATION_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_CLASSIFICATION_TIMEOUT_MS;
+  return Math.min(30000, Math.max(5000, Math.round(numeric)));
 }
 
 function withTimeout(promise, timeoutMs, label) {
@@ -92,15 +127,16 @@ function assertImageSize(buffer) {
   }
 }
 
-async function convertPdfToImages(buffer) {
+async function convertPdfToImages(buffer, options = {}) {
   if (!isPdfBuffer(buffer)) {
     assertImageSize(buffer);
     return [buffer];
   }
 
-  const pagesToProcess = Array.from({ length: MAX_PDF_PAGES }, (_, index) => index + 1);
+  const maxPages = getMaxPdfPages(options.firebaseConfig || options);
+  const pagesToProcess = Array.from({ length: maxPages }, (_, index) => index + 1);
   const pages = await pdfToPng(buffer, {
-    viewportScale: 1.5,
+    viewportScale: 2,
     pagesToProcess,
     strictPagesToProcess: false,
     disableFontFace: false,
@@ -109,7 +145,7 @@ async function convertPdfToImages(buffer) {
   });
 
   const images = pages
-    .slice(0, MAX_PDF_PAGES)
+    .slice(0, maxPages)
     .map((page) => page.content)
     .filter(Buffer.isBuffer);
 
@@ -123,22 +159,38 @@ async function convertPdfToImages(buffer) {
 
 function parseAiJson(text = '') {
   const trimmed = String(text || '').trim();
-  if (!trimmed) return [];
+  if (!trimmed) return null;
 
   try {
     return JSON.parse(trimmed);
   } catch (error) {
-    const arrayMatch = trimmed.match(/\[[\s\S]*\]/);
-    if (!arrayMatch) throw error;
-    return JSON.parse(arrayMatch[0]);
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fencedMatch?.[1]) {
+      return JSON.parse(fencedMatch[1].trim());
+    }
+
+    const arrayStart = trimmed.indexOf('[');
+    const arrayEnd = trimmed.lastIndexOf(']');
+    if (arrayStart >= 0 && arrayEnd > arrayStart) {
+      return JSON.parse(trimmed.slice(arrayStart, arrayEnd + 1));
+    }
+
+    const objectStart = trimmed.indexOf('{');
+    const objectEnd = trimmed.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      return JSON.parse(trimmed.slice(objectStart, objectEnd + 1));
+    }
+
+    throw error;
   }
 }
 
 function validateSubjectMarks(result) {
-  if (!Array.isArray(result)) return [];
+  const subjectRows = Array.isArray(result) ? result : result?.subjects;
+  if (!Array.isArray(subjectRows)) return [];
 
   const bySubject = new Map();
-  result.forEach((item) => {
+  subjectRows.forEach((item) => {
     const rawSubject = typeof item?.subject === 'string' ? item.subject.trim() : '';
     const subject = normalizeSubjectName(rawSubject) || rawSubject;
     const mark = Number(item?.mark);
@@ -181,6 +233,12 @@ Rules:
 - Do NOT return explanations
 - ONLY return JSON`;
 
+  console.debug('[tutorResultsAI] vision prompt prepared', {
+    imageCount: Array.isArray(images) ? images.length : 0,
+    imageBytes: Array.isArray(images) ? images.map((buffer) => buffer.length) : [],
+    prompt,
+  });
+
   return {
     prompt,
     contents: [{
@@ -212,22 +270,35 @@ Rules:
 async function callGeminiForSubjects(images, options = {}) {
   const request = buildVisionPromptContent(images);
   const { prompt, ...geminiRequest } = request;
+  const config = getGeminiConfig(options.firebaseConfig || {});
+  console.debug('[tutorResultsAI] vision prompt sending to Gemini', {
+    model: config.visionModel,
+    timeoutMs: getGeminiTimeoutMs(),
+    prompt,
+  });
+
   const result = await withTimeout(
     getFirebaseAiModel({
       firebaseConfig: options.firebaseConfig || {},
+      model: config.visionModel,
       generationConfig: geminiRequest.generationConfig,
     }).generateContent(geminiRequest.contents[0].parts),
     getGeminiTimeoutMs(),
     'Firebase AI Logic subject extraction',
   );
-  return result.response.text();
+  const outputText = result.response.text();
+  console.debug('[tutorResultsAI] vision raw output received', {
+    model: config.visionModel,
+    outputText,
+  });
+  return { prompt, outputText };
 }
 
 async function extractSubjectsWithAI(images, options = {}) {
   let lastError = null;
   const logger = options.logger || console;
   const logContext = options.logContext || {};
-  const config = getGeminiConfig();
+  const config = getGeminiConfig(options.firebaseConfig || {});
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const startedAt = Date.now();
@@ -238,23 +309,37 @@ async function extractSubjectsWithAI(images, options = {}) {
         imageCount: images.length,
         imageBytes: images.map((image) => image.length),
         provider: 'firebase-ai-logic',
-        aiBackend: getGeminiConfig().backend,
-        model: config.model,
+        aiBackend: config.backend,
+        model: config.visionModel,
         timeoutMs: getGeminiTimeoutMs(),
       });
-      const outputText = await callGeminiForSubjects(images, options);
+      const { prompt, outputText } = await callGeminiForSubjects(images, options);
       const parsed = parseAiJson(outputText);
       const validated = validateSubjectMarks(parsed);
+      console.debug('[tutorResultsAI] vision output parsed and validated', {
+        ...logContext,
+        attempt,
+        prompt,
+        rawOutput: outputText,
+        parsed,
+        validated,
+      });
       logger.info?.('gemini_subject_extraction_completed', {
         ...logContext,
         attempt,
         durationMs: Date.now() - startedAt,
+        prompt,
         rawOutput: outputText,
         extractedSubjectCount: validated.length,
       });
       return validated;
     } catch (error) {
       lastError = error;
+      console.debug('[tutorResultsAI] vision extraction attempt failed', {
+        ...logContext,
+        attempt,
+        error: error.message,
+      });
       logger.warn?.('gemini_subject_extraction_attempt_failed', {
         ...logContext,
         attempt,
@@ -264,7 +349,7 @@ async function extractSubjectsWithAI(images, options = {}) {
     }
   }
 
-  throw new Error(lastError?.message || 'AI subject extraction failed.');
+  throw new Error('AI could not read valid subjects and marks from this document. Upload a clearer result document or try a stronger Gemini vision model.');
 }
 
 function normalizeText(value = '') {
@@ -306,13 +391,14 @@ function normalizeSubjectToSupported(rawSubject, supportedSubjects = []) {
 }
 
 function buildFallbackClassification(supportedSubjects = []) {
-  const defaultSubject = normalizeSubjectToSupported('Mathematics', supportedSubjects) || '';
   return {
-    subject: defaultSubject,
+    subject: '',
+    unsupportedSubject: '',
     topic: '',
     estimatedMinutes: 10,
     subjectConfidence: 'unknown',
-    needsManualSubjectSelection: !defaultSubject,
+    needsManualSubjectSelection: true,
+    unsupportedSubjectRequested: false,
   };
 }
 
@@ -321,41 +407,61 @@ function validateSubjectClassification(parsed, supportedSubjects = []) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
 
   const supportedSubject = normalizeSubjectToSupported(parsed.subject, supportedSubjects);
+  const unsupportedCandidate = normalizeText(parsed.unsupportedSubject || (!supportedSubject ? parsed.subject : ''));
+  const unsupportedSubject = unsupportedCandidate && !normalizeSubjectToSupported(unsupportedCandidate, supportedSubjects)
+    ? unsupportedCandidate
+    : '';
   const confidence = ['high', 'low', 'unknown'].includes(parsed.subjectConfidence)
     ? parsed.subjectConfidence
     : 'unknown';
 
   return {
     subject: supportedSubject || fallback.subject,
+    unsupportedSubject,
     topic: normalizeText(parsed.topic),
     estimatedMinutes: clampEstimatedMinutes(parsed.estimatedMinutes),
     subjectConfidence: confidence,
     needsManualSubjectSelection: Boolean(parsed.needsManualSubjectSelection)
       || !supportedSubject
       || confidence !== 'high',
+    unsupportedSubjectRequested: Boolean(unsupportedSubject),
   };
 }
 
 function buildClassificationPrompt({ supportedSubjects = [], inputText = '' }) {
   const supportedList = supportedSubjects.map((subject) => subject?.value || subject).filter(Boolean);
-  return [
+  const prompt = [
     'You classify tutoring request text.',
+    'The input may contain noisy OCR text from homework images. First identify actual question text, formulas, instructions, and topic clues. Ignore page headers, random OCR fragments, names, dates, marks, and unrelated noise.',
     `Supported subjects: ${supportedList.join(', ')}`,
-    'Return JSON only with keys: subject, topic, estimatedMinutes, subjectConfidence, needsManualSubjectSelection.',
+    'Return JSON only with keys: subject, unsupportedSubject, topic, estimatedMinutes, subjectConfidence, needsManualSubjectSelection.',
     'Rules:',
     '- subject must be one of the supported subjects above or empty string.',
+    '- unsupportedSubject must be empty when the best requested subject is supported or unclear.',
+    '- unsupportedSubject must contain the requested subject name only when the text clearly asks for a subject that is not in the supported subjects list.',
     '- topic must be a short optional string or empty string.',
     '- estimatedMinutes must be an integer from 10 to 90.',
     '- estimatedMinutes should reflect likely tutoring workload visible in the text, including question count, text volume, and diagram or multi-step complexity when implied.',
     '- Treat estimatedMinutes as a suggestion, not a fixed booking length.',
     "- subjectConfidence must be one of: 'high', 'low', 'unknown'.",
     '- needsManualSubjectSelection must be true when subject is unclear, unsupported, or ambiguous.',
-    '- If text does not clearly indicate a supported subject, set subject to empty string, subjectConfidence to unknown, needsManualSubjectSelection to true.',
+    '- If question text clearly points to a supported subject, return the best supported subject even when OCR has noise.',
+    '- If question text clearly points to an unsupported subject, set subject to empty string, unsupportedSubject to that subject, subjectConfidence to high, and needsManualSubjectSelection to true.',
+    '- If text is too random or does not clearly indicate a supported subject, set subject to empty string, subjectConfidence to unknown, needsManualSubjectSelection to true.',
     '- Do not infer beyond the provided text.',
     '',
     'Input text:',
     truncateText(normalizeText(inputText)),
   ].join('\n');
+
+  console.debug('[studentRequestAI] classification prompt prepared', {
+    supportedSubjectCount: supportedList.length,
+    supportedSubjects: supportedList,
+    inputText: truncateText(normalizeText(inputText)),
+    prompt,
+  });
+
+  return prompt;
 }
 
 async function classifySubjectWithAI({ inputText = '', supportedSubjects = [], firebaseConfig = {} } = {}) {
@@ -363,28 +469,48 @@ async function classifySubjectWithAI({ inputText = '', supportedSubjects = [], f
   if (!normalizedInput) return buildFallbackClassification(supportedSubjects);
 
   const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
+  const config = getGeminiConfig(firebaseConfig);
+  console.debug('[studentRequestAI] classification request starting', {
+    model: config.classificationModel,
+    supportedSubjectCount: supportedSubjects.length,
+    inputLength: normalizedInput.length,
+    timeoutMs: getClassificationTimeoutMs(firebaseConfig),
+  });
   const result = await withTimeout(getFirebaseAiModel({
     firebaseConfig,
+    model: config.classificationModel,
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 300,
       responseMimeType: 'application/json',
     },
-  }).generateContent(prompt), getGeminiTimeoutMs(), 'Firebase AI Logic subject classification');
+  }).generateContent(prompt), getClassificationTimeoutMs(firebaseConfig), 'Firebase AI Logic subject classification');
 
   const outputText = result.response.text();
+  console.debug('[studentRequestAI] classification raw output received', {
+    model: config.classificationModel,
+    outputText,
+  });
+  const parsed = parseAiJson(outputText);
+  const classification = validateSubjectClassification(parsed, supportedSubjects);
+  console.debug('[studentRequestAI] classification parsed and validated', {
+    model: config.classificationModel,
+    prompt,
+    parsed,
+    classification,
+  });
   return {
-    classification: validateSubjectClassification(parseAiJson(outputText), supportedSubjects),
+    classification,
     rawOutput: outputText,
     prompt,
-    model: getGeminiConfig().model,
+    model: config.classificationModel,
     provider: 'firebase-ai-logic',
-    backend: getGeminiConfig().backend,
+    backend: config.backend,
   };
 }
 
 module.exports = {
-  MAX_PDF_PAGES,
+  MAX_PDF_PAGES: DEFAULT_MAX_PDF_PAGES,
   convertPdfToImages,
   extractSubjectsWithAI,
   classifySubjectWithAI,

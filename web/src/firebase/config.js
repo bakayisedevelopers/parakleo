@@ -12,7 +12,7 @@ import {
   deleteUser,
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp, onSnapshot, query, where, orderBy, runTransaction, writeBatch } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -94,6 +94,7 @@ function initializeFirebase() {
         ref,
         uploadBytes,
         getDownloadURL,
+        deleteObject,
       },
     };
     return cachedClients;

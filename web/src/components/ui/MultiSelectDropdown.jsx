@@ -13,7 +13,8 @@ export default function MultiSelectDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
-  const selectedSet = useMemo(() => new Set(value), [value]);
+  const selectedValues = Array.isArray(value) ? value : [];
+  const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
 
   const selectedLabels = options
     .filter((option) => selectedSet.has(option.value))
@@ -22,8 +23,8 @@ export default function MultiSelectDropdown({
 
   const toggleValue = (optionValue) => {
     const next = selectedSet.has(optionValue)
-      ? value.filter((item) => item !== optionValue)
-      : [...value, optionValue];
+      ? selectedValues.filter((item) => item !== optionValue)
+      : [...selectedValues, optionValue];
     onChange?.(next);
   };
 
@@ -36,19 +37,17 @@ export default function MultiSelectDropdown({
       }
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('pointerdown', handlePointerDown);
 
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [isOpen]);
 
   return (
-    <div ref={containerRef} className="space-y-1">
+    <div ref={containerRef} className={`space-y-1 ${isOpen ? 'relative z-[100]' : ''}`}>
       <label className="block text-sm font-semibold text-zinc-700">{label}</label>
-      <input type="hidden" name={name} value={value.join(',')} required={required && !value.length} />
+      <input type="hidden" name={name} value={selectedValues.join(',')} required={required && !selectedValues.length} />
       <div className="relative">
         <button
           type="button"
@@ -60,12 +59,16 @@ export default function MultiSelectDropdown({
         </button>
 
         {isOpen ? (
-          <div className="absolute z-30 mt-2 w-full rounded-xl border border-zinc-200 bg-white p-2 shadow-lg">
+          <div className="absolute z-[120] mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl">
             {options.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                onClick={() => toggleValue(option.value)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleValue(option.value);
+                }}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-zinc-50 ${
                   selectedSet.has(option.value) ? 'bg-emerald-50 text-emerald-800' : 'text-zinc-800'
                 }`}

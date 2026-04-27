@@ -89,7 +89,7 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
           <ReferralShareButton
             referralSlug={user?.referralSlug || user?.referralCode}
             className="mb-3"
-            showIntro={!mobile}
+            showIntro={false}
           />
         ) : null}
         <NavLink

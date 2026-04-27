@@ -1,17 +1,20 @@
 import { getFirebaseClients } from '../firebase/config';
+import { cleanExtractedText, parseQuestionsFromExtraction } from './questionParsingService';
 
 const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT || '/classify-subject';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
-const CLASSIFICATION_TIMEOUT_MS = 30000;
+const CLASSIFICATION_TIMEOUT_MS = 12000;
 
 function buildFallbackClassification(supportedSubjects = []) {
-  const defaultSubject = normalizeSubjectToSupported('Mathematics', supportedSubjects) || '';
   return {
-    subject: defaultSubject,
+    subject: '',
+    unsupportedSubject: '',
     topic: '',
     estimatedMinutes: 10,
-    subjectConfidence: defaultSubject ? 'unknown' : 'unknown',
-    needsManualSubjectSelection: !defaultSubject,
+    subjectConfidence: 'unknown',
+    needsManualSubjectSelection: true,
+    unsupportedSubjectRequested: false,
+    isFallback: true,
   };
 }
 
@@ -28,6 +31,26 @@ function normalizeText(value = '') {
 function truncateText(value = '', maxChars = MAX_CLASSIFICATION_INPUT_CHARS) {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}…`;
+}
+
+function formatQuestionBlocksForClassification({ typedText = '', attachmentExtractions = [] } = {}) {
+  const blocks = parseQuestionsFromExtraction({
+    extractedText: typedText,
+    attachmentExtractions,
+  });
+
+  if (!blocks.length) {
+    return cleanExtractedText(typedText).cleanedText;
+  }
+
+  return blocks
+    .map((block, index) => {
+      const label = block.questionNumber ? `Question ${block.questionNumber}` : `Question ${index + 1}`;
+      return `${label}:\n${cleanExtractedText(block.text).cleanedText}`;
+    })
+    .filter((text) => text.replace(/^Question[^:]*:\s*/i, '').trim())
+    .join('\n\n---\n\n')
+    .trim();
 }
 
 function getSupportedSubjectMap(supportedSubjects = []) {
@@ -61,7 +84,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = CLASSIFICATION_TIMEOUT_
 }
 
 export function buildSubjectClassificationInput({ typedText = '', attachmentExtractions = [] } = {}) {
-  const normalizedTypedText = normalizeText(typedText);
+  const normalizedTypedText = cleanExtractedText(typedText).cleanedText;
 
   const usableAttachmentTexts = attachmentExtractions
     .map((entry) => normalizeText(entry?.extractedText))
@@ -79,7 +102,11 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
     combinedSections.push(`Extracted attachment text:\n${usableAttachmentTexts.join('\n\n---\n\n')}`);
   }
 
-  const combinedText = truncateText(combinedSections.join('\n\n'));
+  const structuredText = formatQuestionBlocksForClassification({
+    typedText: combinedSections.join('\n\n'),
+    attachmentExtractions,
+  });
+  const combinedText = truncateText(structuredText || combinedSections.join('\n\n'));
 
   return {
     combinedText,
@@ -91,6 +118,10 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
 export async function classifySubjectFromText({ inputText = '', supportedSubjects = [] } = {}) {
   const normalizedInput = normalizeText(inputText);
   if (!normalizedInput) {
+    console.debug('[studentRequestAI] frontend fallback before request', {
+      reason: 'empty_input',
+      supportedSubjectCount: supportedSubjects.length,
+    });
     return buildFallbackClassification(supportedSubjects);
   }
 
@@ -103,11 +134,13 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
       throw new Error('You must be signed in before classifying a request.');
     }
 
-    console.debug('[subjectClassification] backend classification started', {
+    console.debug('[studentRequestAI] frontend classification request starting', {
       endpoint: CLASSIFY_SUBJECT_ENDPOINT,
       inputLength: normalizedInput.length,
       supportedSubjectCount: supportedSubjects.length,
       timeoutMs: CLASSIFICATION_TIMEOUT_MS,
+      inputText: normalizedInput,
+      supportedSubjects,
     });
 
     const response = await fetchWithTimeout(CLASSIFY_SUBJECT_ENDPOINT, {
@@ -123,11 +156,17 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
     });
 
     const payload = await response.json().catch(() => ({}));
+    console.debug('[studentRequestAI] frontend classification response received', {
+      endpoint: CLASSIFY_SUBJECT_ENDPOINT,
+      ok: response.ok,
+      status: response.status,
+      payload,
+    });
     if (!response.ok || payload?.success !== true || !payload?.classification) {
       throw new Error(payload?.message || 'Subject classification failed.');
     }
 
-    console.debug('[subjectClassification] backend classification completed', {
+    console.debug('[studentRequestAI] frontend classification completed', {
       durationMs: Date.now() - startedAt,
       provider: payload.provider,
       classification: payload.classification,
@@ -149,13 +188,16 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
 
     return {
       subject: supportedSubject,
+      unsupportedSubject: normalizeText(parsed?.unsupportedSubject),
       topic,
       estimatedMinutes,
       subjectConfidence: confidence,
       needsManualSubjectSelection,
+      unsupportedSubjectRequested: Boolean(parsed?.unsupportedSubjectRequested || parsed?.unsupportedSubject),
+      isFallback: false,
     };
   } catch (error) {
-    console.debug('[subjectClassification] classification failed, using fallback', { error: error?.message });
+    console.debug('[studentRequestAI] frontend classification failed, using fallback', { error: error?.message });
     return buildFallbackClassification(supportedSubjects);
   }
 }

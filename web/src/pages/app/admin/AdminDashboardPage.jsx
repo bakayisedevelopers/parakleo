@@ -80,6 +80,9 @@ export default function AdminDashboardPage() {
               <Link to="/app/admin/payments" className="rounded-2xl border border-zinc-300 bg-white p-4 text-sm font-semibold text-zinc-800 hover:border-emerald-300">
                 Weekly manual payout management
               </Link>
+              <Link to="/app/admin/requested-subjects" className="rounded-2xl border border-zinc-300 bg-white p-4 text-sm font-semibold text-zinc-800 hover:border-emerald-300">
+                Requested subjects not yet offered
+              </Link>
             </div>
           </SectionCard>
         </>

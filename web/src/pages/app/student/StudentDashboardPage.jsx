@@ -30,6 +30,7 @@ import {
   buildSubjectClassificationInput,
   classifySubjectFromText,
 } from '../../../services/subjectClassificationService';
+import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSubjectService';
 import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
 import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { getStudentOnboardingStatus } from '../../../utils/onboarding';
@@ -203,6 +204,7 @@ export default function StudentDashboardPage() {
   const textareaRef = useRef(null);
   const attachmentsRef = useRef([]);
   const isManualSubjectRef = useRef(false);
+  const loggedUnsupportedSubjectsRef = useRef(new Set());
   const extractionRunCounterRef = useRef(0);
   const activeExtractionTokenByKeyRef = useRef({});
   const classificationRunCounterRef = useRef(0);
@@ -223,6 +225,7 @@ export default function StudentDashboardPage() {
   const [classificationStatus, setClassificationStatus] = useState('');
   const [classificationState, setClassificationState] = useState('idle');
   const [showSubjectFallback, setShowSubjectFallback] = useState(false);
+  const [unsupportedSubjectRequest, setUnsupportedSubjectRequest] = useState(null);
   const [durationMinutes, setDurationMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [hasManualDurationOverride, setHasManualDurationOverride] = useState(false);
   const [isTextEntryOpen, setIsTextEntryOpen] = useState(false);
@@ -294,8 +297,40 @@ export default function StudentDashboardPage() {
     return nextQuote;
   };
 
+  const recordUnsupportedSubjectOnce = async () => {
+    const subject = unsupportedSubjectRequest?.subject;
+    if (!subject) return;
+
+    const normalizedKey = subject.toLowerCase();
+    if (loggedUnsupportedSubjectsRef.current.has(normalizedKey)) return;
+    loggedUnsupportedSubjectsRef.current.add(normalizedKey);
+
+    try {
+      await recordUnsupportedSubjectRequest({
+        subject,
+        inputText: unsupportedSubjectRequest.inputText || topic,
+        uid: user?.uid,
+      });
+    } catch (recordError) {
+      console.debug('[subjectClassification] unsupported subject logging failed', {
+        error: recordError?.message,
+      });
+    }
+  };
+
   const maybeAdvanceToReview = (intent = '') => {
     if (flowState !== 'request_flow') return;
+    if (unsupportedSubjectRequest?.subject) {
+      console.debug('[studentRequestAI] unsupported subject popup requested', {
+        subject: unsupportedSubjectRequest.subject,
+        intent,
+        topic,
+      });
+      setAdvanceIntent(intent || 'text');
+      setShowSubjectFallback(true);
+      recordUnsupportedSubjectOnce();
+      return;
+    }
     if (!readyForReview) {
       setAdvanceIntent(intent || 'text');
       return;
@@ -311,6 +346,11 @@ export default function StudentDashboardPage() {
     setStage('input');
     setAdvanceIntent('');
     setError('');
+    setUnsupportedSubjectRequest(null);
+    console.debug('[studentRequestAI] topic changed', {
+      topic: nextTopic,
+      attachmentCount: attachments.length,
+    });
     if (!isManualSubjectRef.current) {
       setSelectedSubject(resolveSubjectFromText(nextTopic, subjectOptions));
     }
@@ -323,6 +363,10 @@ export default function StudentDashboardPage() {
     setStage('input');
     setAdvanceIntent('');
     setError('');
+    setUnsupportedSubjectRequest(null);
+    console.debug('[studentRequestAI] quick suggestion applied', {
+      topic: value,
+    });
     if (!isManualSubjectRef.current) {
       setSelectedSubject(resolveSubjectFromText(value, subjectOptions));
     }
@@ -350,6 +394,7 @@ export default function StudentDashboardPage() {
     setStage('input');
     setAdvanceIntent('attachment');
     setError('');
+    setUnsupportedSubjectRequest(null);
     setShowExtractionOverlay(true);
     setShowSlowExtractionMessage(false);
     setExtractionOverlayState('processing');
@@ -437,6 +482,14 @@ export default function StudentDashboardPage() {
 
   const confirmRequest = async () => {
     if (!canConfirm) {
+      if (unsupportedSubjectRequest?.subject) {
+        console.debug('[studentRequestAI] confirm blocked by unsupported subject', {
+          subject: unsupportedSubjectRequest.subject,
+        });
+        setShowSubjectFallback(true);
+        recordUnsupportedSubjectOnce();
+        return;
+      }
       if (!selectedSubject) {
         setShowSubjectFallback(true);
       }
@@ -445,6 +498,14 @@ export default function StudentDashboardPage() {
 
     setError('');
     setIsSubmitting(true);
+    console.debug('[studentRequestAI] submit request started', {
+      selectedSubject,
+      durationMinutes,
+      topic,
+      classifiedTopic,
+      estimatedMinutes,
+      attachmentsCount: attachments.length,
+    });
 
     try {
       const activeQuote = quote || (await refreshQuote(durationMinutes));
@@ -522,6 +583,9 @@ export default function StudentDashboardPage() {
       });
     } catch (requestError) {
       setError(requestError.message || 'Unable to submit request right now.');
+      console.debug('[studentRequestAI] submit request failed', {
+        error: requestError?.message,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -569,11 +633,29 @@ export default function StudentDashboardPage() {
       attachmentExtractions: extractionResults,
     });
 
+    console.debug('[studentRequestAI] classification effect evaluated input', {
+      topic,
+      attachmentCount: attachmentsRef.current.length,
+      hasUsableText,
+      combinedText,
+    });
+
     if (!hasUsableText) {
+      console.debug('[studentRequestAI] classification skipped due to no usable text', {
+        attachmentCount: attachmentsRef.current.length,
+      });
       setClassifiedTopic('');
       setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-      setClassificationStatus('');
-      setClassificationState('idle');
+      setClassificationStatus(
+        attachmentsRef.current.length
+          ? 'We could not read enough text from the upload. Choose the subject manually before sending.'
+          : '',
+      );
+      setClassificationState(attachmentsRef.current.length ? 'done' : 'idle');
+      setUnsupportedSubjectRequest(null);
+      if (attachmentsRef.current.length && !isManualSubjectRef.current) {
+        setSelectedSubject('');
+      }
       if (!hasManualDurationOverride) {
         setDurationMinutes(DEFAULT_LESSON_DURATION);
       }
@@ -584,6 +666,11 @@ export default function StudentDashboardPage() {
     classificationRunCounterRef.current = runId;
     let isCancelled = false;
 
+    console.debug('[studentRequestAI] classification effect started', {
+      runId,
+      combinedText,
+      supportedSubjectCount: subjectOptions.length || SUBJECT_OPTIONS.length,
+    });
     setClassificationState('running');
     setClassificationStatus('Analyzing your request...');
 
@@ -596,20 +683,44 @@ export default function StudentDashboardPage() {
 
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
 
+        console.debug('[studentRequestAI] classification effect received result', {
+          runId,
+          result,
+        });
+
         const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
         setClassifiedTopic(result.topic || '');
         setEstimatedMinutes(nextEstimatedMinutes);
         setClassificationState('done');
 
         if (result.subject) {
+          setUnsupportedSubjectRequest(null);
           setSelectedSubject(result.subject);
           setClassificationStatus(
             result.needsManualSubjectSelection || result.subjectConfidence === 'low'
               ? 'Subject detected. Please confirm before sending.'
               : 'Subject and study focus detected from your request.',
           );
+        } else if (result.unsupportedSubjectRequested && result.unsupportedSubject) {
+          setSelectedSubject('');
+          setUnsupportedSubjectRequest({
+            subject: result.unsupportedSubject,
+            inputText: combinedText,
+          });
+          setClassificationStatus(`Sorry, ${result.unsupportedSubject} is not offered yet.`);
+          console.debug('[studentRequestAI] unsupported subject detected', {
+            runId,
+            unsupportedSubject: result.unsupportedSubject,
+            classification: result,
+          });
         } else {
-          setClassificationStatus('We need you to choose the subject manually before review.');
+          setUnsupportedSubjectRequest(null);
+          setSelectedSubject('');
+          setClassificationStatus('Choose the subject manually before sending.');
+          console.debug('[studentRequestAI] classification fell back to manual selection', {
+            runId,
+            classification: result,
+          });
         }
 
         if (!hasManualDurationOverride) {
@@ -617,8 +728,21 @@ export default function StudentDashboardPage() {
         }
       } catch (classificationError) {
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
-        setClassificationState('error');
-        setClassificationStatus('We could not estimate the request yet. Keep editing or try again.');
+        console.debug('[studentRequestAI] classification effect failed', {
+          runId,
+          error: classificationError?.message,
+        });
+        setClassifiedTopic('');
+        setEstimatedMinutes(DEFAULT_LESSON_DURATION);
+        setClassificationState('done');
+        setClassificationStatus('Choose the subject manually before sending.');
+        setUnsupportedSubjectRequest(null);
+        if (!isManualSubjectRef.current) {
+          setSelectedSubject('');
+        }
+        if (!hasManualDurationOverride) {
+          setDurationMinutes(DEFAULT_LESSON_DURATION);
+        }
       }
     }, 450);
 
@@ -723,6 +847,7 @@ export default function StudentDashboardPage() {
   const handleSubjectChange = (event) => {
     isManualSubjectRef.current = true;
     setSelectedSubject(event.target.value);
+    setUnsupportedSubjectRequest(null);
     setQuote(null);
     setError('');
   };
@@ -1067,46 +1192,67 @@ export default function StudentDashboardPage() {
       {showSubjectFallback ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-white/75 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
-            <p className="text-lg font-bold text-zinc-900">Choose subject before review</p>
-            <p className="mt-2 text-sm text-zinc-600">We couldn&apos;t confidently resolve a supported subject from the request details.</p>
+            {unsupportedSubjectRequest?.subject ? (
+              <>
+                <p className="text-lg font-bold text-zinc-900">Subject not offered yet</p>
+                <p className="mt-2 text-sm text-zinc-600">
+                  Sorry, {unsupportedSubjectRequest.subject} is not offered yet.
+                </p>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowSubjectFallback(false)}
+                    className="rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-bold text-zinc-900">Choose subject before review</p>
+                <p className="mt-2 text-sm text-zinc-600">We couldn&apos;t confidently resolve a supported subject from the request details.</p>
 
-            <select
-              value={selectedSubject}
-              onChange={(event) => {
-                const nextSubject = event.target.value;
-                isManualSubjectRef.current = Boolean(nextSubject);
-                setSelectedSubject(nextSubject);
-              }}
-              className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-900 outline-none"
-            >
-              <option value="">Select subject</option>
-              {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
-                <option key={subject.value} value={subject.value}>
-                  {subject.label}
-                </option>
-              ))}
-            </select>
+                <select
+                  value={selectedSubject}
+                  onChange={(event) => {
+                    const nextSubject = event.target.value;
+                    isManualSubjectRef.current = Boolean(nextSubject);
+                    setSelectedSubject(nextSubject);
+                    setUnsupportedSubjectRequest(null);
+                  }}
+                  className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-900 outline-none"
+                >
+                  <option value="">Select subject</option>
+                  {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
+                    <option key={subject.value} value={subject.value}>
+                      {subject.label}
+                    </option>
+                  ))}
+                </select>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowSubjectFallback(false)}
-                className="rounded-2xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!selectedSubject}
-                onClick={() => {
-                  setShowSubjectFallback(false);
-                  maybeAdvanceToReview(advanceIntent || 'text');
-                }}
-                className="rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-600 disabled:text-zinc-200"
-              >
-                Confirm subject
-              </button>
-            </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSubjectFallback(false)}
+                    className="rounded-2xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedSubject}
+                    onClick={() => {
+                      setShowSubjectFallback(false);
+                      maybeAdvanceToReview(advanceIntent || 'text');
+                    }}
+                    className="rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-600 disabled:text-zinc-200"
+                  >
+                    Confirm subject
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}

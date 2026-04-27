@@ -21,6 +21,7 @@ import SessionRoomPage from './pages/app/SessionRoomPage';
 import AdminDashboardPage from './pages/app/admin/AdminDashboardPage';
 import AdminTutorsPage from './pages/app/admin/AdminTutorsPage';
 import AdminPaymentsPage from './pages/app/admin/AdminPaymentsPage';
+import AdminUnsupportedSubjectsPage from './pages/app/admin/AdminUnsupportedSubjectsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsPage from './pages/TermsPage';
 import RefundPolicyPage from './pages/RefundPolicyPage';
@@ -182,6 +183,14 @@ export default function App() {
             element={
               <ProtectedRoute requireAdmin>
                 <AdminPaymentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/requested-subjects"
+            element={
+              <ProtectedRoute requireAdmin>
+                <AdminUnsupportedSubjectsPage />
               </ProtectedRoute>
             }
           />

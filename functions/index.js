@@ -492,8 +492,21 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
 
 async function processTutorDocumentRecord({ docId, data = {} }) {
   const docRef = db.collection('tutorDocuments').doc(docId);
+  console.debug('[tutorResultsAI] processing document record', {
+    docId,
+    uid: data.uid || '',
+    filePath: data.filePath || '',
+    status: data.status || '',
+    contentType: data.contentType || '',
+  });
 
   if (!data.uid || !data.filePath) {
+    console.debug('[tutorResultsAI] missing uid or filePath', {
+      docId,
+      uid: data.uid || '',
+      filePath: data.filePath || '',
+    });
+    if (!(await docRef.get()).exists) return;
     await docRef.set({
       status: 'FAILED',
       error: 'Document record is missing uid or filePath.',
@@ -502,11 +515,13 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
     return;
   }
 
+  if (!(await docRef.get()).exists) return;
   await docRef.set({
     status: 'PROCESSING',
     error: null,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
+  console.debug('[tutorResultsAI] document marked processing', { docId, uid: data.uid });
 
   try {
     const bucket = admin.storage().bucket();
@@ -518,12 +533,27 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       contentType: data.contentType || '',
     });
     const [documentBuffer] = await file.download();
+    console.debug('[tutorResultsAI] document downloaded from storage', {
+      docId,
+      uid: data.uid,
+      filePath: data.filePath,
+      byteLength: documentBuffer.length,
+    });
     logger.info('tutor_document_downloaded', {
       docId,
       uid: data.uid,
       byteLength: documentBuffer.length,
     });
-    const images = await convertPdfToImages(documentBuffer);
+    const aiConfig = getAiSecrets();
+    const images = await convertPdfToImages(documentBuffer, {
+      firebaseConfig: aiConfig,
+    });
+    console.debug('[tutorResultsAI] document converted to images', {
+      docId,
+      uid: data.uid,
+      imageCount: images.length,
+      imageBytes: images.map((image) => image.length),
+    });
     logger.info('tutor_document_images_ready', {
       docId,
       uid: data.uid,
@@ -536,10 +566,20 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
         docId,
         uid: data.uid,
       },
-      firebaseConfig: getAiSecrets(),
+      firebaseConfig: aiConfig,
+    });
+    console.debug('[tutorResultsAI] extracted subjects result', {
+      docId,
+      uid: data.uid,
+      extractedSubjects,
     });
 
     if (!extractedSubjects.length) {
+      console.debug('[tutorResultsAI] no subjects detected in document', {
+        docId,
+        uid: data.uid,
+      });
+      if (!(await docRef.get()).exists) return;
       await docRef.set({
         extractedSubjects: [],
         qualifiedSubjects: [],
@@ -551,7 +591,13 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
     }
 
     const qualifiedSubjects = buildQualifiedSubjects(extractedSubjects);
+    console.debug('[tutorResultsAI] qualified subjects built', {
+      docId,
+      uid: data.uid,
+      qualifiedSubjects,
+    });
 
+    if (!(await docRef.get()).exists) return;
     await docRef.set({
       extractedSubjects,
       qualifiedSubjects,
@@ -574,11 +620,17 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       qualifiedSubjectCount: qualifiedSubjects.length,
     });
   } catch (error) {
+    console.debug('[tutorResultsAI] processing failed', {
+      docId,
+      uid: data.uid,
+      error: error.message,
+    });
     logger.error('Tutor document processing failed.', {
       docId,
       uid: data.uid,
       error: error.message,
     });
+    if (!(await docRef.get()).exists) return;
     await docRef.set({
       status: 'FAILED',
       error: error.message || 'Document processing failed.',
@@ -862,6 +914,19 @@ function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
 
+async function getGlobalSubjectOptions() {
+  const snapshot = await db.collection('system').doc('subjects').get();
+  const subjectNames = snapshot.exists && Array.isArray(snapshot.data()?.subjectNames)
+    ? snapshot.data().subjectNames
+    : [];
+
+  return subjectNames
+    .map((subject) => normalizeExtractedText(subject))
+    .filter(Boolean)
+    .slice(0, 100)
+    .map((subject) => ({ value: subject, label: subject }));
+}
+
 function parseGroupedSecretJson(name, rawValue) {
   const value = String(rawValue || '').trim();
   if (!value) {
@@ -967,6 +1032,11 @@ function getAiSecrets() {
     storageBucket: groupedSecrets.FIREBASE_STORAGE_BUCKET || groupedSecrets.VITE_FIREBASE_STORAGE_BUCKET || '',
     messagingSenderId: groupedSecrets.FIREBASE_MESSAGING_SENDER_ID || groupedSecrets.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
     appId: groupedSecrets.FIREBASE_APP_ID || groupedSecrets.VITE_FIREBASE_APP_ID || '',
+    GEMINI_MODEL: groupedSecrets.GEMINI_MODEL || groupedSecrets.FIREBASE_AI_MODEL || '',
+    GEMINI_VISION_MODEL: groupedSecrets.GEMINI_VISION_MODEL || '',
+    GEMINI_CLASSIFICATION_MODEL: groupedSecrets.GEMINI_CLASSIFICATION_MODEL || '',
+    GEMINI_CLASSIFICATION_TIMEOUT_MS: groupedSecrets.GEMINI_CLASSIFICATION_TIMEOUT_MS || '',
+    MAX_PDF_PAGES: groupedSecrets.MAX_PDF_PAGES || '',
   };
 
   assertRequiredSecrets('CLAXI_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
@@ -1206,16 +1276,6 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
   }
 
   const inputText = normalizeExtractedText(req.body?.inputText || '');
-  const supportedSubjects = Array.isArray(req.body?.supportedSubjects)
-    ? req.body.supportedSubjects
-      .map((subject) => ({
-        value: normalizeExtractedText(subject?.value || subject),
-        label: normalizeExtractedText(subject?.label || subject?.value || subject),
-      }))
-      .filter((subject) => subject.value)
-      .slice(0, 50)
-    : [];
-
   if (!inputText) {
     res.status(400).json({ success: false, message: 'Missing text to classify.' });
     return;
@@ -1223,6 +1283,12 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
 
   try {
     const startedAt = Date.now();
+    const supportedSubjects = await getGlobalSubjectOptions();
+    console.debug('[studentRequestAI] classification request received', {
+      uid: decoded.uid,
+      inputLength: inputText.length,
+      supportedSubjects,
+    });
     logger.info('subject_classification_started', {
       uid: decoded.uid,
       provider: 'firebase-ai-logic',
@@ -1235,6 +1301,14 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       inputText,
       supportedSubjects,
       firebaseConfig: getAiSecrets(),
+    });
+    console.debug('[studentRequestAI] classification AI result', {
+      uid: decoded.uid,
+      prompt: aiResult.prompt,
+      rawOutput: aiResult.rawOutput,
+      classification: aiResult.classification,
+      model: aiResult.model,
+      backend: aiResult.backend,
     });
     const classification = aiResult.classification;
 
@@ -1250,6 +1324,10 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       subjectConfidence: classification.subjectConfidence,
       needsManualSubjectSelection: classification.needsManualSubjectSelection,
     });
+    console.debug('[studentRequestAI] classification response sent', {
+      uid: decoded.uid,
+      classification,
+    });
 
     res.status(200).json({
       success: true,
@@ -1257,6 +1335,10 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       provider: 'firebase-ai-logic',
     });
   } catch (error) {
+    console.debug('[studentRequestAI] classification failed', {
+      uid: decoded.uid,
+      error: error.message,
+    });
     logger.error('subject_classification_failed', {
       uid: decoded.uid,
       error: error.message,
