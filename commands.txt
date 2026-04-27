@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after AI implementation for extraction for results and replacing Firebase AI Logic with Vertex AI - 27.04.2026 - 1."
+git commit -m "Commit after AI implementation for extraction for results and replacing Vertex with Firebase AI Logic - 27.04.2026 - 2."
 git push origin main
 git push origin main --force
 
@@ -139,4 +139,24 @@ $secretPath = Join-Path $env:TEMP "claxi-realtime-secrets.json"
 cat $secretPath | ConvertFrom-Json | Out-Null
 Write-Host "JSON is valid"
 cat $secretPath | firebase.cmd functions:secrets:set CLAXI_REALTIME_SECRETS --project claxi-bakayise
+Remove-Item $secretPath
+
+
+-- CLAXI_AI_KEYS --
+$ErrorActionPreference = "Stop"
+$secretPath = Join-Path $env:TEMP "claxi-ai-keys.json"
+@'
+{
+  "FIREBASE_API_KEY": "AIzaSyDM-UOQ8EZfT54OUlo6JadwDXm2gIIyvHI",
+  "FIREBASE_AUTH_DOMAIN": "claxi-bakayise.firebaseapp.com",
+  "FIREBASE_PROJECT_ID": "claxi-bakayise",
+  "FIREBASE_STORAGE_BUCKET": "claxi-bakayise.firebasestorage.app",
+  "FIREBASE_MESSAGING_SENDER_ID": "1061720623518",
+  "FIREBASE_APP_ID": "1:1061720623518:web:dec7d086af76a24aab6e8f",
+  "FIREBASE_MEASUREMENT_ID": "G-H3F69HET20"
+}
+'@ | Set-Content -NoNewline -Encoding utf8 $secretPath
+cat $secretPath | ConvertFrom-Json | Out-Null
+Write-Host "JSON is valid"
+cat $secretPath | firebase.cmd functions:secrets:set CLAXI_AI_KEYS --project claxi-bakayise
 Remove-Item $secretPath

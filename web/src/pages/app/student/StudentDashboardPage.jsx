@@ -277,6 +277,7 @@ export default function StudentDashboardPage() {
   const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && !isSubmitting;
   const isPricingQuoteError = /pricing quote/i.test(error);
   const shouldShowExtractionOverlay = showExtractionOverlay && stage !== 'review';
+  const isWaitingForClassification = shouldShowExtractionOverlay && !hasRunningExtraction && classificationState === 'running';
 
   const resizeTextarea = () => {
     if (!textareaRef.current) return;
@@ -657,6 +658,10 @@ export default function StudentDashboardPage() {
 
   useEffect(() => {
     if (!shouldShowExtractionOverlay) return undefined;
+    if (classificationState === 'running') {
+      setExtractionOverlayState('processing');
+      return undefined;
+    }
     if (hasRunningExtraction) {
       setExtractionOverlayState('processing');
       return undefined;
@@ -665,7 +670,7 @@ export default function StudentDashboardPage() {
     setExtractionOverlayState('done');
     setShowSlowExtractionMessage(false);
     return undefined;
-  }, [shouldShowExtractionOverlay, hasRunningExtraction]);
+  }, [shouldShowExtractionOverlay, hasRunningExtraction, classificationState]);
 
   useEffect(() => {
     if (!shouldShowExtractionOverlay) return undefined;
@@ -1119,12 +1124,18 @@ export default function StudentDashboardPage() {
               </div>
 
               <h2 className="mt-4 text-xl font-black tracking-tight text-zinc-900">
-                {extractionOverlayState === 'done' ? 'Processing complete' : 'We are processing your file'}
+                {extractionOverlayState === 'done'
+                  ? 'Processing complete'
+                  : isWaitingForClassification
+                    ? 'We are detecting the subject'
+                    : 'We are processing your file'}
               </h2>
               <p className="mt-2 text-sm text-zinc-600">
                 {extractionOverlayState === 'done'
                   ? 'You are being redirected.'
-                  : 'Please wait while we scan and prepare your uploaded files.'}
+                  : isWaitingForClassification
+                    ? 'Please wait while we analyze your request and prepare the review.'
+                    : 'Please wait while we scan and prepare your uploaded files.'}
               </p>
               {showSlowExtractionMessage ? (
                 <p className="mt-3 rounded-2xl border border-amber-300/60 bg-amber-100 px-4 py-3 text-sm text-zinc-900">

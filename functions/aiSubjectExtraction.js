@@ -1,48 +1,68 @@
-const { VertexAI } = require('@google-cloud/vertexai');
+const { initializeApp, getApp, getApps } = require('firebase/app');
+const { getAI, getGenerativeModel, GoogleAIBackend } = require('firebase/ai');
 const { pdfToPng } = require('pdf-to-png-converter');
 const { normalizeSubjectName } = require('./subjectExtraction');
 
 const MAX_PDF_PAGES = 5;
 const MAX_IMAGE_BYTES = 19 * 1024 * 1024;
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-const DEFAULT_VERTEX_LOCATION = 'us-central1';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
+const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
 
-let vertexAI = null;
-
-function getGoogleCloudProjectId() {
-  let firebaseProjectId = '';
-  try {
-    firebaseProjectId = JSON.parse(process.env.FIREBASE_CONFIG || '{}')?.projectId || '';
-  } catch (error) {
-    firebaseProjectId = '';
-  }
-
-  return process.env.GCLOUD_PROJECT
-    || process.env.GCP_PROJECT
-    || process.env.GOOGLE_CLOUD_PROJECT
-    || firebaseProjectId
-    || '';
+function getGeminiConfig() {
+  return {
+    model: process.env.GEMINI_MODEL || process.env.FIREBASE_AI_MODEL || DEFAULT_GEMINI_MODEL,
+    backend: 'firebase-ai-logic-google-ai',
+  };
 }
 
-function getGeminiModel() {
-  if (!vertexAI) {
-    const project = getGoogleCloudProjectId();
-    if (!project) {
-      throw new Error('Google Cloud project ID is required for Gemini Vertex AI.');
-    }
+function getFirebaseAiConfig(overrides = {}) {
+  const config = {
+    apiKey: overrides.apiKey || overrides.FIREBASE_API_KEY || overrides.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY,
+    authDomain: overrides.authDomain || overrides.FIREBASE_AUTH_DOMAIN || overrides.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: overrides.projectId || overrides.FIREBASE_PROJECT_ID || overrides.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: overrides.storageBucket || overrides.FIREBASE_STORAGE_BUCKET || overrides.VITE_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: overrides.messagingSenderId || overrides.FIREBASE_MESSAGING_SENDER_ID || overrides.VITE_FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: overrides.appId || overrides.FIREBASE_APP_ID || overrides.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID,
+  };
 
-    vertexAI = new VertexAI({
-      project,
-      location: process.env.GOOGLE_CLOUD_LOCATION
-        || process.env.GOOGLE_VERTEX_AI_LOCATION
-        || DEFAULT_VERTEX_LOCATION,
-    });
+  const missing = ['apiKey', 'projectId', 'appId'].filter((key) => !config[key]);
+  if (missing.length) {
+    throw new Error(`CLAXI_AI_KEYS is missing Firebase AI Logic config field(s): ${missing.join(', ')}`);
   }
 
-  return vertexAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || process.env.GEMINI_VISION_MODEL || DEFAULT_GEMINI_MODEL,
+  return config;
+}
+
+function getFirebaseAiModel(options = {}) {
+  const firebaseConfig = getFirebaseAiConfig(options.firebaseConfig || {});
+  const appName = `claxi-ai-${firebaseConfig.projectId}`;
+  const app = getApps().some((candidate) => candidate.name === appName)
+    ? getApp(appName)
+    : initializeApp(firebaseConfig, appName);
+  const ai = getAI(app, { backend: new GoogleAIBackend() });
+
+  return getGenerativeModel(ai, {
+    model: options.model || getGeminiConfig().model,
+    generationConfig: options.generationConfig,
   });
+}
+
+function getGeminiTimeoutMs() {
+  const numeric = Number(process.env.GEMINI_TIMEOUT_MS || DEFAULT_GEMINI_TIMEOUT_MS);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_GEMINI_TIMEOUT_MS;
+  return Math.min(120000, Math.max(5000, Math.round(numeric)));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 }
 
 function isPdfBuffer(buffer) {
@@ -114,14 +134,6 @@ function parseAiJson(text = '') {
   }
 }
 
-function getGeminiText(response = {}) {
-  return (response.candidates || [])
-    .flatMap((candidate) => candidate?.content?.parts || [])
-    .map((part) => part?.text || '')
-    .join('')
-    .trim();
-}
-
 function validateSubjectMarks(result) {
   if (!Array.isArray(result)) return [];
 
@@ -144,12 +156,7 @@ function validateSubjectMarks(result) {
 }
 
 function buildVisionPromptContent(images) {
-  return {
-    contents: [{
-      role: 'user',
-      parts: [
-    {
-      text: `You are extracting academic results from a student report.
+  const prompt = `You are extracting academic results from a student report.
 
 Analyze the images carefully.
 
@@ -172,7 +179,15 @@ Rules:
 - Do NOT hallucinate
 - If unsure, skip the entry
 - Do NOT return explanations
-- ONLY return JSON`,
+- ONLY return JSON`;
+
+  return {
+    prompt,
+    contents: [{
+      role: 'user',
+      parts: [
+    {
+      text: prompt,
     },
     ...images.map((buffer) => {
       assertImageSize(buffer);
@@ -194,20 +209,58 @@ Rules:
   };
 }
 
-async function callGeminiForSubjects(images) {
-  const result = await getGeminiModel().generateContent(buildVisionPromptContent(images));
-  return getGeminiText(result.response);
+async function callGeminiForSubjects(images, options = {}) {
+  const request = buildVisionPromptContent(images);
+  const { prompt, ...geminiRequest } = request;
+  const result = await withTimeout(
+    getFirebaseAiModel({
+      firebaseConfig: options.firebaseConfig || {},
+      generationConfig: geminiRequest.generationConfig,
+    }).generateContent(geminiRequest.contents[0].parts),
+    getGeminiTimeoutMs(),
+    'Firebase AI Logic subject extraction',
+  );
+  return result.response.text();
 }
 
-async function extractSubjectsWithAI(images) {
+async function extractSubjectsWithAI(images, options = {}) {
   let lastError = null;
+  const logger = options.logger || console;
+  const logContext = options.logContext || {};
+  const config = getGeminiConfig();
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const startedAt = Date.now();
     try {
-      const outputText = await callGeminiForSubjects(images);
-      return validateSubjectMarks(parseAiJson(outputText));
+      logger.info?.('gemini_subject_extraction_started', {
+        ...logContext,
+        attempt,
+        imageCount: images.length,
+        imageBytes: images.map((image) => image.length),
+        provider: 'firebase-ai-logic',
+        aiBackend: getGeminiConfig().backend,
+        model: config.model,
+        timeoutMs: getGeminiTimeoutMs(),
+      });
+      const outputText = await callGeminiForSubjects(images, options);
+      const parsed = parseAiJson(outputText);
+      const validated = validateSubjectMarks(parsed);
+      logger.info?.('gemini_subject_extraction_completed', {
+        ...logContext,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        rawOutput: outputText,
+        extractedSubjectCount: validated.length,
+      });
+      return validated;
     } catch (error) {
       lastError = error;
+      logger.warn?.('gemini_subject_extraction_attempt_failed', {
+        ...logContext,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        error: error.message,
+      });
     }
   }
 
@@ -305,24 +358,29 @@ function buildClassificationPrompt({ supportedSubjects = [], inputText = '' }) {
   ].join('\n');
 }
 
-async function classifySubjectWithAI({ inputText = '', supportedSubjects = [] } = {}) {
+async function classifySubjectWithAI({ inputText = '', supportedSubjects = [], firebaseConfig = {} } = {}) {
   const normalizedInput = normalizeText(inputText);
   if (!normalizedInput) return buildFallbackClassification(supportedSubjects);
 
-  const result = await getGeminiModel().generateContent({
-    contents: [{
-      role: 'user',
-      parts: [{ text: buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput }) }],
-    }],
+  const prompt = buildClassificationPrompt({ supportedSubjects, inputText: normalizedInput });
+  const result = await withTimeout(getFirebaseAiModel({
+    firebaseConfig,
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 300,
       responseMimeType: 'application/json',
     },
-  });
+  }).generateContent(prompt), getGeminiTimeoutMs(), 'Firebase AI Logic subject classification');
 
-  const outputText = getGeminiText(result.response);
-  return validateSubjectClassification(parseAiJson(outputText), supportedSubjects);
+  const outputText = result.response.text();
+  return {
+    classification: validateSubjectClassification(parseAiJson(outputText), supportedSubjects),
+    rawOutput: outputText,
+    prompt,
+    model: getGeminiConfig().model,
+    provider: 'firebase-ai-logic',
+    backend: getGeminiConfig().backend,
+  };
 }
 
 module.exports = {

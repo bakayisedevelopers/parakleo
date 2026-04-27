@@ -30,6 +30,7 @@ const db = admin.firestore();
 const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
 const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
 const CLAXI_REALTIME_SECRETS = defineSecret('CLAXI_REALTIME_SECRETS');
+const CLAXI_AI_KEYS = defineSecret('CLAXI_AI_KEYS');
 
 const PAYSTACK_SECRET_KEY = defineSecret('PAYSTACK_SECRET_KEY');
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
@@ -510,9 +511,33 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
   try {
     const bucket = admin.storage().bucket();
     const file = bucket.file(data.filePath);
+    logger.info('tutor_document_ai_processing_started', {
+      docId,
+      uid: data.uid,
+      filePath: data.filePath,
+      contentType: data.contentType || '',
+    });
     const [documentBuffer] = await file.download();
+    logger.info('tutor_document_downloaded', {
+      docId,
+      uid: data.uid,
+      byteLength: documentBuffer.length,
+    });
     const images = await convertPdfToImages(documentBuffer);
-    const extractedSubjects = await extractSubjectsWithAI(images);
+    logger.info('tutor_document_images_ready', {
+      docId,
+      uid: data.uid,
+      imageCount: images.length,
+      imageBytes: images.map((image) => image.length),
+    });
+    const extractedSubjects = await extractSubjectsWithAI(images, {
+      logger,
+      logContext: {
+        docId,
+        uid: data.uid,
+      },
+      firebaseConfig: getAiSecrets(),
+    });
 
     if (!extractedSubjects.length) {
       await docRef.set({
@@ -562,13 +587,19 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
   }
 }
 
-exports.processTutorDocument = onDocumentCreated('tutorDocuments/{docId}', async (event) => {
+exports.processTutorDocument = onDocumentCreated({
+  document: 'tutorDocuments/{docId}',
+  secrets: [CLAXI_AI_KEYS],
+}, async (event) => {
   const docId = event.params.docId;
   const data = event.data?.data() || {};
   await processTutorDocumentRecord({ docId, data });
 });
 
-exports.retryTutorDocumentProcessing = onDocumentWritten('tutorDocuments/{docId}', async (event) => {
+exports.retryTutorDocumentProcessing = onDocumentWritten({
+  document: 'tutorDocuments/{docId}',
+  secrets: [CLAXI_AI_KEYS],
+}, async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!before || !after) return;
@@ -927,6 +958,21 @@ function getRealtimeSecrets() {
   return secrets;
 }
 
+function getAiSecrets() {
+  const groupedSecrets = parseGroupedSecretJson('CLAXI_AI_KEYS', CLAXI_AI_KEYS.value());
+  const secrets = {
+    apiKey: groupedSecrets.FIREBASE_API_KEY || groupedSecrets.VITE_FIREBASE_API_KEY || '',
+    authDomain: groupedSecrets.FIREBASE_AUTH_DOMAIN || groupedSecrets.VITE_FIREBASE_AUTH_DOMAIN || '',
+    projectId: groupedSecrets.FIREBASE_PROJECT_ID || groupedSecrets.VITE_FIREBASE_PROJECT_ID || '',
+    storageBucket: groupedSecrets.FIREBASE_STORAGE_BUCKET || groupedSecrets.VITE_FIREBASE_STORAGE_BUCKET || '',
+    messagingSenderId: groupedSecrets.FIREBASE_MESSAGING_SENDER_ID || groupedSecrets.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+    appId: groupedSecrets.FIREBASE_APP_ID || groupedSecrets.VITE_FIREBASE_APP_ID || '',
+  };
+
+  assertRequiredSecrets('CLAXI_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
+  return secrets;
+}
+
 function applyFreeMinuteDiscount({ originalPrice, durationMinutes, freeMinutesRemaining }) {
   const safeOriginalPrice = Math.max(0, Number(originalPrice || 0));
   const safeDurationMinutes = Math.max(1, Number(durationMinutes || 1));
@@ -1141,7 +1187,7 @@ exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-exports.classifySubject = onRequest({ cors: true }, async (req, res) => {
+exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -1176,14 +1222,30 @@ exports.classifySubject = onRequest({ cors: true }, async (req, res) => {
   }
 
   try {
-    const classification = await classifySubjectWithAI({
+    const startedAt = Date.now();
+    logger.info('subject_classification_started', {
+      uid: decoded.uid,
+      provider: 'firebase-ai-logic',
+      inputLength: inputText.length,
+      supportedSubjectCount: supportedSubjects.length,
+      inputPreview: inputText.slice(0, 500),
+    });
+
+    const aiResult = await classifySubjectWithAI({
       inputText,
       supportedSubjects,
+      firebaseConfig: getAiSecrets(),
     });
+    const classification = aiResult.classification;
 
     logger.info('subject_classification_completed', {
       uid: decoded.uid,
-      provider: 'vertex-gemini',
+      provider: 'firebase-ai-logic',
+      model: aiResult.model,
+      backend: aiResult.backend,
+      durationMs: Date.now() - startedAt,
+      prompt: aiResult.prompt,
+      rawOutput: aiResult.rawOutput,
       subject: classification.subject || '',
       subjectConfidence: classification.subjectConfidence,
       needsManualSubjectSelection: classification.needsManualSubjectSelection,
@@ -1192,7 +1254,7 @@ exports.classifySubject = onRequest({ cors: true }, async (req, res) => {
     res.status(200).json({
       success: true,
       classification,
-      provider: 'vertex-gemini',
+      provider: 'firebase-ai-logic',
     });
   } catch (error) {
     logger.error('subject_classification_failed', {

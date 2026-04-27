@@ -2,6 +2,7 @@ import { getFirebaseClients } from '../firebase/config';
 
 const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT || '/classify-subject';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
+const CLASSIFICATION_TIMEOUT_MS = 30000;
 
 function buildFallbackClassification(supportedSubjects = []) {
   const defaultSubject = normalizeSubjectToSupported('Mathematics', supportedSubjects) || '';
@@ -49,6 +50,16 @@ function normalizeSubjectToSupported(rawSubject, supportedSubjects = []) {
   return supportedMap.get(normalized) || '';
 }
 
+function fetchWithTimeout(url, options = {}, timeoutMs = CLASSIFICATION_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeoutId));
+}
+
 export function buildSubjectClassificationInput({ typedText = '', attachmentExtractions = [] } = {}) {
   const normalizedTypedText = normalizeText(typedText);
 
@@ -84,6 +95,7 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
   }
 
   try {
+    const startedAt = Date.now();
     const clients = await getFirebaseClients();
     const idToken = await clients?.auth?.currentUser?.getIdToken?.();
 
@@ -91,7 +103,14 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
       throw new Error('You must be signed in before classifying a request.');
     }
 
-    const response = await fetch(CLASSIFY_SUBJECT_ENDPOINT, {
+    console.debug('[subjectClassification] backend classification started', {
+      endpoint: CLASSIFY_SUBJECT_ENDPOINT,
+      inputLength: normalizedInput.length,
+      supportedSubjectCount: supportedSubjects.length,
+      timeoutMs: CLASSIFICATION_TIMEOUT_MS,
+    });
+
+    const response = await fetchWithTimeout(CLASSIFY_SUBJECT_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -107,6 +126,12 @@ export async function classifySubjectFromText({ inputText = '', supportedSubject
     if (!response.ok || payload?.success !== true || !payload?.classification) {
       throw new Error(payload?.message || 'Subject classification failed.');
     }
+
+    console.debug('[subjectClassification] backend classification completed', {
+      durationMs: Date.now() - startedAt,
+      provider: payload.provider,
+      classification: payload.classification,
+    });
 
     const parsed = payload.classification;
 
