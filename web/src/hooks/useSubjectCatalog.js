@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getFirebaseClients } from '../firebase/config';
 import { FALLBACK_SUBJECTS, normalizeSubjectList, toSubjectOptions } from '../constants/subjects';
 
 export function useSubjectCatalog() {
   const [subjectNames, setSubjectNames] = useState(FALLBACK_SUBJECTS);
+  const subjectOptions = useMemo(() => toSubjectOptions(subjectNames), [subjectNames]);
 
   useEffect(() => {
     let unsubscribe = null;
@@ -38,6 +39,6 @@ export function useSubjectCatalog() {
 
   return {
     subjectNames,
-    subjectOptions: toSubjectOptions(subjectNames),
+    subjectOptions,
   };
 }

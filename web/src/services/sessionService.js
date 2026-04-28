@@ -10,6 +10,7 @@ import { debugError, debugLog } from '../utils/devLogger';
 
 const MOCK_SESSIONS_KEY = 'claxi_mock_sessions';
 const MOCK_REQUESTS_KEY = 'claxi_mock_requests';
+const FINALIZE_SESSION_BILLING_ENDPOINT = import.meta.env.VITE_FINALIZE_SESSION_BILLING_ENDPOINT || '/finalize-session-billing';
 const DEFAULT_RATING_STATUS = {
   student: 'pending',
   tutor: 'pending',
@@ -286,7 +287,7 @@ export async function finalizeSessionClosure(session, options = {}) {
       throw new Error('You must be signed in to end this session.');
     }
 
-    const response = await fetch('/finalize-session-billing', {
+    const response = await fetch(FINALIZE_SESSION_BILLING_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

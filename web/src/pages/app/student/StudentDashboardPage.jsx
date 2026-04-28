@@ -19,6 +19,7 @@ import { useStudentRequests } from '../../../hooks/useClassRequests';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
+import { appendUserAiLog, subscribeToUserAiLogs } from '../../../services/aiLogService';
 import {
   extractAttachments,
 } from '../../../services/attachmentExtractionService';
@@ -34,6 +35,8 @@ import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSu
 import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
 import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { getStudentOnboardingStatus } from '../../../utils/onboarding';
+
+const CLASSIFICATION_OVERLAY_TIMEOUT_MS = 15000;
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -209,6 +212,8 @@ export default function StudentDashboardPage() {
   const activeExtractionTokenByKeyRef = useRef({});
   const classificationRunCounterRef = useRef(0);
   const extractionOverlayRedirectTimeoutRef = useRef(null);
+  const classificationOverlayTimeoutRef = useRef(null);
+  const loggedAiLogIdsRef = useRef(new Set());
 
   const [stage, setStage] = useState('input');
   const [advanceIntent, setAdvanceIntent] = useState('');
@@ -238,6 +243,25 @@ export default function StudentDashboardPage() {
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
   const { subjectOptions } = useSubjectCatalog();
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    return subscribeToUserAiLogs(user.uid, (logs) => {
+      logs.forEach((log) => {
+        if (loggedAiLogIdsRef.current.has(log.id)) return;
+        loggedAiLogIdsRef.current.add(log.id);
+        if (log.source === 'student_subject_classification') {
+          console.log(`=== STUDENT SUBJECT CLASSIFICATION AI PROMPT (${log.id}) ===`);
+          if (log.prompt) console.log(log.prompt);
+          console.log(`=== STUDENT SUBJECT CLASSIFICATION AI OUTPUT (${log.id}) ===`);
+          if (log.rawOutput) console.log(log.rawOutput);
+          if (log.error) console.log(`=== STUDENT SUBJECT CLASSIFICATION AI ERROR (${log.id}) ===`);
+          if (log.error) console.log(log.error);
+        }
+      });
+    });
+  }, [user?.uid]);
 
   const onboardingStatus = getStudentOnboardingStatus(currentUser || user);
   const activeOrOngoingRequest = requests.find((request) => [
@@ -300,6 +324,7 @@ export default function StudentDashboardPage() {
   const recordUnsupportedSubjectOnce = async () => {
     const subject = unsupportedSubjectRequest?.subject;
     if (!subject) return;
+    if (unsupportedSubjectRequest?.recorded) return;
 
     const normalizedKey = subject.toLowerCase();
     if (loggedUnsupportedSubjectsRef.current.has(normalizedKey)) return;
@@ -418,6 +443,17 @@ export default function StudentDashboardPage() {
       return next;
     });
 
+    appendUserAiLog(user?.uid, {
+      source: 'student_attachment_upload',
+      step: 'upload_started',
+      status: 'info',
+      message: 'Attachment upload started.',
+      details: {
+        fileCount: newFilesForExtraction.length,
+        fileNames: newFilesForExtraction.map((file) => file.name),
+      },
+    }).catch(() => null);
+
     extractAttachments(newFilesForExtraction, (result, index) => {
       const file = newFilesForExtraction[index];
       const fileKey = getAttachmentKey(file);
@@ -439,6 +475,26 @@ export default function StudentDashboardPage() {
               ? 'fallback needed'
               : 'extraction weak',
       }));
+
+      appendUserAiLog(user?.uid, {
+        source: 'student_attachment_extraction',
+        step: 'file_extracted',
+        status: result.success ? 'success' : 'partial',
+        message: `Processed ${file?.name || 'attachment'}.`,
+        details: {
+          fileName: file?.name || '',
+          fileType: file?.type || '',
+          extractionMethod: result.extractionMethod || '',
+          extractionQuality: result.extractionQuality || '',
+          success: Boolean(result.success),
+          textLength: Number(result.textLength || 0),
+          extractedText: String(result.extractedText || '').slice(0, 5000),
+          scannedPdfDetected: Boolean(result.scannedPdfDetected),
+          ocrStatus: result.ocrStatus || '',
+          pageCount: result.pageCount || null,
+          failedPageCount: result.failedPageCount || 0,
+        },
+      }).catch(() => null);
 
     }).finally(() => {
       setAttachmentExtractionStatusByKey((prev) => {
@@ -628,9 +684,10 @@ export default function StudentDashboardPage() {
     if (isManualSubjectRef.current) return;
 
     const extractionResults = Object.values(attachmentExtractionByKey || {});
-    const { combinedText, hasUsableText } = buildSubjectClassificationInput({
+    const { combinedText, hasUsableText, structuredPayload } = buildSubjectClassificationInput({
       typedText: topic,
       attachmentExtractions: extractionResults,
+      supportedSubjects: subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS,
     });
 
     console.debug('[studentRequestAI] classification effect evaluated input', {
@@ -638,12 +695,23 @@ export default function StudentDashboardPage() {
       attachmentCount: attachmentsRef.current.length,
       hasUsableText,
       combinedText,
+      structuredPayload,
     });
 
     if (!hasUsableText) {
       console.debug('[studentRequestAI] classification skipped due to no usable text', {
         attachmentCount: attachmentsRef.current.length,
       });
+      appendUserAiLog(user?.uid, {
+        source: 'student_subject_classification',
+        step: 'classification_skipped_no_text',
+        status: 'info',
+        message: 'Classification skipped because there was no usable text.',
+        details: {
+          attachmentCount: attachmentsRef.current.length,
+          topic,
+        },
+      }).catch(() => null);
       setClassifiedTopic('');
       setEstimatedMinutes(DEFAULT_LESSON_DURATION);
       setClassificationStatus(
@@ -669,8 +737,22 @@ export default function StudentDashboardPage() {
     console.debug('[studentRequestAI] classification effect started', {
       runId,
       combinedText,
+      structuredPayload,
       supportedSubjectCount: subjectOptions.length || SUBJECT_OPTIONS.length,
     });
+    appendUserAiLog(user?.uid, {
+      source: 'student_subject_classification',
+      step: 'classification_input_prepared',
+      status: 'info',
+      message: 'Classification input prepared.',
+      details: {
+        runId,
+        attachmentCount: attachmentsRef.current.length,
+        supportedSubjectCount: subjectOptions.length || SUBJECT_OPTIONS.length,
+        combinedText,
+        structuredPayload,
+      },
+    }).catch(() => null);
     setClassificationState('running');
     setClassificationStatus('Analyzing your request...');
 
@@ -678,6 +760,7 @@ export default function StudentDashboardPage() {
       try {
         const result = await classifySubjectFromText({
           inputText: combinedText,
+          inputPayload: structuredPayload,
           supportedSubjects: subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS,
         });
 
@@ -687,6 +770,18 @@ export default function StudentDashboardPage() {
           runId,
           result,
         });
+        appendUserAiLog(user?.uid, {
+          source: 'student_subject_classification',
+          step: 'classification_result_received',
+          status: result.subject ? 'success' : 'fallback',
+          message: 'Classification result received.',
+          details: {
+            runId,
+            result,
+          },
+          prompt: '',
+          rawOutput: '',
+        }).catch(() => null);
 
         const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
         setClassifiedTopic(result.topic || '');
@@ -706,8 +801,17 @@ export default function StudentDashboardPage() {
           setUnsupportedSubjectRequest({
             subject: result.unsupportedSubject,
             inputText: combinedText,
+            recorded: Boolean(result.unsupportedSubjectRecorded),
           });
           setClassificationStatus(`Sorry, ${result.unsupportedSubject} is not offered yet.`);
+          if (result.unsupportedSubjectRecorded) {
+            console.debug('[studentRequestAI] unsupported subject saved in Firestore', {
+              runId,
+              subject: result.unsupportedSubject,
+            });
+          } else {
+            recordUnsupportedSubjectOnce();
+          }
           console.debug('[studentRequestAI] unsupported subject detected', {
             runId,
             unsupportedSubject: result.unsupportedSubject,
@@ -732,6 +836,17 @@ export default function StudentDashboardPage() {
           runId,
           error: classificationError?.message,
         });
+        appendUserAiLog(user?.uid, {
+          source: 'student_subject_classification',
+          step: 'classification_failed',
+          status: 'failed',
+          message: 'Classification failed.',
+          error: classificationError?.message || '',
+          details: {
+            runId,
+            combinedText,
+          },
+        }).catch(() => null);
         setClassifiedTopic('');
         setEstimatedMinutes(DEFAULT_LESSON_DURATION);
         setClassificationState('done');
@@ -797,6 +912,39 @@ export default function StudentDashboardPage() {
   }, [shouldShowExtractionOverlay, hasRunningExtraction, classificationState]);
 
   useEffect(() => {
+    if (!shouldShowExtractionOverlay || classificationState !== 'running') {
+      if (classificationOverlayTimeoutRef.current) {
+        clearTimeout(classificationOverlayTimeoutRef.current);
+        classificationOverlayTimeoutRef.current = null;
+      }
+      return undefined;
+    }
+
+    classificationOverlayTimeoutRef.current = setTimeout(() => {
+      classificationRunCounterRef.current += 1;
+      setClassifiedTopic('');
+      setEstimatedMinutes(DEFAULT_LESSON_DURATION);
+      setClassificationState('done');
+      setClassificationStatus('Choose the subject manually before sending.');
+      setUnsupportedSubjectRequest(null);
+      if (!isManualSubjectRef.current) {
+        setSelectedSubject('');
+      }
+      if (!hasManualDurationOverride) {
+        setDurationMinutes(DEFAULT_LESSON_DURATION);
+      }
+      console.debug('[studentRequestAI] classification overlay timed out; falling back to manual subject selection');
+    }, CLASSIFICATION_OVERLAY_TIMEOUT_MS);
+
+    return () => {
+      if (classificationOverlayTimeoutRef.current) {
+        clearTimeout(classificationOverlayTimeoutRef.current);
+        classificationOverlayTimeoutRef.current = null;
+      }
+    };
+  }, [shouldShowExtractionOverlay, classificationState, hasManualDurationOverride]);
+
+  useEffect(() => {
     if (!shouldShowExtractionOverlay) return undefined;
     if (hasRunningExtraction || !readyForReview) return undefined;
 
@@ -828,6 +976,10 @@ export default function StudentDashboardPage() {
       clearTimeout(extractionOverlayRedirectTimeoutRef.current);
       extractionOverlayRedirectTimeoutRef.current = null;
     }
+    if (classificationOverlayTimeoutRef.current) {
+      clearTimeout(classificationOverlayTimeoutRef.current);
+      classificationOverlayTimeoutRef.current = null;
+    }
 
     return undefined;
   }, [stage]);
@@ -835,6 +987,9 @@ export default function StudentDashboardPage() {
   useEffect(() => () => {
     if (extractionOverlayRedirectTimeoutRef.current) {
       clearTimeout(extractionOverlayRedirectTimeoutRef.current);
+    }
+    if (classificationOverlayTimeoutRef.current) {
+      clearTimeout(classificationOverlayTimeoutRef.current);
     }
   }, []);
 

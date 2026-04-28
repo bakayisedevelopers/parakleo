@@ -1,17 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
 import FormField from '../../components/ui/FormField';
-import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
 import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
 import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
 import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { updateUserProfile } from '../../services/userService';
-import { normalizeSubjectList } from '../../constants/subjects';
-import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import {
   getStudentOnboardingStatus,
   getTutorOnboardingStatus,
@@ -19,8 +16,6 @@ import {
 } from '../../utils/onboarding';
 import PaymentMethodsManager from '../../components/app/PaymentMethodsManager';
 import { syncStudentGrowth } from '../../services/studentGrowthService';
-
-const EMPTY_SUBJECTS = [];
 
 export default function OnboardingPage() {
   const { user, setUser } = useAuth();
@@ -31,13 +26,6 @@ export default function OnboardingPage() {
   const role = queryRole === 'tutor' ? 'tutor' : 'student';
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavingTutorProfile, setIsSavingTutorProfile] = useState(false);
-  const [studentSubjects, setStudentSubjects] = useState(normalizeSubjectList(currentUser?.subjects || EMPTY_SUBJECTS));
-  const { subjectOptions } = useSubjectCatalog();
-
-  useEffect(() => {
-    const nextSubjects = normalizeSubjectList(currentUser?.subjects || EMPTY_SUBJECTS);
-    setStudentSubjects(nextSubjects);
-  }, [currentUser?.subjects]);
 
   const studentStatus = useMemo(() => getStudentOnboardingStatus(currentUser), [currentUser]);
   const tutorStatus = useMemo(() => getTutorOnboardingStatus(currentUser), [currentUser]);
@@ -52,7 +40,6 @@ export default function OnboardingPage() {
         curriculum: formData.get('curriculum')?.toString().trim() || '',
         discoverySource: formData.get('discoverySource')?.toString().trim() || '',
       },
-      subjects: studentSubjects,
     });
     const syncedProfile = await syncStudentGrowth().catch(() => null);
 
@@ -112,16 +99,6 @@ export default function OnboardingPage() {
                 placeholder="Instagram"
                 required
               />
-              <div className="md:col-span-3">
-                <MultiSelectDropdown
-                  label="Subjects"
-                  name="studentSubjects"
-                  options={subjectOptions}
-                  value={studentSubjects}
-                  onChange={setStudentSubjects}
-                  required
-                />
-              </div>
               <div className="md:col-span-3">
                 <button type="submit" className="rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white">Save student profile</button>
               </div>

@@ -2,6 +2,8 @@ import { getFirebaseClients } from '../firebase/config';
 import { normalizePricingSnapshot } from '../utils/pricing';
 import { debugLog } from '../utils/devLogger';
 
+const PRICING_QUOTE_ENDPOINT = import.meta.env.VITE_PRICING_QUOTE_ENDPOINT || '/pricing-quote';
+
 export async function fetchPricingQuote({ durationMinutes, subject }) {
   const clients = await getFirebaseClients();
   if (!clients?.auth?.currentUser) {
@@ -9,7 +11,7 @@ export async function fetchPricingQuote({ durationMinutes, subject }) {
   }
 
   const idToken = await clients.auth.currentUser.getIdToken();
-  const response = await fetch('/pricing-quote', {
+  const response = await fetch(PRICING_QUOTE_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

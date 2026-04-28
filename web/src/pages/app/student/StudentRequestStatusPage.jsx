@@ -1,6 +1,6 @@
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, Search, XCircle } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Search, Star, XCircle } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
 import { useStudentRequest } from '../../../hooks/useClassRequests';
@@ -287,9 +287,14 @@ export default function StudentRequestStatusPage() {
                 </p>
                 <p className="text-xs text-violet-700">
                   Rating:{' '}
-                  {Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average ?? 0) > 0
-                    ? `${Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average).toFixed(2)} / 5`
-                    : 'Not rated yet'}
+                  {Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average ?? 0) > 0 ? (
+                    <span className="inline-flex items-center gap-1 font-semibold text-violet-800">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                      <span>{Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average).toFixed(2)}</span>
+                    </span>
+                  ) : (
+                    'Not rated yet'
+                  )}
                 </p>
               </div>
             ) : null}

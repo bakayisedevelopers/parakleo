@@ -1,4 +1,5 @@
 import { getFirebaseClients } from '../firebase/config';
+import { appendUserAiLog } from './aiLogService';
 import { normalizeSubjectList } from '../constants/subjects';
 
 const DOCUMENT_STATUSES = new Set(['UPLOADED', 'PROCESSING', 'VERIFIED', 'FAILED']);
@@ -10,6 +11,18 @@ function sanitizeFileName(fileName = 'document') {
 export async function uploadTutorDocument({ uid, file }) {
   if (!uid) throw new Error('Missing tutor id.');
   if (!file) throw new Error('No document selected.');
+
+  appendUserAiLog(uid, {
+    source: 'tutor_results_extraction',
+    step: 'upload_started',
+    status: 'info',
+    message: 'Tutor results upload started.',
+    details: {
+      fileName: file.name,
+      fileType: file.type || '',
+      fileSize: Number(file.size || 0),
+    },
+  }).catch(() => null);
 
   const clients = await getFirebaseClients();
   if (!clients?.storage || !clients?.db) {
@@ -46,6 +59,19 @@ export async function uploadTutorDocument({ uid, file }) {
   };
 
   await setDoc(docRef, record);
+  appendUserAiLog(uid, {
+    source: 'tutor_results_extraction',
+    step: 'upload_record_created',
+    status: 'info',
+    message: 'Tutor results upload record created.',
+    details: {
+      docId: docRef.id,
+      fileName: file.name,
+      filePath,
+      fileType: file.type || '',
+      fileSize: Number(file.size || 0),
+    },
+  }).catch(() => null);
   return { ...record, createdAt: Date.now(), updatedAt: Date.now() };
 }
 

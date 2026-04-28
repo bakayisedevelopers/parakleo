@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { FileText, RefreshCw, Upload, X } from 'lucide-react';
+import { subscribeToUserAiLogs } from '../../services/aiLogService';
 import {
   deleteTutorDocument,
   normalizeDocumentStatus,
@@ -45,6 +46,47 @@ export default function TutorDocumentsManager({ user, onMessage }) {
   const [error, setError] = useState('');
   const [retryingDocumentId, setRetryingDocumentId] = useState('');
   const [deletingDocumentId, setDeletingDocumentId] = useState('');
+  const loggedDocsRef = useRef(new Set());
+  const loggedAiLogsRef = useRef(new Set());
+
+  useEffect(() => {
+    documents.forEach((doc) => {
+      if ((doc.aiPrompt || doc.aiRawOutput) && !loggedDocsRef.current.has(doc.id)) {
+        console.log(`=== TUTOR RESULTS EXTRACTION AI PROMPT (${doc.fileName || doc.id}) ===`);
+        console.log(doc.aiPrompt);
+        console.log(`=== TUTOR RESULTS EXTRACTION AI OUTPUT (${doc.fileName || doc.id}) ===`);
+        console.log(doc.aiRawOutput);
+        loggedDocsRef.current.add(doc.id);
+      }
+    });
+  }, [documents]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    return subscribeToUserAiLogs(user.uid, (logs) => {
+      logs.forEach((log) => {
+        if (loggedAiLogsRef.current.has(log.id)) return;
+        loggedAiLogsRef.current.add(log.id);
+        if (String(log.source || '').startsWith('tutor_results_extraction')) {
+          console.log(`=== TUTOR RESULTS EXTRACTION LOG (${log.step || log.id}) ===`);
+          console.log(log);
+          if (log.prompt) {
+            console.log('AI PROMPT:');
+            console.log(log.prompt);
+          }
+          if (log.rawOutput) {
+            console.log('AI OUTPUT:');
+            console.log(log.rawOutput);
+          }
+          if (log.error) {
+            console.log('AI ERROR:');
+            console.log(log.error);
+          }
+        }
+      });
+    });
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return undefined;

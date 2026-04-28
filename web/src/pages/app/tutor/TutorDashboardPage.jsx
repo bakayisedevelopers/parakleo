@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Power } from 'lucide-react';
+import { Power, Star } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
+import TutorMetricTile from '../../../components/app/TutorMetricTile';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTutorAvailableRequests } from '../../../hooks/useClassRequests';
 import { getTutorOnboardingStatus } from '../../../utils/onboarding';
@@ -129,38 +130,42 @@ export default function TutorDashboardPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Dispatch metrics" subtitle="These values are used in backend tutor dispatch ranking.">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Acceptance rate</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.acceptanceRate)}</p>
+      {isOnline ? (
+        <SectionCard title="Dispatch metrics" subtitle="These values are used in backend tutor dispatch ranking.">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <TutorMetricTile
+              label="Acceptance rate"
+              value={formatPercent(dispatchMetrics.acceptanceRate)}
+            />
+            <TutorMetricTile
+              label="Completion rate"
+              value={formatPercent(dispatchMetrics.completionRate)}
+            />
+            <TutorMetricTile
+              label="Tutor rating"
+              value={dispatchMetrics.overallRating > 0 ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                  <span>{dispatchMetrics.overallRating.toFixed(2)}</span>
+                </span>
+              ) : 'Not rated yet'}
+            />
+            <TutorMetricTile
+              label="Avg response speed"
+              value={dispatchMetrics.avgResponseSeconds > 0 ? `${dispatchMetrics.avgResponseSeconds.toFixed(0)}s` : 'Not available yet'}
+            />
+            <TutorMetricTile
+              label="Cancellation rate"
+              value={formatPercent(dispatchMetrics.cancellationRate)}
+            />
+            <TutorMetricTile
+              label="Recent assignments"
+              value={Math.max(0, dispatchMetrics.recentAssignmentsCount).toFixed(0)}
+            />
+            <TutorMetricTile label="Last offer received" value={formatDateTime(dispatchMetrics.lastOfferAt)} />
           </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Completion rate</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.completionRate)}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Tutor rating</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{dispatchMetrics.overallRating > 0 ? `${dispatchMetrics.overallRating.toFixed(2)} / 5` : 'Not rated yet'}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Avg response speed</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{dispatchMetrics.avgResponseSeconds > 0 ? `${dispatchMetrics.avgResponseSeconds.toFixed(0)}s` : 'Not available yet'}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cancellation rate</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(dispatchMetrics.cancellationRate)}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Recent assignments</p>
-            <p className="mt-1 text-lg font-bold text-zinc-900">{Math.max(0, dispatchMetrics.recentAssignmentsCount).toFixed(0)}</p>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 sm:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last offer received</p>
-            <p className="mt-1 text-sm font-semibold text-zinc-900">{formatDateTime(dispatchMetrics.lastOfferAt)}</p>
-          </div>
-        </div>
-      </SectionCard>
+        </SectionCard>
+      ) : null}
 
       {isOnline ? (
         <SectionCard title="Incoming requests">

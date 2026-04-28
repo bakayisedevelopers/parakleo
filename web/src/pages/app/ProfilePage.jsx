@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Star } from 'lucide-react';
 import SectionCard from '../../components/ui/SectionCard';
 import PageHeader from '../../components/ui/PageHeader';
+import TutorMetricTile from '../../components/app/TutorMetricTile';
 import FormField from '../../components/ui/FormField';
-import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
 import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
 import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
@@ -11,10 +12,6 @@ import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { getStudentOnboardingStatus, getTutorOnboardingStatus } from '../../utils/onboarding';
 import { getUserProfile, updateUserProfile } from '../../services/userService';
-import { normalizeSubjectList } from '../../constants/subjects';
-import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
-
-const EMPTY_SUBJECTS = [];
 
 export default function ProfilePage() {
   const { user, logout, deleteAccount, setUser } = useAuth();
@@ -23,7 +20,6 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const studentStatus = getStudentOnboardingStatus(currentUser);
   const tutorStatus = getTutorOnboardingStatus(currentUser);
-  const { subjectOptions } = useSubjectCatalog();
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState('');
@@ -32,7 +28,6 @@ export default function ProfilePage() {
     fullName: '',
     phoneNumber: '',
     bio: '',
-    subjects: EMPTY_SUBJECTS,
     availability: '',
   });
 
@@ -48,7 +43,6 @@ export default function ProfilePage() {
         fullName: profileData.fullName || profileData.displayName || '',
         phoneNumber: profileData.phoneNumber || '',
         bio: profileData.bio || '',
-        subjects: normalizeSubjectList(profileData.subjects || EMPTY_SUBJECTS),
         availability: profileData.availability || '',
       });
     });
@@ -91,10 +85,6 @@ export default function ProfilePage() {
       availability: form.availability,
     };
 
-    if (!isTutorRole) {
-      updates.subjects = normalizeSubjectList(form.subjects);
-    }
-
     const profile = await updateUserProfile(user.uid, updates);
 
     setUser((prev) => ({ ...prev, ...profile }));
@@ -103,6 +93,7 @@ export default function ProfilePage() {
   };
 
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
+  const isTutorOnline = currentUser?.onlineStatus === 'online';
   const tutorProfileData = currentUser?.tutorProfile || {};
   const formatPercent = (value) => `${(Math.max(0, Number(value || 0) <= 1 ? Number(value || 0) * 100 : Number(value || 0))).toFixed(1)}%`;
   const formatDateTime = (value) => {
@@ -132,15 +123,6 @@ export default function ProfilePage() {
             <FormField label="Phone number" name="phoneNumber" value={form.phoneNumber} onChange={(event) => setForm((prev) => ({ ...prev, phoneNumber: event.target.value }))} />
           </div>
           <FormField label="Bio" name="bio" as="textarea" rows={3} value={form.bio} onChange={(event) => setForm((prev) => ({ ...prev, bio: event.target.value }))} />
-          {!isTutorRole ? (
-            <MultiSelectDropdown
-              label="Subjects"
-              name="subjects"
-              options={subjectOptions}
-              value={form.subjects}
-              onChange={(subjects) => setForm((prev) => ({ ...prev, subjects }))}
-            />
-          ) : null}
           {isTutorRole ? (
             <>
               <FormField label="Availability" name="availability" value={form.availability} onChange={(event) => setForm((prev) => ({ ...prev, availability: event.target.value }))} placeholder="Weekdays after 5pm" />
@@ -181,56 +163,55 @@ export default function ProfilePage() {
             <QualifiedSubjectsManager user={currentUser} setUser={setUser} onMessage={setMessage} />
           </SectionCard>
 
-          <SectionCard title="Dispatch metrics" subtitle="These values are used when ranking tutors for incoming requests.">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Acceptance rate</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.acceptanceRate ?? user?.acceptanceRate)}</p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Completion rate</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.completionRate ?? user?.completionRate)}</p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Tutor rating</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">
-                {Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average ?? 0) > 0
-                  ? `${Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average).toFixed(2)} / 5`
-                  : 'Not rated yet'}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Avg response speed</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">
-                {Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds ?? 0) > 0
-                  ? `${Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds).toFixed(0)}s`
-                  : 'Not available yet'}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cancellation rate</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">{formatPercent(tutorProfileData.cancellationRate ?? user?.cancellationRate)}</p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Recent assignments</p>
-              <p className="mt-1 text-lg font-bold text-zinc-900">
-                {Math.max(
-                  0,
-                  Number(
-                    tutorProfileData.recentAssignmentsCount
-                    ?? user?.recentAssignmentsCount
-                    ?? tutorProfileData.completedSessionsLast24Hours
-                    ?? 0,
-                  ),
-                ).toFixed(0)}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 sm:col-span-2 xl:col-span-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last offer received</p>
-              <p className="mt-1 text-sm font-semibold text-zinc-900">{formatDateTime(tutorProfileData.lastOfferAt || user?.lastOfferAt)}</p>
-            </div>
-            </div>
-          </SectionCard>
+          {isTutorOnline ? (
+            <SectionCard title="Dispatch metrics" subtitle="These values are used when ranking tutors for incoming requests.">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <TutorMetricTile
+                  label="Acceptance rate"
+                  value={formatPercent(tutorProfileData.acceptanceRate ?? user?.acceptanceRate)}
+                />
+                <TutorMetricTile
+                  label="Completion rate"
+                  value={formatPercent(tutorProfileData.completionRate ?? user?.completionRate)}
+                />
+                <TutorMetricTile
+                  label="Tutor rating"
+                  value={Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average ?? 0) > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                      <span>{Number(tutorProfileData.overallRating ?? user?.ratings?.asTutor?.average).toFixed(2)}</span>
+                    </span>
+                  ) : 'Not rated yet'}
+                />
+                <TutorMetricTile
+                  label="Avg response speed"
+                  value={Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds ?? 0) > 0
+                    ? `${Number(tutorProfileData.avgResponseSeconds ?? user?.avgResponseSeconds).toFixed(0)}s`
+                    : 'Not available yet'}
+                />
+                <TutorMetricTile
+                  label="Cancellation rate"
+                  value={formatPercent(tutorProfileData.cancellationRate ?? user?.cancellationRate)}
+                />
+                <TutorMetricTile
+                  label="Recent assignments"
+                  value={Math.max(
+                    0,
+                    Number(
+                      tutorProfileData.recentAssignmentsCount
+                      ?? user?.recentAssignmentsCount
+                      ?? tutorProfileData.completedSessionsLast24Hours
+                      ?? 0,
+                    ),
+                  ).toFixed(0)}
+                />
+                <TutorMetricTile
+                  label="Last offer received"
+                  value={formatDateTime(tutorProfileData.lastOfferAt || user?.lastOfferAt)}
+                />
+              </div>
+            </SectionCard>
+          ) : null}
         </>
       ) : null}
 
