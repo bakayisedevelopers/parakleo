@@ -40,7 +40,7 @@ Keep the mobile migration aligned with both the declared web ranges and the curr
 | `tailwindcss` | `^3.4.1` | `3.4.19` |
 | `vite` | `^5.0.8` | `5.4.21` |
 
-Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `expo-status-bar@~2.0.0`, `react@^18.3.1`, and `react-native@0.76.0`. Phase 0 must either keep these exact mobile runtime versions or explicitly document any required Expo-compatible change.
+Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `expo-status-bar@~2.2.3`, `firebase@^11.10.0`, `react@19.0.0`, and `react-native@0.79.6`. Phase 0 keeps this Expo SDK 53-compatible runtime baseline.
 
 ### Student-relevant feature set detected in the current app
 
@@ -63,7 +63,7 @@ Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `ex
 
 ### Web design and UX traits to preserve
 
-- Light app shell with white/zinc surfaces, emerald brand color (`#10b981`), cyan/indigo accents, rounded panels, soft shadows, and bottom navigation behavior on mobile-sized web viewports.
+- Light app shell with white/zinc surfaces, emerald brand color (`#10b981`), cyan/indigo accents, rounded panels, soft shadows, and the web topbar plus sidebar/drawer navigation behavior.
 - Student dashboard is the primary first screen after login, not a marketing page.
 - Camera/file upload and typed request entry are prominent, with clear processing overlays for extraction/classification before review.
 - Form controls use compact cards, icon-led actions, loading/empty/error states, and status badges.
@@ -77,8 +77,8 @@ Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `ex
 
 | Current web package/capability | React Native counterpart(s) | Notes |
 |---|---|---|
-| `react@18.3.1`, `react-dom@18.3.1`, Vite app shell | `react@^18.3.1`, `react-native@0.76.0`, `expo@^53.0.0` | Current mobile starter already matches React 18.3.1 and Expo-managed RN. Keep Expo compatibility first. |
-| `react-router-dom@6.30.3` | `@react-navigation/native`, `@react-navigation/native-stack`, `@react-navigation/bottom-tabs` | Navigation/route guards for auth + student app areas. Mirror `/app/student`, `/app/student/requests`, `/app/student/payment`, `/app/profile`, `/app/onboarding`, and `/app/session/:id`. |
+| `react@18.3.1`, `react-dom@18.3.1`, Vite app shell | `react@19.0.0`, `react-native@0.79.6`, `expo@^53.0.0` | Current mobile app uses the Expo SDK 53-compatible React Native baseline from `mobile/package.json`; keep Expo compatibility first. |
+| `react-router-dom@6.30.3` | `@react-navigation/native`, `@react-navigation/native-stack`, drawer/sidebar navigation | Navigation/route guards for auth + student app areas. Mirror `/app/student`, `/app/student/requests`, `/app/student/payment`, `/app/profile`, `/app/onboarding`, and `/app/session/:id` with the web topbar/sidebar pattern. |
 | `firebase@11.10.0` (auth/firestore/storage/functions) | `firebase@11.10.0` JS SDK (modular) in RN + `@react-native-async-storage/async-storage` | Keep shared backend, Firestore schema, Storage paths, and auth persistence aligned with web. |
 | `lucide-react@0.307.0` icons | `lucide-react-native@0.307.0` | Pin to the matching icon set version where Expo compatibility allows. |
 | `motion@11.18.2` animations | `react-native-reanimated` (+ optional `moti`) | Better-native motion performance/gestures; preserve processing overlays, page transitions, and control affordances. |
@@ -89,7 +89,7 @@ Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `ex
 | File/image picking uploads | `expo-image-picker`, `expo-camera`, `expo-document-picker`, `expo-file-system` | Replaces browser file input/upload behavior and supports the dashboard "Take Picture" first workflow. |
 | Push/notifications UI | `expo-notifications` | For local + remote notification handling. |
 | Secure token/session storage | `expo-secure-store` | Store auth/session-sensitive values securely. |
-| Payments (Paystack web flow) | `react-native-paystack-webview` (or API + custom web checkout fallback) | Validate PCI-safe flow and regional requirements. |
+| Payments (Paystack web flow) | `react-native-webview` hosting Paystack inline script | Mirror web `PaystackPop.setup` as closely as React Native allows, then call the same `verifyPaystack` backend endpoint. |
 | Email events (server-side) | no mobile package (keep Firebase Functions + Resend backend) | Mobile only triggers backend workflows. |
 
 ---
@@ -100,9 +100,29 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 
 > Hard constraint for every phase: use React Native + Expo libraries and workflows only.
 
-> 2026-04-27 parity update: keep the existing phased plan, but execute it against the current web app shape: dashboard-first student request flow, `firebase@11.10.0`, React 18.3.1 parity, Paystack verification endpoints, OCR/classification/growth endpoints, and the full-screen WebRTC/screen-share session room.
+## Important Migration Rules
+
+- This mobile application is a direct migration and duplicate of the existing web student application. It is not a new app, redesign, or from-scratch product.
+- Every phase must copy the web application's UI, UX, navigation style, logic flow, data contracts, validation rules, status labels, and backend behavior as exactly as React Native allows.
+- Navigation must mirror the web app shell: topbar plus sidebar/drawer navigation. Do not introduce a bottom menu bar unless React Native cannot support the web pattern for that specific surface.
+- Payment method addition must mirror the web Paystack flow: tap "Add a Card", open Paystack authorization, charge R1, receive the Paystack callback reference, call `verifyPaystack`, save the returned card, and show the same success/cancel/error messaging pattern.
+- Any difference from the web application must be documented in the relevant phase tracker with the exact React Native limitation that forced the difference.
+- Web services remain the source of truth for Firestore schema, Functions endpoints, pricing, request lifecycle, onboarding requirements, payment behavior, session lifecycle, and status mapping.
+- Students should feel they are using the same Claxi app across web and mobile. Visual language, screen order, copy, and interaction flow must stay consistent unless a native platform constraint prevents it.
+
+> 2026-04-27 parity update: keep the existing phased plan, but execute it against the current web app shape: dashboard-first student request flow, `firebase@11.10.0`, React 18.3.1 parity, Paystack verification endpoints, OCR/classification/growth endpoints, sidebar/drawer app navigation, and the full-screen WebRTC/screen-share session room.
 
 ### Phase 0 — Discovery, package spike, and architecture freeze
+
+Status: Completed
+
+Results:
+- Confirmed the student-only route inventory and preserved the mobile scope guardrail: auth, protected student shell, dashboard, requests, sessions/classes, wallet, profile, with onboarding/request details/session room reserved for later phases.
+- Added `mobile/docs/phase-0-architecture.md` with accepted stack, rejected alternatives, endpoint strategy, and carry-forward decisions.
+- Froze the current mobile runtime baseline around Expo SDK 53, React 19, React Native 0.79.6, and Firebase 11.10.0 as currently present in `mobile/package.json`.
+- Selected WebView-hosted `tldraw@4.5.9` as the first whiteboard candidate for Phase 5 and kept native canvas as a rejected alternative for now.
+- Selected Paystack mobile authorization plus existing backend verification as the payment direction.
+- Migration rule for this phase: architecture decisions must preserve web parity first; alternatives are accepted only when exact web behavior is impossible in React Native.
 
 **Goal:** remove technical uncertainty before UI migration.
 
@@ -125,13 +145,26 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 
 ### Phase 1 — Foundation and shared infrastructure
 
+Status: Completed
+
+Results:
+- Replaced the Expo starter screen with a protected student app shell in `mobile/App.js`.
+- Added Firebase-backed auth context, sign in, signup, sign out, and session restoration service boundaries.
+- Added student screens for dashboard, requests, sessions/classes, wallet, and profile.
+- Added a lightweight internal auth/sidebar navigator so the app shell mirrors the web topbar plus sidebar/drawer pattern; React Navigation remains the intended replacement once dependency installation completes.
+- Added reusable native UI primitives for buttons, compact cards, form fields, status badges, loading, empty, error, and global error boundary states.
+- Added Claxi design tokens for white/zinc surfaces, emerald brand, cyan/indigo accents, rounded panels, and soft shadows.
+- Added shared mobile service boundaries mirroring web names/contracts where practical: `authService`, `userService`, `classRequestService`, `sessionService`, `walletService`, and `paymentMethodService`.
+- Added Firestore listener boundaries for student profile, requests, sessions, and wallet data.
+- Migration rule for this phase: navigation and app shell must mirror the web topbar/sidebar structure, not introduce mobile-only bottom-tab behavior.
+
 **Goal:** create production-ready student app skeleton.
 
 - Set up navigation structure (auth stack + student tab/stack) matching web's student route map.
 - Configure environment management and Firebase client initialization.
 - Implement auth session persistence and protected routes.
 - Add design system primitives (buttons, compact cards, form fields, select fields, status badges, loading/empty/error states).
-- Recreate web visual direction in native primitives: white/zinc surfaces, emerald brand, cyan/indigo accents, soft shadows, rounded panels, and bottom-tab ergonomics.
+- Recreate web visual direction in native primitives: white/zinc surfaces, emerald brand, cyan/indigo accents, soft shadows, rounded panels, topbar, and sidebar/drawer ergonomics.
 - Add telemetry/logging hooks and global error boundary.
 - Add shared service boundaries that mirror web service names/contracts where practical (`authService`, `userService`, `classRequestService`, `sessionService`, `walletService`, `paymentMethodService`).
 
@@ -140,11 +173,24 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 
 **Exit criteria:**
 - User can sign in/out and remain logged in after app restart.
-- App shell, bottom tabs, protected screens, and shared service wiring are ready for feature screens.
+- App shell, sidebar/drawer navigation, protected screens, and shared service wiring are ready for feature screens.
 
 ---
 
 ### Phase 2 — Student onboarding/profile + payment methods
+
+Status: Completed
+
+Results:
+- Added student setup screen to the protected mobile shell for grade, curriculum, discovery source, and subject selection.
+- Ported student onboarding status logic to mobile so setup can report academic-profile and payment-method completion.
+- Added South African subject constants and native subject chip selection compatible with the web `subjects` array.
+- Added Firestore profile update support through `updateUserProfile` and wired setup saves to the existing `studentProfile` contract.
+- Added `syncStudentGrowth` mobile service boundary using the Firebase Functions endpoint strategy from Phase 0.
+- Added saved-card management UI in setup and wallet surfaces: verified-card display, primary-card selection, removal, nickname support, and empty states.
+- Added the web-equivalent Paystack card authorization flow through `react-native-webview`: open Paystack inline authorization, charge R1, receive the callback reference, call `verifyPaystack` with Firebase ID token, save the returned card, and show success/cancel/error messaging.
+- Updated dashboard/profile states to guide students into setup until academic and payment requirements are complete.
+- Migration rule for this phase: onboarding/profile/payment method UI and logic must stay aligned with the web `OnboardingPage`, `PaymentMethodsManager`, `paystackService`, and `paymentMethodService` flow.
 
 **Goal:** unlock request eligibility paths.
 
@@ -164,6 +210,8 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 
 ### Phase 3 — Class request creation + attachments + pricing
 
+Migration rule for this phase: copy the web dashboard-first request creation flow exactly, including quick suggestions, typed request fields, attachment processing states, OCR/classification behavior, pricing quote, free-minute preview, selected card, and review-before-confirm.
+
 **Goal:** ship core “request a class” workflow.
 
 - Implement dashboard-first request flow, not a separate blank form.
@@ -181,6 +229,8 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 ---
 
 ### Phase 4 — Request tracking + notifications + sessions list
+
+Migration rule for this phase: copy the web request list, request detail/status timeline, notification behavior, session card data, lifecycle labels, and join/re-open class logic exactly.
 
 **Goal:** keep student informed in real-time.
 
@@ -201,6 +251,8 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 
 ### Phase 5 — Session room (WebRTC + whiteboard)
 
+Migration rule for this phase: copy the web session room control flow, full-screen treatment, WebRTC lifecycle, screen-share viewing, duration/grace handling, whiteboard preparation behavior, and rating prompt as exactly as React Native allows.
+
 **Goal:** deliver live classroom experience.
 
 - Implement RTC media connect/disconnect flow with ICE config support and network error messaging.
@@ -220,6 +272,8 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 ---
 
 ### Phase 6 — Wallet, billing, and hardening
+
+Migration rule for this phase: copy the web wallet, billing, debt handling, policy links, retry/error states, and production hardening behavior exactly.
 
 **Goal:** complete payment lifecycle and production readiness.
 

@@ -1,0 +1,69 @@
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from 'firebase/auth';
+import { getFirebaseClients } from '../firebase/config';
+import { getUserProfile, upsertStudentProfile } from './userService';
+
+function normalizeStudentUser(firebaseUser, profile = {}) {
+  if (!firebaseUser) return null;
+
+  return {
+    uid: firebaseUser.uid,
+    email: firebaseUser.email,
+    emailVerified: Boolean(firebaseUser.emailVerified),
+    displayName: profile.displayName || firebaseUser.displayName || '',
+    fullName: profile.fullName || profile.displayName || firebaseUser.displayName || '',
+    role: 'student',
+    activeRole: 'student',
+    roles: ['student'],
+    ...profile,
+  };
+}
+
+export function subscribeToAuthChanges(callback, onError) {
+  const { auth } = getFirebaseClients();
+
+  return onAuthStateChanged(auth, async (firebaseUser) => {
+    try {
+      if (!firebaseUser) {
+        callback(null);
+        return;
+      }
+
+      const profile = await getUserProfile(firebaseUser.uid);
+      callback(normalizeStudentUser(firebaseUser, profile || {}));
+    } catch (error) {
+      onError?.(error);
+      callback(normalizeStudentUser(firebaseUser));
+    }
+  }, onError);
+}
+
+export async function loginWithEmail({ email, password }) {
+  const { auth } = getFirebaseClients();
+  const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+  const profile = await getUserProfile(credential.user.uid);
+  return normalizeStudentUser(credential.user, profile || {});
+}
+
+export async function signupWithEmail({ name, email, password }) {
+  const { auth } = getFirebaseClients();
+  const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  await updateProfile(credential.user, { displayName: name.trim() });
+  const profile = await upsertStudentProfile({
+    uid: credential.user.uid,
+    email: credential.user.email,
+    displayName: name.trim(),
+  });
+
+  return normalizeStudentUser(credential.user, profile || {});
+}
+
+export async function logoutUser() {
+  const { auth } = getFirebaseClients();
+  await signOut(auth);
+}

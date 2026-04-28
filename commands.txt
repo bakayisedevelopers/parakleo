@@ -7,7 +7,7 @@ Run:
 
 git status
 git add .
-git commit -m "Commit after AI implementation for extraction for results and replacing Vertex with Firebase AI Logic (no success) - 27.04.2026 - 3."
+git commit -m "Commit after AI implementation for extraction for results and replacing Vertex with Firebase AI Logic (no success) and started with Mobile developement from scratch - 28.04.2026 - 1."
 git push origin main
 git push origin main --force
 
@@ -31,6 +31,15 @@ Publishing to hosting
 npm run build
 firebase deploy --only hosting
 firebase deploy --only functions
+
+cd "C:\Users\Jabu Babb\Documents\Code\Claxi\claxi"
+firebase emulators:start --only auth,firestore,functions,storage --project claxi-bakayise
+
+cd "C:\Users\Jabu Babb\Documents\Code\Claxi\claxi"
+npm.cmd --prefix web run dev
+
+cd "C:\Users\Jabu Babb\Documents\Code\Claxi\claxi"
+npm.cmd --prefix mobile start
 
 
 firebase use default

@@ -1,0 +1,184 @@
+[debug] [2026-04-28T07:48:47.310Z] ----------------------------------------------------------------------
+[debug] [2026-04-28T07:48:47.313Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Jabu Babb\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js emulators:start --only auth firestore functions storage --project claxi-bakayise
+[debug] [2026-04-28T07:48:47.314Z] CLI Version:   15.15.0
+[debug] [2026-04-28T07:48:47.314Z] Platform:      win32
+[debug] [2026-04-28T07:48:47.314Z] Node Version:  v24.15.0
+[debug] [2026-04-28T07:48:47.314Z] Time:          Tue Apr 28 2026 09:48:47 GMT+0200 (South Africa Standard Time)
+[debug] [2026-04-28T07:48:47.314Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-28T07:48:49.066Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-28T07:48:49.067Z] > authorizing via signed-in user (bakayise.developers@gmail.com)
+[debug] [2026-04-28T07:48:49.157Z] openjdk version "21.0.10" 2026-01-20 LTS
+
+[debug] [2026-04-28T07:48:49.158Z] OpenJDK Runtime Environment Temurin-21.0.10+7 (build 21.0.10+7-LTS)
+OpenJDK 64-Bit Server VM Temurin-21.0.10+7 (build 21.0.10+7-LTS, mixed mode, sharing)
+
+[debug] [2026-04-28T07:48:49.169Z] Parsed Java major version: 21
+[info] i  emulators: Starting emulators: auth, functions, firestore, storage {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: auth, functions, firestore, storage"}}
+[debug] [2026-04-28T07:48:49.193Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.193Z] [auth] Authentication Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.193Z] [firestore] Firestore Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.194Z] [firestore.websocket] websocket server for firestore only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.194Z] [storage] Storage Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.194Z] assigned listening specs for emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8080}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"storage":[{"address":"127.0.0.1","family":"IPv4","port":9199}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-04-28T07:48:49.201Z] Found emulator hub locator: {"version":"15.15.0","origins":["http://127.0.0.1:4400","http://[::1]:4400"],"pid":5812}
+[debug] [2026-04-28T07:48:49.201Z] Write emulator hub locator at C:\Users\JABUBA~1\AppData\Local\Temp\hub-claxi-bakayise.json
+[debug] [2026-04-28T07:48:49.219Z] [functions] Functions Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.219Z] [eventarc] Eventarc Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.219Z] [tasks] Cloud Tasks Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-04-28T07:48:49.219Z] late-assigned ports for functions and eventarc emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8080}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"storage":[{"address":"127.0.0.1","family":"IPv4","port":9199}],"functions":[{"address":"127.0.0.1","family":"IPv4","port":5001}],"eventarc":[{"address":"127.0.0.1","family":"IPv4","port":9299}],"tasks":[{"address":"127.0.0.1","family":"IPv4","port":9499}]},"metadata":{"message":"late-assigned ports for functions and eventarc emulators"}}
+[warn] !  functions: The following emulators are not running, calls to these services from the Functions emulator will affect production: apphosting, database, hosting, pubsub, dataconnect {"metadata":{"emulator":{"name":"functions"},"message":"The following emulators are not running, calls to these services from the Functions emulator will affect production: \u001b[1mapphosting, database, hosting, pubsub, dataconnect\u001b[22m"}}
+[debug] [2026-04-28T07:48:49.268Z] defaultcredentials: writing to file C:\Users\Jabu Babb\AppData\Roaming\firebase\bakayise_developers_gmail.com_application_default_credentials.json
+[debug] [2026-04-28T07:48:49.270Z] Setting GAC to C:\Users\Jabu Babb\AppData\Roaming\firebase\bakayise_developers_gmail.com_application_default_credentials.json {"metadata":{"emulator":{"name":"functions"},"message":"Setting GAC to C:\\Users\\Jabu Babb\\AppData\\Roaming\\firebase\\bakayise_developers_gmail.com_application_default_credentials.json"}}
+[debug] [2026-04-28T07:48:49.272Z] Checked if tokens are valid: true, expires at: 1777364494111
+[debug] [2026-04-28T07:48:49.272Z] Checked if tokens are valid: true, expires at: 1777364494111
+[debug] [2026-04-28T07:48:49.274Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig [none]
+[debug] [2026-04-28T07:48:50.406Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig 200
+[debug] [2026-04-28T07:48:50.406Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig {"projectId":"claxi-bakayise","storageBucket":"claxi-bakayise.firebasestorage.app"}
+[debug] [2026-04-28T07:48:50.433Z] Ignoring unsupported arg: auto_download {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: auto_download"}}
+[debug] [2026-04-28T07:48:50.433Z] Ignoring unsupported arg: single_project_mode_error {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: single_project_mode_error"}}
+[debug] [2026-04-28T07:48:50.434Z] Starting Firestore Emulator with command {"binary":"java","args":["-Dgoogle.cloud_firestore.debug_log_level=FINE","-Duser.language=en","-jar","C:\\Users\\Jabu Babb\\.cache\\firebase\\emulators\\cloud-firestore-emulator-v1.20.4.jar","--host","127.0.0.1","--port",8080,"--websocket_port",9150,"--database-edition","standard","--project_id","claxi-bakayise","--rules","C:\\Users\\Jabu Babb\\Documents\\Code\\Claxi\\claxi\\firestore.rules","--single_project_mode",true,"--functions_emulator","127.0.0.1:5001"],"optionalArgs":["port","webchannel_port","host","rules","websocket_port","database-edition","functions_emulator","seed_from_export","project_id","single_project_mode"],"joinArgs":false,"shell":false,"port":8080} {"metadata":{"emulator":{"name":"firestore"},"message":"Starting Firestore Emulator with command {\"binary\":\"java\",\"args\":[\"-Dgoogle.cloud_firestore.debug_log_level=FINE\",\"-Duser.language=en\",\"-jar\",\"C:\\\\Users\\\\Jabu Babb\\\\.cache\\\\firebase\\\\emulators\\\\cloud-firestore-emulator-v1.20.4.jar\",\"--host\",\"127.0.0.1\",\"--port\",8080,\"--websocket_port\",9150,\"--database-edition\",\"standard\",\"--project_id\",\"claxi-bakayise\",\"--rules\",\"C:\\\\Users\\\\Jabu Babb\\\\Documents\\\\Code\\\\Claxi\\\\claxi\\\\firestore.rules\",\"--single_project_mode\",true,\"--functions_emulator\",\"127.0.0.1:5001\"],\"optionalArgs\":[\"port\",\"webchannel_port\",\"host\",\"rules\",\"websocket_port\",\"database-edition\",\"functions_emulator\",\"seed_from_export\",\"project_id\",\"single_project_mode\"],\"joinArgs\":false,\"shell\":false,\"port\":8080}"}}
+[info] i  firestore: Firestore Emulator logging to firestore-debug.log {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator logging to \u001b[1mfirestore-debug.log\u001b[22m"}}
+[debug] [2026-04-28T07:48:52.308Z] Apr 28, 2026 9:48:52 AM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start
+INFO: Started WebSocket server on ws://127.0.0.1:9150
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 28, 2026 9:48:52 AM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start\r\nINFO: Started WebSocket server on ws://127.0.0.1:9150\r\n"}}
+[debug] [2026-04-28T07:48:52.382Z] 
+API endpoint: http:// {"metadata":{"emulator":{"name":"firestore"},"message":"\nAPI endpoint: http://"}}
+[debug] [2026-04-28T07:48:52.382Z] 127.0.0.1:8080
+Database Edition: STANDARD
+Database Mode: CLOUD_FIRESTORE
+
+If you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:
+
+   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+
+If you are running a Firestore in Datastore Mode project, run:
+
+   export DATASTORE_EMULATOR_HOST=127.0.0.1:8080
+
+Note: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.
+Dev App Server is now running.
+
+ {"metadata":{"emulator":{"name":"firestore"},"message":"127.0.0.1:8080\nDatabase Edition: STANDARD\nDatabase Mode: CLOUD_FIRESTORE\n\nIf you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:\r\n\n   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080\n\nIf you are running a Firestore in Datastore Mode project, run:\r\n\n   export DATASTORE_EMULATOR_HOST=127.0.0.1:8080\n\nNote: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.\r\nDev App Server is now running.\n\r\n"}}
+[info] +  firestore: Firestore Emulator was started in standard edition. {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator was started in standard edition."}}
+[info] +  firestore: Firestore Emulator UI websocket is running on 9150. {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator UI websocket is running on 9150."}}
+[debug] [2026-04-28T07:49:00.164Z] Ignoring unsupported arg: port {"metadata":{"emulator":{"name":"storage"},"message":"Ignoring unsupported arg: port"}}
+[debug] [2026-04-28T07:49:01.369Z] Temp file directory for storage emulator: C:\Users\JABUBA~1\AppData\Local\Temp/firebase/storage/blobs {"metadata":{"emulator":{"name":"storage"},"message":"Temp file directory for storage emulator: C:\\Users\\JABUBA~1\\AppData\\Local\\Temp/firebase/storage/blobs"}}
+[info] i  functions: Watching "C:\Users\Jabu Babb\Documents\Code\Claxi\claxi\functions" for Cloud Functions... {"metadata":{"emulator":{"name":"functions"},"message":"Watching \"C:\\Users\\Jabu Babb\\Documents\\Code\\Claxi\\claxi\\functions\" for Cloud Functions..."}}
+[debug] [2026-04-28T07:49:01.388Z] Validating nodejs source
+[warn] !  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory. 
+[warn] !  functions: Please note that there will be breaking changes when you upgrade. 
+[debug] [2026-04-28T07:49:02.573Z] > [functions] package.json contents: {
+  "name": "claxi-functions",
+  "private": true,
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google-cloud/vision": "^5.2.0",
+    "firebase": "^12.12.1",
+    "firebase-admin": "^12.1.1",
+    "firebase-functions": "^5.1.0",
+    "pdf-parse": "^1.1.1",
+    "pdf-to-png-converter": "^3.18.0",
+    "resend": "^4.1.2"
+  }
+}
+[debug] [2026-04-28T07:49:02.574Z] Building nodejs source
+[debug] [2026-04-28T07:49:02.574Z] Failed to find version of module node: reached end of search path C:\Users\Jabu Babb\Documents\Code\Claxi\claxi\functions\node_modules
+[warn] !  functions: Your requested "node" version "20" doesn't match your global version "24". Using node@24 from host. 
+[debug] [2026-04-28T07:49:02.577Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-04-28T07:49:02.589Z] Found firebase-functions binary at 'C:\Users\Jabu Babb\Documents\Code\Claxi\claxi\functions\node_modules\.bin\firebase-functions'
+[info] Serving at port 8398
+
+[debug] [2026-04-28T07:49:03.894Z] Got response from /__/functions.yaml {"endpoints":{"syncClassRequestLifecycle":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"classRequests/{requestId}"},"retry":false},"entryPoint":"syncClassRequestLifecycle"},"processTutorDocument":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_AI_KEYS"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.created","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"tutorDocuments/{docId}"},"retry":false},"entryPoint":"processTutorDocument"},"retryTutorDocumentProcessing":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_AI_KEYS"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"tutorDocuments/{docId}"},"retry":false},"entryPoint":"retryTutorDocumentProcessing"},"updateGlobalSubjects":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"updateGlobalSubjects"},"refreshGlobalSubjectsOnTutorChange":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"refreshGlobalSubjectsOnTutorChange"},"getPricingQuote":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"getPricingQuote"},"extractImageOcr":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"extractImageOcr"},"classifySubject":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_AI_KEYS"}],"labels":{},"httpsTrigger":{},"entryPoint":"classifySubject"},"syncStudentGrowth":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncStudentGrowth"},"getIceConfig":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_REALTIME_SECRETS"},{"key":"CLOUDFLARE_TURN_KEY_ID"},{"key":"CLOUDFLARE_TURN_API_TOKEN"},{"key":"CLOUDFLARE_TURN_TTL_SECONDS"}],"labels":{},"httpsTrigger":{},"entryPoint":"getIceConfig"},"verifyPaystack":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_PAYMENTS_SECRETS"},{"key":"PAYSTACK_SECRET_KEY"}],"labels":{},"httpsTrigger":{},"entryPoint":"verifyPaystack"},"finalizeSessionBilling":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_PAYMENTS_SECRETS"},{"key":"PAYSTACK_SECRET_KEY"}],"labels":{},"httpsTrigger":{},"entryPoint":"finalizeSessionBilling"},"sendEmailFromQueue":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"CLAXI_EMAIL_SECRETS"},{"key":"RESEND_API_KEY"},{"key":"EMAIL_FROM"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.created","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"emailEvents/{eventId}"},"retry":false},"entryPoint":"sendEmailFromQueue"}},"specVersion":"v1alpha1","requiredAPIs":[],"extensions":{},"params":[{"type":"secret","name":"CLAXI_PAYMENTS_SECRETS"},{"type":"secret","name":"CLAXI_EMAIL_SECRETS"},{"type":"secret","name":"CLAXI_REALTIME_SECRETS"},{"type":"secret","name":"CLAXI_AI_KEYS"},{"type":"secret","name":"PAYSTACK_SECRET_KEY"},{"type":"secret","name":"RESEND_API_KEY"},{"type":"secret","name":"EMAIL_FROM"},{"type":"secret","name":"CLOUDFLARE_TURN_KEY_ID"},{"type":"secret","name":"CLOUDFLARE_TURN_API_TOKEN"},{"type":"secret","name":"CLOUDFLARE_TURN_TTL_SECONDS"}]}
+[info] +  functions: Loaded functions definitions from source: syncClassRequestLifecycle, processTutorDocument, retryTutorDocumentProcessing, updateGlobalSubjects, refreshGlobalSubjectsOnTutorChange, getPricingQuote, extractImageOcr, classifySubject, syncStudentGrowth, getIceConfig, verifyPaystack, finalizeSessionBilling, sendEmailFromQueue. {"metadata":{"emulator":{"name":"functions"},"message":"Loaded functions definitions from source: syncClassRequestLifecycle, processTutorDocument, retryTutorDocumentProcessing, updateGlobalSubjects, refreshGlobalSubjectsOnTutorChange, getPricingQuote, extractImageOcr, classifySubject, syncStudentGrowth, getIceConfig, verifyPaystack, finalizeSessionBilling, sendEmailFromQueue."}}
+[debug] [2026-04-28T07:49:07.974Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:07.974Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"classRequests/{requestId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:07.975Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-syncClassRequestLifecycle-0 [none]
+[debug] [2026-04-28T07:49:07.975Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-syncClassRequestLifecycle-0 "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"classRequests/{requestId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:07.982Z] Apr 28, 2026 9:49:07 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead
+INFO: Detected non-HTTP/2 connection.
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 28, 2026 9:49:07 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead\r\nINFO: Detected non-HTTP/2 connection.\r\n"}}
+[debug] [2026-04-28T07:49:08.234Z] Apr 28, 2026 9:49:08 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead
+INFO: Detected HTTP/2 connection.
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 28, 2026 9:49:08 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead\r\nINFO: Detected HTTP/2 connection.\r\n"}}
+[debug] [2026-04-28T07:49:09.003Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-syncClassRequestLifecycle-0 200
+[debug] [2026-04-28T07:49:09.003Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-syncClassRequestLifecycle-0 {"eventType":"google.cloud.firestore.document.v1.written","database":"(default)","namespace":"(default)","document":{"value":"classRequests/{requestId}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-syncClassRequestLifecycle]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[debug] [2026-04-28T07:49:09.005Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:09.005Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.created\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"tutorDocuments/{docId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.006Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-processTutorDocument-0 [none]
+[debug] [2026-04-28T07:49:09.006Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-processTutorDocument-0 "{\"eventType\":\"google.cloud.firestore.document.v1.created\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"tutorDocuments/{docId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.020Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-processTutorDocument-0 200
+[debug] [2026-04-28T07:49:09.020Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-processTutorDocument-0 {"eventType":"google.cloud.firestore.document.v1.created","database":"(default)","namespace":"(default)","document":{"value":"tutorDocuments/{docId}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-processTutorDocument]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[debug] [2026-04-28T07:49:09.021Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:09.021Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"tutorDocuments/{docId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.021Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-retryTutorDocumentProcessing-0 [none]
+[debug] [2026-04-28T07:49:09.021Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-retryTutorDocumentProcessing-0 "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"tutorDocuments/{docId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.034Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-retryTutorDocumentProcessing-0 200
+[debug] [2026-04-28T07:49:09.034Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-retryTutorDocumentProcessing-0 {"eventType":"google.cloud.firestore.document.v1.written","database":"(default)","namespace":"(default)","document":{"value":"tutorDocuments/{docId}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-retryTutorDocumentProcessing]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[debug] [2026-04-28T07:49:09.035Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:09.035Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"users/{uid}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.036Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-updateGlobalSubjects-0 [none]
+[debug] [2026-04-28T07:49:09.036Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-updateGlobalSubjects-0 "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"users/{uid}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.047Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-updateGlobalSubjects-0 200
+[debug] [2026-04-28T07:49:09.047Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-updateGlobalSubjects-0 {"eventType":"google.cloud.firestore.document.v1.written","database":"(default)","namespace":"(default)","document":{"value":"users/{uid}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-updateGlobalSubjects]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[debug] [2026-04-28T07:49:09.048Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:09.048Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"users/{uid}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.048Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-refreshGlobalSubjectsOnTutorChange-0 [none]
+[debug] [2026-04-28T07:49:09.048Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-refreshGlobalSubjectsOnTutorChange-0 "{\"eventType\":\"google.cloud.firestore.document.v1.written\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"users/{uid}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.058Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-refreshGlobalSubjectsOnTutorChange-0 200
+[debug] [2026-04-28T07:49:09.058Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-refreshGlobalSubjectsOnTutorChange-0 {"eventType":"google.cloud.firestore.document.v1.written","database":"(default)","namespace":"(default)","document":{"value":"users/{uid}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-refreshGlobalSubjectsOnTutorChange]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[info] +  functions[us-central1-getPricingQuote]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/getPricingQuote). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/getPricingQuote)."}}
+[info] +  functions[us-central1-extractImageOcr]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/extractImageOcr). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/extractImageOcr)."}}
+[info] +  functions[us-central1-classifySubject]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/classifySubject). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/classifySubject)."}}
+[info] +  functions[us-central1-syncStudentGrowth]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/syncStudentGrowth). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/syncStudentGrowth)."}}
+[info] +  functions[us-central1-getIceConfig]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/getIceConfig). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/getIceConfig)."}}
+[info] +  functions[us-central1-verifyPaystack]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/verifyPaystack). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/verifyPaystack)."}}
+[info] +  functions[us-central1-finalizeSessionBilling]: http function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/finalizeSessionBilling). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/claxi-bakayise/us-central1/finalizeSessionBilling)."}}
+[debug] [2026-04-28T07:49:09.063Z] Found a v2 firestore trigger.
+[debug] [2026-04-28T07:49:09.064Z] addFirestoreTrigger "{\"eventType\":\"google.cloud.firestore.document.v1.created\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"emailEvents/{eventId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.064Z] >>> [apiv2][query] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-sendEmailFromQueue-0 [none]
+[debug] [2026-04-28T07:49:09.064Z] >>> [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-sendEmailFromQueue-0 "{\"eventType\":\"google.cloud.firestore.document.v1.created\",\"database\":\"(default)\",\"namespace\":\"(default)\",\"document\":{\"value\":\"emailEvents/{eventId}\",\"matchType\":\"PATH_PATTERN\"}}"
+[debug] [2026-04-28T07:49:09.074Z] <<< [apiv2][status] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-sendEmailFromQueue-0 200
+[debug] [2026-04-28T07:49:09.074Z] <<< [apiv2][body] POST http://127.0.0.1:8080/emulator/v1/projects/claxi-bakayise/eventarcTrigger?eventarcTriggerId=us-central1-sendEmailFromQueue-0 {"eventType":"google.cloud.firestore.document.v1.created","database":"(default)","namespace":"(default)","document":{"value":"emailEvents/{eventId}","matchType":"PATH_PATTERN"}}
+[info] +  functions[us-central1-sendEmailFromQueue]: firestore function initialized. {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mfirestore\u001b[22m function initialized."}}
+[debug] [2026-04-28T07:49:09.085Z] Could not find VSCode notification endpoint: FetchError: request to http://localhost:40001/vscode/notify failed, reason: . If you are not running the Firebase SQL Connect VSCode extension, this is expected and not an issue.
+[info] 
+┌─────────────────────────────────────────────────────────────┐
+│ ✔  All emulators ready! It is now safe to connect your app. │
+│ i  View Emulator UI at http://127.0.0.1:4000/               │
+└─────────────────────────────────────────────────────────────┘
+
+┌────────────────┬────────────────┬─────────────────────────────────┐
+│ Emulator       │ Host:Port      │ View in Emulator UI             │
+├────────────────┼────────────────┼─────────────────────────────────┤
+│ Authentication │ 127.0.0.1:9099 │ http://127.0.0.1:4000/auth      │
+├────────────────┼────────────────┼─────────────────────────────────┤
+│ Functions      │ 127.0.0.1:5001 │ http://127.0.0.1:4000/functions │
+├────────────────┼────────────────┼─────────────────────────────────┤
+│ Firestore      │ 127.0.0.1:8080 │ http://127.0.0.1:4000/firestore │
+├────────────────┼────────────────┼─────────────────────────────────┤
+│ Storage        │ 127.0.0.1:9199 │ http://127.0.0.1:4000/storage   │
+└────────────────┴────────────────┴─────────────────────────────────┘
+  Emulator Hub host: 127.0.0.1 port: 4400
+  Other reserved ports: 4500, 9150
+
+Issues? Report them at https://github.com/firebase/firebase-tools/issues and attach the *-debug.log files.
+ 
+[debug] [2026-04-28T07:49:43.596Z] Apr 28, 2026 9:49:43 AM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketChannelHandler initChannel
+INFO: Connected to new websocket client
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 28, 2026 9:49:43 AM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketChannelHandler initChannel\r\nINFO: Connected to new websocket client\r\n"}}
+[debug] [2026-04-28T07:50:22.659Z] Apr 28, 2026 9:50:22 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead
+INFO: Detected non-HTTP/2 connection.
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Apr 28, 2026 9:50:22 AM io.gapi.emulators.netty.HttpVersionRoutingHandler channelRead\r\nINFO: Detected non-HTTP/2 connection.\r\n"}}
