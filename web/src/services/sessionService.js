@@ -236,8 +236,12 @@ export async function finalizeSessionClosure(session, options = {}) {
 
   if (!clients) {
     const endedAt = Date.now();
-    const startedAt = Number(session.billingStartedAt || session.studentJoinedAt || session.callStartedAt || endedAt);
-    const billedSeconds = Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+    const accumulatedSeconds = Math.max(0, Number(session.billedSeconds || 0));
+    const activeStartedAt = Number(session.billingStartedAt || 0);
+    const activeSeconds = activeStartedAt
+      ? Math.max(0, Math.floor((endedAt - activeStartedAt) / 1000))
+      : 0;
+    const billedSeconds = accumulatedSeconds + activeSeconds;
     const billedMinutes = Number((billedSeconds / 60).toFixed(2));
     const pricingSnapshot = normalizePricingSnapshot(session.pricingSnapshot);
     const selectedDurationMinutes = Number(session.durationMinutes || pricingSnapshot.durationMinutes || 0);

@@ -16,7 +16,7 @@ Tutor and admin routes are excluded from mobile scope.
 
 ## Accepted Package Stack
 
-- Runtime: Expo SDK 53, React 19, React Native 0.79.6.
+- Runtime: Expo SDK 54, React 19.1.0, React Native 0.81.5.
 - Backend: `firebase@^11.10.0` modular JS SDK.
 - Current implementation baseline: React Native primitives, Firebase, and `react-native-webview`.
 - Intended navigation package once install completes: `@react-navigation/native`, `@react-navigation/native-stack`, and drawer/sidebar navigation primitives that preserve the web topbar plus sidebar/drawer pattern.

@@ -1,5 +1,92 @@
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { getFirebaseClients } from '../firebase/config';
+
+const ACTIVE_CREATE_BLOCKING_STATUSES = ['pending', 'matching', 'offered', 'no_tutor_available'];
+
+export async function createClassRequest(payload) {
+  const { db } = getFirebaseClients();
+
+  const requestBody = {
+    ...payload,
+    subject: payload.subject || 'Mathematics',
+    durationMinutes: Number(payload.durationMinutes || 10),
+    pricingSnapshot: payload.pricingSnapshot || null,
+    pricingQuoteId: payload.pricingSnapshot?.quoteId || null,
+    mode: 'online',
+    meetingProviderPreference: payload.meetingProviderPreference || 'any',
+    status: 'pending',
+    tutorId: null,
+    tutorName: null,
+    tutorEmail: null,
+    tutorQueue: [],
+    currentOfferTutorId: null,
+    offerExpiresAt: null,
+    imageAttachment: payload.imageAttachment || '',
+    attachment: payload.attachment || null,
+    attachments: Array.isArray(payload.attachments)
+      ? payload.attachments
+      : (payload.attachment ? [payload.attachment] : []),
+    statusDetail: 'Request submitted. Initializing tutor matching.',
+    ratings: {
+      student: null,
+      tutor: null,
+    },
+    ratingStatus: {
+      student: 'pending',
+      tutor: 'pending',
+    },
+  };
+
+  const existingSnap = await getDocs(
+    query(
+      collection(db, 'classRequests'),
+      where('studentId', '==', payload.studentId),
+      where('status', 'in', ACTIVE_CREATE_BLOCKING_STATUSES),
+    ),
+  );
+
+  await Promise.all(existingSnap.docs.map((item) => updateDoc(item.ref, {
+    status: 'expired',
+    statusDetail: 'Previous request auto-expired by new request.',
+    currentOfferTutorId: null,
+    offerExpiresAt: null,
+    updatedAt: serverTimestamp(),
+  })));
+
+  const docRef = await addDoc(collection(db, 'classRequests'), {
+    ...requestBody,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await Promise.all([
+    addDoc(collection(db, 'notifications'), {
+      userId: payload.studentId,
+      title: 'Class request submitted',
+      message: `Your ${payload.topic || payload.subject || 'class'} request is now matching tutors.`,
+      type: 'class_request',
+      requestId: docRef.id,
+      read: false,
+      createdAt: serverTimestamp(),
+    }),
+    addDoc(collection(db, 'emailEvents'), {
+      eventType: 'request_created',
+      payload: {
+        requestId: docRef.id,
+        studentId: payload.studentId,
+        studentName: payload.studentName,
+        studentEmail: payload.studentEmail,
+        subject: requestBody.subject,
+        topic: payload.topic,
+      },
+      status: 'queued',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  ]);
+
+  return docRef.id;
+}
 
 export function subscribeToStudentRequests(studentId, callback, onError) {
   if (!studentId) {

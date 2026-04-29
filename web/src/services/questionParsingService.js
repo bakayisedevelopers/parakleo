@@ -105,11 +105,37 @@ function normalizeImageAttachment(item) {
   };
 }
 
+function normalizeFileAttachment(item) {
+  if (!item || typeof item === 'string') return null;
+
+  const url = item?.downloadUrl || item?.src || item?.url || '';
+  if (!url) return null;
+
+  return {
+    type: 'file',
+    url,
+    fileName: item?.fileName || item?.name || 'Uploaded file',
+    mimeType: item?.contentType || item?.mimeType || item?.type || '',
+    id: item?.id || item?.path || '',
+    size: Number(item?.size || 0) || undefined,
+  };
+}
+
 function dedupeImages(images = []) {
   const seen = new Set();
   return images.filter((image) => {
     const key = `${image?.src || ''}::${image?.fileName || ''}`;
     if (!image?.src || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeFiles(files = []) {
+  const seen = new Set();
+  return files.filter((file) => {
+    const key = `${file?.url || ''}::${file?.fileName || ''}`;
+    if (!file?.url || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -153,15 +179,16 @@ function splitQuestionsDeterministically(fullText = '') {
   return blocks;
 }
 
-function buildFallbackQuestion(fullText, imageReferences = []) {
+function buildFallbackQuestion(fullText, imageReferences = [], fileReferences = []) {
   const text = String(fullText || '').trim();
-  if (!text && !imageReferences.length) return [];
+  if (!text && !imageReferences.length && !fileReferences.length) return [];
 
   return [
     {
       questionNumber: null,
       text,
       images: imageReferences,
+      files: fileReferences,
     },
   ];
 }
@@ -181,19 +208,25 @@ function attachImagesToBlocks(blocks = [], images = []) {
   return nextBlocks;
 }
 
-function parseSourceIntoBlocks({ text = '', images = [] }) {
+function parseSourceIntoBlocks({ text = '', images = [], files = [] }) {
   const { cleanedText } = cleanExtractedText(text);
   const structuredBlocks = splitQuestionsDeterministically(cleanedText);
 
   if (!structuredBlocks.length) {
     return {
-      blocks: buildFallbackQuestion(cleanedText, images),
+      blocks: buildFallbackQuestion(cleanedText, images, files).map((block, index) => ({
+        ...block,
+        files: index === 0 ? files : [],
+      })),
       fallbackUsed: true,
     };
   }
 
   return {
-    blocks: attachImagesToBlocks(structuredBlocks, images),
+    blocks: attachImagesToBlocks(structuredBlocks, images).map((block, index) => ({
+      ...block,
+      files: index === 0 ? files : [],
+    })),
     fallbackUsed: false,
   };
 }
@@ -202,6 +235,7 @@ function normalizeAttachmentExtractions(attachmentExtractions = []) {
   return (attachmentExtractions || [])
     .map((entry) => {
       const uploadedImage = normalizeImageAttachment(entry?.uploadedAttachment);
+      const uploadedFile = normalizeFileAttachment(entry?.uploadedAttachment);
       const extractedImages = (entry?.extractedImages || [])
         .map((image) => normalizeImageAttachment(image))
         .filter(Boolean);
@@ -217,9 +251,10 @@ function normalizeAttachmentExtractions(attachmentExtractions = []) {
           ...extractedImages,
           ...(uploadedImage ? [uploadedImage] : []),
         ]),
+        files: dedupeFiles(uploadedFile ? [uploadedFile] : []),
       };
     })
-    .filter((entry) => String(entry.text || '').trim() || entry.images.length);
+    .filter((entry) => String(entry.text || '').trim() || entry.images.length || entry.files.length);
 }
 
 export function parseQuestionsFromExtraction({
@@ -229,6 +264,7 @@ export function parseQuestionsFromExtraction({
   ocrImageReferences = [],
 } = {}) {
   const attachmentImages = dedupeImages((attachments || []).map((item) => normalizeImageAttachment(item)).filter(Boolean));
+  const attachmentFiles = dedupeFiles((attachments || []).map((item) => normalizeFileAttachment(item)).filter(Boolean));
   const ocrImages = dedupeImages((ocrImageReferences || []).map((item) => normalizeImageAttachment(item)).filter(Boolean));
   const extractionSources = normalizeAttachmentExtractions(attachmentExtractions);
 
@@ -242,12 +278,14 @@ export function parseQuestionsFromExtraction({
   const sourceBlocks = [];
   let fallbackUsed = false;
   let attachedImageCount = 0;
+  let attachedFileCount = 0;
 
   if (extractionSources.length) {
     extractionSources.forEach((source) => {
       const parsed = parseSourceIntoBlocks(source);
       fallbackUsed = fallbackUsed || parsed.fallbackUsed;
       attachedImageCount += source.images.length;
+      attachedFileCount += source.files.length;
       sourceBlocks.push(...parsed.blocks);
     });
   }
@@ -256,9 +294,11 @@ export function parseQuestionsFromExtraction({
     const parsed = parseSourceIntoBlocks({
       text: extractedText,
       images: dedupeImages([...attachmentImages, ...ocrImages]),
+      files: attachmentFiles,
     });
     fallbackUsed = parsed.fallbackUsed;
     attachedImageCount += attachmentImages.length + ocrImages.length;
+    attachedFileCount += attachmentFiles.length;
     sourceBlocks.push(...parsed.blocks);
   } else {
     const extraImages = dedupeImages([
@@ -275,16 +315,33 @@ export function parseQuestionsFromExtraction({
       ];
       attachedImageCount += extraImages.length;
     }
+
+    const extraFiles = dedupeFiles(attachmentFiles.filter((file) => {
+      return !sourceBlocks.some((block) => (block.files || []).some((blockFile) => blockFile.url === file.url));
+    }));
+
+    if (extraFiles.length && sourceBlocks.length) {
+      sourceBlocks[0].files = [
+        ...(sourceBlocks[0].files || []),
+        ...extraFiles,
+      ];
+      attachedFileCount += extraFiles.length;
+    }
   }
 
   const finalBlocks = sourceBlocks.length
     ? sourceBlocks
-    : buildFallbackQuestion(cleanExtractedText(extractedText).cleanedText, dedupeImages([...attachmentImages, ...ocrImages]));
+    : buildFallbackQuestion(cleanExtractedText(extractedText).cleanedText, dedupeImages([...attachmentImages, ...ocrImages]))
+      .map((block, index) => ({
+        ...block,
+        files: index === 0 ? attachmentFiles : [],
+      }));
 
   debugLog('questionParsing', '[parse] finished.', {
     questionBlockCount: finalBlocks.length,
     fallbackUsed,
     attachedImageCount,
+    attachedFileCount,
   });
 
   return finalBlocks;

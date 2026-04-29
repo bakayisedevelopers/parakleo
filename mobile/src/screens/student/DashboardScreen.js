@@ -1,14 +1,43 @@
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { StatusBadge } from '../../components/ui/StatusBadge';
+import { LoadingState } from '../../components/ui/States';
+import { StudentRequestComposer } from '../../components/student/StudentRequestComposer';
 import { useAuth } from '../../context/AuthContext';
+import { subscribeToStudentRequests } from '../../services/classRequestService';
+import { subscribeToStudentSessions } from '../../services/sessionService';
 import { getStudentOnboardingStatus } from '../../utils/onboarding';
 import { colors } from '../../theme/colors';
 
 export function DashboardScreen({ navigate }) {
   const { user } = useAuth();
   const onboardingStatus = getStudentOnboardingStatus(user);
+  const [requests, setRequests] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+
+  useEffect(() => subscribeToStudentRequests(
+    user?.uid,
+    (items) => {
+      setRequests(items);
+      setLoadingRequests(false);
+    },
+    () => setLoadingRequests(false),
+  ), [user?.uid]);
+
+  useEffect(() => subscribeToStudentSessions(
+    user?.uid,
+    (items) => {
+      setSessions(items);
+      setLoadingSessions(false);
+    },
+    () => setLoadingSessions(false),
+  ), [user?.uid]);
+
+  if (loadingRequests || loadingSessions) {
+    return <LoadingState label="Loading dashboard" />;
+  }
 
   return (
     <View style={styles.wrap}>
@@ -16,28 +45,22 @@ export function DashboardScreen({ navigate }) {
         <Text style={styles.kicker}>Student dashboard</Text>
         <Text style={styles.title}>Hi {user?.displayName || 'there'}</Text>
       </View>
-      <Card style={styles.hero}>
-        <StatusBadge label={onboardingStatus.complete ? 'Ready' : 'Complete profile'} tone={onboardingStatus.complete ? 'success' : 'warning'} />
-        <Text style={styles.cardTitle}>Request flow placeholder</Text>
-        <Text style={styles.copy}>
-          {onboardingStatus.complete
-            ? 'The app shell is ready for the Phase 3 dashboard-first request creation flow.'
-            : onboardingStatus.message}
-        </Text>
-        <Button onPress={() => navigate(onboardingStatus.complete ? 'Requests' : 'Onboarding')}>
-          {onboardingStatus.complete ? 'View requests' : 'Complete profile'}
-        </Button>
-      </Card>
+      <StudentRequestComposer navigate={navigate} requests={requests} sessions={sessions} user={user} />
       <View style={styles.grid}>
         <Card style={styles.tile}>
           <Text style={styles.tileValue}>{user?.freeMinutesRemaining ?? 0}</Text>
           <Text style={styles.tileLabel}>Free minutes</Text>
         </Card>
         <Card style={styles.tile}>
-          <Text style={styles.tileValue}>ZAR</Text>
-          <Text style={styles.tileLabel}>Payment currency</Text>
+          <Text style={styles.tileValue}>{user?.paymentMethods?.length ?? 0}</Text>
+          <Text style={styles.tileLabel}>Saved cards</Text>
         </Card>
       </View>
+      {!onboardingStatus.complete ? (
+        <Card>
+          <Text style={styles.copy}>{onboardingStatus.message}</Text>
+        </Card>
+      ) : null}
     </View>
   );
 }
@@ -55,14 +78,6 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: 30,
-    fontWeight: '900',
-  },
-  hero: {
-    gap: 12,
-  },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 20,
     fontWeight: '900',
   },
   copy: {

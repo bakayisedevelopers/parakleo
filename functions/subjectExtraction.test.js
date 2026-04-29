@@ -1,12 +1,22 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractSubjectsAndMarks, normalizeSubjectName } = require('./subjectExtraction');
+const { extractSubjectsAndMarks, normalizeSubjectName, isAllowedGrade1To12Subject } = require('./subjectExtraction');
 
 test('normalizes common South African subject aliases', () => {
   assert.equal(normalizeSubjectName('Maths'), 'Mathematics');
   assert.equal(normalizeSubjectName('Physical Science'), 'Physical Sciences');
   assert.equal(normalizeSubjectName('Zulu'), 'IsiZulu');
   assert.equal(normalizeSubjectName('Math Lit'), 'Mathematical Literacy');
+  assert.equal(normalizeSubjectName('English FAL'), 'English');
+  assert.equal(normalizeSubjectName('Afrikaans HL'), 'Afrikaans');
+});
+
+test('allows only grade 1 to 12 school subjects', () => {
+  assert.equal(isAllowedGrade1To12Subject('Mathematics'), true);
+  assert.equal(isAllowedGrade1To12Subject('English FAL'), true);
+  assert.equal(isAllowedGrade1To12Subject('Afrikaans HL'), true);
+  assert.equal(isAllowedGrade1To12Subject('Psychology'), false);
+  assert.equal(isAllowedGrade1To12Subject('Financial Accounting'), false);
 });
 
 test('extracts subjects and percentage marks from result text', () => {

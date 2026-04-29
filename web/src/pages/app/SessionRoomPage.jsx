@@ -49,6 +49,21 @@ function useLiveSeconds(startTs) {
   return Math.max(0, Math.floor((tick - startTs) / 1000));
 }
 
+function useBillableSeconds(session, isActive) {
+  const [tick, setTick] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const accumulatedSeconds = Math.max(0, Number(session?.billedSeconds || 0));
+  const activeStartedAt = Number(session?.billingStartedAt || 0);
+  if (!isActive || !activeStartedAt) return accumulatedSeconds;
+
+  return accumulatedSeconds + Math.max(0, Math.floor((tick - activeStartedAt) / 1000));
+}
+
 function formatDuration(seconds) {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
@@ -147,6 +162,7 @@ export default function SessionRoomPage() {
   const [isPortraitMobile, setIsPortraitMobile] = useState(false);
   const [isLocalScreenSharing, setIsLocalScreenSharing] = useState(false);
   const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
+  const [isPeerConnected, setIsPeerConnected] = useState(false);
   const [remoteScreenStreamObj, setRemoteScreenStreamObj] = useState(null);
   const [showStudentControls, setShowStudentControls] = useState(true);
   const [hasAcceptedExtension, setHasAcceptedExtension] = useState(false);
@@ -170,7 +186,17 @@ export default function SessionRoomPage() {
   const previousStatusRef = useRef(null);
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
-  const billedSeconds = useLiveSeconds(session?.billingStartedAt);
+  const hasLiveRemoteScreenTrack = Boolean(
+    remoteScreenStreamObj
+      ?.getVideoTracks?.()
+      ?.some((track) => track.readyState === 'live'),
+  );
+  const isStudentBillableActive = role === 'student'
+    && session?.status === SESSION_STATUS.IN_PROGRESS
+    && isPeerConnected
+    && isRemoteScreenSharing
+    && hasLiveRemoteScreenTrack;
+  const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
   const ratingStatus = session?.ratingStatus?.[role] || 'pending';
   const needsRating = Boolean(session?.id)
     && isRatingPromptOpen
@@ -220,6 +246,7 @@ export default function SessionRoomPage() {
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     setShowStudentControls(true);
+    setIsPeerConnected(false);
     setHasAcceptedExtension(false);
     setGraceEndsAtMs(null);
     extensionPromptShownRef.current = false;
@@ -319,6 +346,38 @@ export default function SessionRoomPage() {
           return;
         }
 
+        if (item.type === 'file' && item.url) {
+          const assetId = AssetRecordType.createId();
+          assets.push({
+            id: assetId,
+            type: 'bookmark',
+            typeName: 'asset',
+            props: {
+              title: item.fileName || `Uploaded file ${index + 1}`,
+              description: item.mimeType || 'Original uploaded file',
+              image: '',
+              favicon: '',
+              src: item.url,
+            },
+            meta: {},
+          });
+
+          shapes.push({
+            id: createShapeId(),
+            type: 'bookmark',
+            parentId: editor.getCurrentPageId(),
+            x: item.position.x,
+            y: item.position.y,
+            props: {
+              assetId,
+              url: item.url,
+              w: item.width || 420,
+              h: item.height || 160,
+            },
+          });
+          return;
+        }
+
         if (item.type === 'image' && item.src) {
           const assetId = AssetRecordType.createId();
           assets.push({
@@ -356,6 +415,10 @@ export default function SessionRoomPage() {
       }
       if (shapes.length) {
         editor.createShapes(shapes);
+      }
+
+      if (shapes.length && typeof editor.setCamera === 'function') {
+        editor.setCamera({ x: 80, y: 80, z: 1 }, { immediate: true });
       }
 
       boardContentLoadedRef.current = true;
@@ -412,6 +475,46 @@ export default function SessionRoomPage() {
 
     previousStatusRef.current = currentStatus;
   }, [ratingStatus, session?.id, session?.status]);
+
+  useEffect(() => {
+    if (role !== 'student') return;
+    if (!session?.id) return;
+    if (![SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)) return;
+
+    const syncBillableClock = async () => {
+      const accumulatedSeconds = Math.max(0, Number(session.billedSeconds || 0));
+      const activeStartedAt = Number(session.billingStartedAt || 0);
+
+      if (isStudentBillableActive) {
+        if (activeStartedAt) return;
+
+        await updateSession(session.id, {
+          billingStartedAt: Date.now(),
+          billedSeconds: accumulatedSeconds,
+        });
+        return;
+      }
+
+      if (!activeStartedAt) return;
+
+      const nextBilledSeconds = accumulatedSeconds + Math.max(0, Math.floor((Date.now() - activeStartedAt) / 1000));
+      await updateSession(session.id, {
+        billingStartedAt: null,
+        billedSeconds: nextBilledSeconds,
+      });
+    };
+
+    syncBillableClock().catch((error) => {
+      setNetworkError(error.message || 'Unable to update billable time.');
+    });
+  }, [
+    isStudentBillableActive,
+    role,
+    session?.billingStartedAt,
+    session?.billedSeconds,
+    session?.id,
+    session?.status,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -628,6 +731,7 @@ export default function SessionRoomPage() {
         onNetworkFailure: (message) => setNetworkError(message),
 
         onSessionState: async (state) => {
+          setIsPeerConnected(state === 'connected');
           if (state !== 'connected') return;
           if (connectionStartRecordedRef.current) return;
           connectionStartRecordedRef.current = true;
@@ -635,9 +739,6 @@ export default function SessionRoomPage() {
           const updates = {};
           if (!session.callStartedAt) {
             updates.callStartedAt = Date.now();
-          }
-          if (!session.billingStartedAt) {
-            updates.billingStartedAt = Date.now();
           }
 
           if (Object.keys(updates).length > 0) {
@@ -771,7 +872,7 @@ export default function SessionRoomPage() {
       const shouldExtend = window.confirm('Your selected lesson time is almost up. Continue and get a 2-minute grace period?');
       if (shouldExtend) {
         setHasAcceptedExtension(true);
-        setGraceEndsAtMs(Number(session.billingStartedAt) + ((selectedDurationSeconds + 120) * 1000));
+        setGraceEndsAtMs(Date.now() + (Math.max(0, selectedDurationSeconds + 120 - elapsedSeconds) * 1000));
       }
     }
 
@@ -853,9 +954,6 @@ export default function SessionRoomPage() {
           <StageBadge icon={Clock3} className="bg-[#1b2230]/98">
             Call {formatDuration(callSeconds)}
           </StageBadge>
-          <StageBadge icon={BadgeDollarSign} className="bg-[#1b2230]/98">
-            Billable {formatDuration(billedSeconds)}
-          </StageBadge>
         </div>
       </div>
     </div>
@@ -870,6 +968,9 @@ export default function SessionRoomPage() {
       <div className="rounded-[22px] border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-2">
           <StageBadge icon={Clock3}>Call length {formatDuration(callSeconds)}</StageBadge>
+          <StageBadge icon={BadgeDollarSign} tone={isStudentBillableActive ? 'success' : 'warning'}>
+            Billable {formatDuration(billedSeconds)}
+          </StageBadge>
 
           <StageBadge icon={Wifi} tone={connectionTone}>
             {connectionMessage || 'Connecting…'}

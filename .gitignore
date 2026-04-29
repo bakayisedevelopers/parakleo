@@ -4,3 +4,4 @@ node_modules
 web/node_models
 web/dist
 mobile/.expo/
+.firebase-config/

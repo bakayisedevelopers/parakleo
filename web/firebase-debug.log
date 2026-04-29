@@ -1,0 +1,22 @@
+[debug] [2026-04-29T07:58:27.562Z] ----------------------------------------------------------------------
+[debug] [2026-04-29T07:58:27.566Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Jabu Babb\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions
+[debug] [2026-04-29T07:58:27.567Z] CLI Version:   15.15.0
+[debug] [2026-04-29T07:58:27.567Z] Platform:      win32
+[debug] [2026-04-29T07:58:27.567Z] Node Version:  v24.15.0
+[debug] [2026-04-29T07:58:27.568Z] Time:          Wed Apr 29 2026 09:58:27 GMT+0200 (South Africa Standard Time)
+[debug] [2026-04-29T07:58:27.568Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-29T07:58:29.528Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-29T07:58:29.528Z] > authorizing via signed-in user (bakayise.developers@gmail.com)
+[debug] [2026-04-29T07:58:29.528Z] [iam] checking project claxi-bakayise for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-04-29T07:58:29.530Z] Checked if tokens are valid: true, expires at: 1777453088231
+[debug] [2026-04-29T07:58:29.530Z] Checked if tokens are valid: true, expires at: 1777453088231
+[debug] [2026-04-29T07:58:29.531Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions [none]
+[debug] [2026-04-29T07:58:29.531Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions  x-goog-user-project=claxi-bakayise
+[debug] [2026-04-29T07:58:29.531Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-04-29T07:58:31.276Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions 200
+[debug] [2026-04-29T07:58:31.276Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-04-29T07:58:31.276Z] Checked if tokens are valid: true, expires at: 1777453088231
+[debug] [2026-04-29T07:58:31.276Z] Checked if tokens are valid: true, expires at: 1777453088231
+[debug] [2026-04-29T07:58:31.276Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-04-29T07:58:31.276Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}

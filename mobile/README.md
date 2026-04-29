@@ -40,7 +40,7 @@ Keep the mobile migration aligned with both the declared web ranges and the curr
 | `tailwindcss` | `^3.4.1` | `3.4.19` |
 | `vite` | `^5.0.8` | `5.4.21` |
 
-Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `expo-status-bar@~2.2.3`, `firebase@^11.10.0`, `react@19.0.0`, and `react-native@0.79.6`. Phase 0 keeps this Expo SDK 53-compatible runtime baseline.
+Current mobile packages in `mobile/package.json` are `expo@~54.0.34`, `expo-status-bar@~3.0.9`, `firebase@^11.10.0`, `react@19.1.0`, `react-native@0.81.5`, and `react-native-webview@13.15.0`. The app was upgraded from SDK 53 to SDK 54 so it runs in the current Expo Go app on physical phones.
 
 ### Student-relevant feature set detected in the current app
 
@@ -77,7 +77,7 @@ Current mobile starter packages in `mobile/package.json` are `expo@^53.0.0`, `ex
 
 | Current web package/capability | React Native counterpart(s) | Notes |
 |---|---|---|
-| `react@18.3.1`, `react-dom@18.3.1`, Vite app shell | `react@19.0.0`, `react-native@0.79.6`, `expo@^53.0.0` | Current mobile app uses the Expo SDK 53-compatible React Native baseline from `mobile/package.json`; keep Expo compatibility first. |
+| `react@18.3.1`, `react-dom@18.3.1`, Vite app shell | `react@19.1.0`, `react-native@0.81.5`, `expo@~54.0.34` | Current mobile app uses the Expo SDK 54-compatible React Native baseline from `mobile/package.json`; keep Expo Go compatibility first. |
 | `react-router-dom@6.30.3` | `@react-navigation/native`, `@react-navigation/native-stack`, drawer/sidebar navigation | Navigation/route guards for auth + student app areas. Mirror `/app/student`, `/app/student/requests`, `/app/student/payment`, `/app/profile`, `/app/onboarding`, and `/app/session/:id` with the web topbar/sidebar pattern. |
 | `firebase@11.10.0` (auth/firestore/storage/functions) | `firebase@11.10.0` JS SDK (modular) in RN + `@react-native-async-storage/async-storage` | Keep shared backend, Firestore schema, Storage paths, and auth persistence aligned with web. |
 | `lucide-react@0.307.0` icons | `lucide-react-native@0.307.0` | Pin to the matching icon set version where Expo compatibility allows. |
@@ -119,7 +119,7 @@ Status: Completed
 Results:
 - Confirmed the student-only route inventory and preserved the mobile scope guardrail: auth, protected student shell, dashboard, requests, sessions/classes, wallet, profile, with onboarding/request details/session room reserved for later phases.
 - Added `mobile/docs/phase-0-architecture.md` with accepted stack, rejected alternatives, endpoint strategy, and carry-forward decisions.
-- Froze the current mobile runtime baseline around Expo SDK 53, React 19, React Native 0.79.6, and Firebase 11.10.0 as currently present in `mobile/package.json`.
+- Froze the current mobile runtime baseline around Expo SDK 54, React 19.1.0, React Native 0.81.5, and Firebase 11.10.0 as currently present in `mobile/package.json`.
 - Selected WebView-hosted `tldraw@4.5.9` as the first whiteboard candidate for Phase 5 and kept native canvas as a rejected alternative for now.
 - Selected Paystack mobile authorization plus existing backend verification as the payment direction.
 - Migration rule for this phase: architecture decisions must preserve web parity first; alternatives are accepted only when exact web behavior is impossible in React Native.
@@ -209,6 +209,18 @@ Results:
 ---
 
 ### Phase 3 — Class request creation + attachments + pricing
+
+Status: Completed
+
+Results:
+- Replaced the dashboard placeholder with a live dashboard-first request composer in `mobile/src/components/student/StudentRequestComposer.js` and `mobile/src/screens/student/DashboardScreen.js`.
+- Added camera/upload entry for image and PDF attachments through a `react-native-webview` picker bridge so the mobile flow preserves the web request entry pattern without changing the web application.
+- Added production mobile service boundaries for pricing quote, attachment OCR, subject classification, Storage upload, and request persistence in `mobile/src/services/`.
+- Added review-before-confirm flow with quick suggestions, typed request text, extracted attachment state, detected/manual subject handling, estimated/selectable duration, free-minute preview, selected saved card, and pricing snapshot lock.
+- Extended the mobile request write path to persist the web-compatible request fields: `pricingSnapshot`, `pricingQuoteId`, `attachments`, `selectedCardId`, and `boardPreparationSource`.
+- Updated the student request list surface to show lifecycle labels, duration, quote summary, and attachment counts from live requests.
+- Added additive backend PDF OCR support to the existing `extractImageOcr` endpoint so mobile attachments can stay on the production OCR path while web image behavior remains unchanged.
+- Migration rule for this phase: React Native uses a WebView-backed chooser plus server-side PDF OCR because the web `input[type=file]` plus `pdfjs` client path is browser-specific.
 
 Migration rule for this phase: copy the web dashboard-first request creation flow exactly, including quick suggestions, typed request fields, attachment processing states, OCR/classification behavior, pricing quote, free-minute preview, selected card, and review-before-confirm.
 

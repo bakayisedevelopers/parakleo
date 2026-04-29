@@ -16,16 +16,77 @@ const {
 } = require('./pricingEngine');
 const {
   normalizeSubjectName,
+  isAllowedGrade1To12Subject,
 } = require('./subjectExtraction');
 const {
   convertPdfToImages,
   extractSubjectsWithAI,
   classifySubjectWithAI,
+  validateSubjectClassification,
 } = require('./aiSubjectExtraction');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+
+async function writeAiLog({
+  userId,
+  source,
+  status,
+  prompt = '',
+  rawOutput = '',
+  error = '',
+  details = {},
+}) {
+  if (!userId) return null;
+
+  const logId = randomUUID();
+  await db.collection('users').doc(userId).collection('aiLogs').doc(logId).set({
+    source: source || '',
+    status: status || 'unknown',
+    prompt: prompt || '',
+    rawOutput: rawOutput || '',
+    error: error || '',
+    details: details || {},
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAtMs: Date.now(),
+  }, { merge: true });
+
+  return logId;
+}
+
+async function recordUnsupportedSubjectRequestOnServer({
+  subject,
+  inputText = '',
+  uid = '',
+}) {
+  const normalizedSubject = String(subject || '').replace(/\s+/g, ' ').trim();
+  if (!normalizedSubject) return null;
+
+  const demandId = normalizedSubject
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'unknown-subject';
+
+  const demandRef = db.collection('unsupportedSubjectRequests').doc(demandId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(demandRef);
+    const existing = snapshot.exists ? (snapshot.data() || {}) : {};
+    transaction.set(demandRef, {
+      subject: existing.subject || normalizedSubject,
+      normalizedSubject: normalizedSubject.toLowerCase(),
+      count: Number(existing.count || 0) + 1,
+      lastInputPreview: String(inputText || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+      lastRequestedBy: uid || null,
+      lastRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+
+  return { subject: normalizedSubject };
+}
 
 const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
 const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
@@ -58,6 +119,9 @@ const DEFAULT_RATING = 4.5;
 const DEFAULT_AVG_RESPONSE_SECONDS = 30;
 const DEFAULT_CANCELLATION_RATE = 0.08;
 const FAIRNESS_WORKLOAD_CAP = 10;
+const TUTOR_STATS_MAX_EVENTS = 100;
+const TUTOR_STATS_ROLLING_DAYS = 30;
+const TUTOR_STATS_RECENT_ASSIGNMENT_DAYS = 7;
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
 const REFERRAL_REWARD_MINUTES = 30;
 const REQUEST_STATUS = {
@@ -71,6 +135,14 @@ const REQUEST_STATUS = {
   CANCELED_DURING: 'canceled_during',
   EXPIRED: 'expired',
   NO_TUTOR_AVAILABLE: 'no_tutor_available',
+};
+const SESSION_STATUS = {
+  WAITING_STUDENT: 'waiting_student',
+  IN_PROGRESS: 'in_progress',
+  IN_SESSION: 'in_session',
+  COMPLETED: 'completed',
+  CANCELED: 'canceled',
+  CANCELED_DURING: 'canceled_during',
 };
 const ACTIVE_REQUEST_STATUSES = new Set([
   REQUEST_STATUS.PENDING,
@@ -185,6 +257,204 @@ function normalizePositiveNumber(value, fallback) {
   return numeric;
 }
 
+function getTutorStatsWindowStartMs(days) {
+  return Date.now() - (Math.max(1, Number(days || 1)) * 24 * 60 * 60 * 1000);
+}
+
+function normalizeStatsEventTimestamp(value) {
+  const numeric = normalizeMillis(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function getTutorStatsCollections(uid) {
+  const userRef = db.collection('users').doc(uid);
+  return {
+    userRef,
+    offerEventsRef: userRef.collection('tutorStatsOfferEvents'),
+    sessionEventsRef: userRef.collection('tutorStatsSessionEvents'),
+  };
+}
+
+function buildTutorStatsSummary(existingProfile = {}, existingStats = {}, rollups = {}) {
+  return {
+    acceptanceRate: rollups.acceptanceRate ?? existingProfile.acceptanceRate ?? existingStats.acceptanceRate ?? DEFAULT_ACCEPTANCE_RATE,
+    completionRate: rollups.completionRate ?? existingProfile.completionRate ?? existingStats.completionRate ?? DEFAULT_COMPLETION_RATE,
+    cancellationRate: rollups.cancellationRate ?? existingProfile.cancellationRate ?? existingStats.cancellationRate ?? DEFAULT_CANCELLATION_RATE,
+    avgResponseSeconds: rollups.avgResponseSeconds ?? existingProfile.avgResponseSeconds ?? existingStats.avgResponseSeconds ?? DEFAULT_AVG_RESPONSE_SECONDS,
+    recentAssignmentsCount: rollups.recentAssignmentsCount ?? existingProfile.recentAssignmentsCount ?? existingStats.recentAssignmentsCount ?? 0,
+    statsWindow: {
+      rollingDays: TUTOR_STATS_ROLLING_DAYS,
+      maxEvents: TUTOR_STATS_MAX_EVENTS,
+      recentAssignmentsDays: TUTOR_STATS_RECENT_ASSIGNMENT_DAYS,
+    },
+    statsUpdatedAt: new Date().toISOString(),
+  };
+}
+
+async function storeTutorStatsEvent({ uid, collectionRef, eventId, payload }) {
+  if (!uid || !collectionRef || !eventId) return;
+  await collectionRef.doc(eventId).set({
+    ...payload,
+    uid,
+    updatedAtMs: Date.now(),
+  }, { merge: true });
+}
+
+async function computeTutorDerivedStats(uid) {
+  if (!uid) return null;
+
+  const { userRef, offerEventsRef, sessionEventsRef } = getTutorStatsCollections(uid);
+  const [userSnap, offerSnap, sessionSnap] = await Promise.all([
+    userRef.get(),
+    offerEventsRef.orderBy('occurredAtMs', 'desc').limit(TUTOR_STATS_MAX_EVENTS).get(),
+    sessionEventsRef.orderBy('occurredAtMs', 'desc').limit(TUTOR_STATS_MAX_EVENTS).get(),
+  ]);
+
+  const userData = userSnap.exists ? (userSnap.data() || {}) : {};
+  const existingProfile = userData.tutorProfile || {};
+  const existingStats = userData.stats || {};
+
+  const now = Date.now();
+  const thirtyDaysAgo = getTutorStatsWindowStartMs(TUTOR_STATS_ROLLING_DAYS);
+  const sevenDaysAgo = getTutorStatsWindowStartMs(TUTOR_STATS_RECENT_ASSIGNMENT_DAYS);
+
+  const offerEvents = offerSnap.docs
+    .map((snap) => ({ id: snap.id, ...snap.data() }))
+    .filter((event) => normalizeStatsEventTimestamp(event.closedAtMs || event.occurredAtMs) >= thirtyDaysAgo);
+  const closedOffers = offerEvents.filter((event) => ['accepted', 'declined', 'expired'].includes(String(event.outcome || '').toLowerCase()));
+  const acceptedOffers = closedOffers.filter((event) => String(event.outcome || '').toLowerCase() === 'accepted');
+
+  const offerDenominator = closedOffers.length;
+  const acceptanceRate = offerDenominator > 0
+    ? Number((acceptedOffers.length / offerDenominator).toFixed(4))
+    : null;
+
+  const acceptedResponseTimes = acceptedOffers
+    .map((event) => Number(event.responseSeconds || 0))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  const avgResponseSeconds = acceptedResponseTimes.length
+    ? Number((acceptedResponseTimes.reduce((sum, value) => sum + value, 0) / acceptedResponseTimes.length).toFixed(2))
+    : null;
+
+  const recentAssignmentsCount = acceptedOffers.filter((event) => normalizeStatsEventTimestamp(event.closedAtMs || event.occurredAtMs) >= sevenDaysAgo).length;
+
+  const sessionEvents = sessionSnap.docs
+    .map((snap) => ({ id: snap.id, ...snap.data() }))
+    .filter((event) => normalizeStatsEventTimestamp(event.occurredAtMs) >= thirtyDaysAgo);
+  const completedSessions = sessionEvents.filter((event) => String(event.outcome || '').toLowerCase() === 'completed');
+  const tutorCanceledSessions = sessionEvents.filter((event) => {
+    const outcome = String(event.outcome || '').toLowerCase();
+    const canceledBy = String(event.canceledBy || '').toLowerCase();
+    return ['canceled', 'canceled_during'].includes(outcome) && (canceledBy === 'tutor' || canceledBy === 'tutor_user' || canceledBy === 'tutor_account');
+  });
+  const sessionDenominator = completedSessions.length + tutorCanceledSessions.length;
+  const completionRate = sessionDenominator > 0
+    ? Number((completedSessions.length / sessionDenominator).toFixed(4))
+    : null;
+  const cancellationRate = sessionDenominator > 0
+    ? Number((tutorCanceledSessions.length / sessionDenominator).toFixed(4))
+    : null;
+
+  const rollups = {
+    acceptanceRate,
+    completionRate,
+    cancellationRate,
+    avgResponseSeconds,
+    recentAssignmentsCount,
+  };
+  const summary = buildTutorStatsSummary(existingProfile, existingStats, rollups);
+
+  const updatePayload = {
+    tutorProfile: {
+      ...existingProfile,
+      ...summary,
+      statsWindow: summary.statsWindow,
+      statsUpdatedAt: summary.statsUpdatedAt,
+    },
+    stats: {
+      ...existingStats,
+      ...summary,
+      statsWindow: summary.statsWindow,
+      statsUpdatedAt: summary.statsUpdatedAt,
+      computedAtMs: now,
+    },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await userRef.set(updatePayload, { merge: true });
+  return summary;
+}
+
+async function recordTutorOfferLifecycleEvent({
+  tutorId,
+  requestId,
+  offerRevision,
+  subject,
+  outcome,
+  offeredAtMs,
+  closedAtMs,
+  responseSeconds,
+  sourceStatus,
+}) {
+  if (!tutorId || !requestId) return null;
+
+  const { offerEventsRef } = getTutorStatsCollections(tutorId);
+  const eventId = `${requestId}_${Number(offerRevision || 0) || 0}`;
+  const payload = {
+    tutorId,
+    requestId,
+    offerRevision: Number(offerRevision || 0) || 0,
+    subject: subject || '',
+    outcome,
+    occurredAtMs: normalizeStatsEventTimestamp(offeredAtMs) || Date.now(),
+    offeredAtMs: normalizeStatsEventTimestamp(offeredAtMs) || Date.now(),
+    closedAtMs: normalizeStatsEventTimestamp(closedAtMs) || null,
+    responseSeconds: Number.isFinite(Number(responseSeconds)) ? Number(responseSeconds) : null,
+    sourceStatus: sourceStatus || '',
+  };
+
+  await storeTutorStatsEvent({
+    uid: tutorId,
+    collectionRef: offerEventsRef,
+    eventId,
+    payload,
+  });
+
+  return computeTutorDerivedStats(tutorId);
+}
+
+async function recordTutorSessionLifecycleEvent({
+  tutorId,
+  sessionId,
+  requestId,
+  outcome,
+  canceledBy,
+  startedAtMs,
+  occurredAtMs,
+}) {
+  if (!tutorId || !sessionId) return null;
+
+  const { sessionEventsRef } = getTutorStatsCollections(tutorId);
+  const payload = {
+    tutorId,
+    sessionId,
+    requestId: requestId || '',
+    outcome,
+    canceledBy: canceledBy || null,
+    startedAtMs: normalizeStatsEventTimestamp(startedAtMs) || null,
+    occurredAtMs: normalizeStatsEventTimestamp(occurredAtMs) || Date.now(),
+  };
+
+  await storeTutorStatsEvent({
+    uid: tutorId,
+    collectionRef: sessionEventsRef,
+    eventId: sessionId,
+    payload,
+  });
+
+  return computeTutorDerivedStats(tutorId);
+}
+
 function hasCompletedStudentProfile(user = {}) {
   const studentProfile = user?.studentProfile || {};
   const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
@@ -265,6 +535,27 @@ function normalizeActiveSubjects(values = []) {
 
 function buildQualifiedSubjects(extractedSubjects = []) {
   return extractedSubjects.filter((item) => Number(item.mark) >= 60);
+}
+
+function validateTutorSchoolSubjects(extractedSubjects = []) {
+  const normalizedSubjects = extractedSubjects
+    .map((item) => ({
+      rawSubject: String(item?.subject || '').trim(),
+      subject: normalizeSubjectName(item?.subject) || String(item?.subject || '').trim(),
+      mark: Number(item?.mark || 0),
+    }))
+    .filter((item) => item.subject && Number.isFinite(item.mark));
+
+  const allowedSubjects = normalizedSubjects.filter((item) => isAllowedGrade1To12Subject(item.rawSubject));
+  const unsupportedSubjects = [...new Set(normalizedSubjects
+    .filter((item) => !isAllowedGrade1To12Subject(item.rawSubject))
+    .map((item) => item.subject))];
+
+  return {
+    normalizedSubjects,
+    allowedSubjects,
+    unsupportedSubjects,
+  };
 }
 
 async function mergeTutorQualifiedSubjects({ uid, docId, qualifiedSubjects }) {
@@ -490,6 +781,119 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
   });
 });
 
+exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+
+  const requestId = event.params.requestId;
+  const now = Date.now();
+  const beforeStatus = String(before?.status || '').toLowerCase();
+  const afterStatus = String(after.status || '').toLowerCase();
+  const beforeTutorId = before?.currentOfferTutorId || null;
+  const afterTutorId = after.currentOfferTutorId || null;
+  const tutorId = after.tutorId || before?.tutorId || afterTutorId || beforeTutorId || null;
+  const offerRevision = Number(after.offerRevision || before?.offerRevision || 0) || 0;
+  const subject = after.subject || before?.subject || '';
+  const offeredAtMs = normalizeStatsEventTimestamp(
+    after.lastOfferAt
+      || before?.lastOfferAt
+      || after.offerExpiresAt
+      || before?.offerExpiresAt,
+  ) || now;
+
+  if (afterStatus === REQUEST_STATUS.OFFERED && afterTutorId) {
+    const didChangeOffer =
+      beforeStatus !== REQUEST_STATUS.OFFERED
+      || beforeTutorId !== afterTutorId
+      || Number(before?.offerRevision || 0) !== offerRevision;
+
+    if (didChangeOffer) {
+      await recordTutorOfferLifecycleEvent({
+        tutorId: afterTutorId,
+        requestId,
+        offerRevision,
+        subject,
+        outcome: 'offered',
+        offeredAtMs,
+        sourceStatus: afterStatus,
+      });
+    }
+  }
+
+  if (afterStatus === REQUEST_STATUS.ACCEPTED && tutorId) {
+    const responseSeconds = Math.max(0, Math.round((now - offeredAtMs) / 1000));
+    await recordTutorOfferLifecycleEvent({
+      tutorId,
+      requestId,
+      offerRevision,
+      subject,
+      outcome: 'accepted',
+      offeredAtMs,
+      closedAtMs: now,
+      responseSeconds,
+      sourceStatus: afterStatus,
+    });
+    return;
+  }
+
+  const movedOffOffer = beforeStatus === REQUEST_STATUS.OFFERED
+    && beforeTutorId
+    && (afterTutorId !== beforeTutorId || afterStatus !== REQUEST_STATUS.OFFERED);
+
+  if (movedOffOffer && tutorId && beforeTutorId === tutorId) {
+    const expiredByTime = normalizeStatsEventTimestamp(before?.offerExpiresAt) > 0
+      && normalizeStatsEventTimestamp(before.offerExpiresAt) <= now;
+    const outcome = afterStatus === REQUEST_STATUS.EXPIRED || expiredByTime
+      ? 'expired'
+      : 'declined';
+
+    if (outcome !== 'declined' || afterStatus === REQUEST_STATUS.EXPIRED || afterStatus === REQUEST_STATUS.NO_TUTOR_AVAILABLE || afterStatus === REQUEST_STATUS.MATCHING) {
+      await recordTutorOfferLifecycleEvent({
+        tutorId: beforeTutorId,
+        requestId,
+        offerRevision,
+        subject,
+        outcome,
+        offeredAtMs,
+        closedAtMs: now,
+        sourceStatus: afterStatus,
+      });
+    }
+  }
+});
+
+exports.trackTutorSessionStats = onDocumentWritten('sessions/{sessionId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+
+  const beforeStatus = String(before?.status || '').toLowerCase();
+  const afterStatus = String(after.status || '').toLowerCase();
+  if (beforeStatus === afterStatus) return;
+  if (![SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELED, SESSION_STATUS.CANCELED_DURING].includes(after.status)) {
+    return;
+  }
+
+  const tutorId = after.tutorId || before?.tutorId || null;
+  if (!tutorId) return;
+
+  const requestId = after.requestId || before?.requestId || '';
+  const outcome = after.status === SESSION_STATUS.COMPLETED ? 'completed' : after.status;
+  const occurredAtMs = normalizeStatsEventTimestamp(after.endedAt || after.updatedAt || after.completedAt || Date.now());
+  const startedAtMs = normalizeStatsEventTimestamp(after.billingStartedAt || after.studentJoinedAt || after.callStartedAt || before?.billingStartedAt || before?.studentJoinedAt || before?.callStartedAt);
+
+  await recordTutorSessionLifecycleEvent({
+    tutorId,
+    sessionId: event.params.sessionId,
+    requestId,
+    outcome,
+    canceledBy: after.canceledBy || before?.canceledBy || null,
+    startedAtMs,
+    occurredAtMs,
+  });
+});
+
 async function processTutorDocumentRecord({ docId, data = {} }) {
   const docRef = db.collection('tutorDocuments').doc(docId);
   console.debug('[tutorResultsAI] processing document record', {
@@ -522,6 +926,19 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
   console.debug('[tutorResultsAI] document marked processing', { docId, uid: data.uid });
+  await writeAiLog({
+    userId: data.uid,
+    source: 'tutor_results_extraction',
+    step: 'processing_started',
+    status: 'info',
+    message: 'Tutor document processing started.',
+    details: {
+      docId,
+      filePath: data.filePath,
+      fileName: data.fileName || '',
+      contentType: data.contentType || '',
+    },
+  });
 
   try {
     const bucket = admin.storage().bucket();
@@ -539,6 +956,18 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       filePath: data.filePath,
       byteLength: documentBuffer.length,
     });
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'document_downloaded',
+      status: 'info',
+      message: 'Tutor document downloaded from storage.',
+      details: {
+        docId,
+        filePath: data.filePath,
+        byteLength: documentBuffer.length,
+      },
+    });
     logger.info('tutor_document_downloaded', {
       docId,
       uid: data.uid,
@@ -554,13 +983,26 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       imageCount: images.length,
       imageBytes: images.map((image) => image.length),
     });
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'document_converted_to_images',
+      status: 'info',
+      message: 'Tutor document converted to images.',
+      details: {
+        docId,
+        filePath: data.filePath,
+        imageCount: images.length,
+        imageBytes: images.map((image) => image.length),
+      },
+    });
     logger.info('tutor_document_images_ready', {
       docId,
       uid: data.uid,
       imageCount: images.length,
       imageBytes: images.map((image) => image.length),
     });
-    const extractedSubjects = await extractSubjectsWithAI(images, {
+    const aiResult = await extractSubjectsWithAI(images, {
       logger,
       logContext: {
         docId,
@@ -568,16 +1010,87 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       },
       firebaseConfig: aiConfig,
     });
+    const extractedSubjects = aiResult.validated;
+    const aiPrompt = aiResult.prompt;
+    const aiRawOutput = aiResult.rawOutput;
+    const aiReasoning = aiResult.reasoning || '';
+
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'ai_response_received',
+      status: extractedSubjects.length ? 'success' : 'fallback',
+      message: 'Tutor extraction AI response received.',
+      prompt: aiPrompt,
+      rawOutput: aiRawOutput,
+      error: aiResult.error || '',
+      details: {
+        docId,
+        filePath: data.filePath,
+        reasoning: aiReasoning,
+        extractedSubjectCount: extractedSubjects.length,
+      },
+    });
+
     console.debug('[tutorResultsAI] extracted subjects result', {
       docId,
       uid: data.uid,
       extractedSubjects,
     });
 
+    const tutorSubjectValidation = validateTutorSchoolSubjects(extractedSubjects);
+    const { allowedSubjects, unsupportedSubjects } = tutorSubjectValidation;
+
+    if (unsupportedSubjects.length) {
+      console.debug('[tutorResultsAI] unsupported grade 1-12 tutor subjects detected', {
+        docId,
+        uid: data.uid,
+        unsupportedSubjects,
+      });
+      await writeAiLog({
+        userId: data.uid,
+        source: 'tutor_results_extraction',
+        step: 'subjects_rejected',
+        status: 'failed',
+        message: 'Tutor subjects outside the Grade 1-12 allowlist were detected.',
+        details: {
+          docId,
+          filePath: data.filePath,
+          unsupportedSubjects,
+          allowedSubjects,
+        },
+      });
+      if (!(await docRef.get()).exists) return;
+      await docRef.set({
+        extractedSubjects,
+        qualifiedSubjects: [],
+        status: 'FAILED',
+        error: `Unsupported subject(s): ${unsupportedSubjects.join(', ')}`,
+        aiPrompt,
+        aiRawOutput,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
     if (!extractedSubjects.length) {
       console.debug('[tutorResultsAI] no subjects detected in document', {
         docId,
         uid: data.uid,
+      });
+      await writeAiLog({
+        userId: data.uid,
+        source: 'tutor_results_extraction',
+        status: 'no_subjects_found',
+        prompt: aiPrompt,
+        rawOutput: aiRawOutput,
+        error: '',
+        details: {
+          docId,
+          filePath: data.filePath,
+          extractedSubjectCount: 0,
+          reasoning: aiReasoning,
+        },
       });
       if (!(await docRef.get()).exists) return;
       await docRef.set({
@@ -585,16 +1098,31 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
         qualifiedSubjects: [],
         status: 'FAILED',
         error: 'No subjects detected',
+        aiPrompt,
+        aiRawOutput,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
       return;
     }
 
-    const qualifiedSubjects = buildQualifiedSubjects(extractedSubjects);
+    const qualifiedSubjects = buildQualifiedSubjects(allowedSubjects);
     console.debug('[tutorResultsAI] qualified subjects built', {
       docId,
       uid: data.uid,
       qualifiedSubjects,
+    });
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'subjects_validated',
+      status: 'success',
+      message: 'Tutor subjects validated.',
+      details: {
+        docId,
+        filePath: data.filePath,
+        extractedSubjects,
+        qualifiedSubjects,
+      },
     });
 
     if (!(await docRef.get()).exists) return;
@@ -603,8 +1131,26 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       qualifiedSubjects,
       status: 'VERIFIED',
       error: null,
+      aiPrompt,
+      aiRawOutput,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      status: 'success',
+      prompt: aiPrompt,
+      rawOutput: aiRawOutput,
+      error: '',
+      details: {
+        docId,
+        filePath: data.filePath,
+        extractedSubjectCount: extractedSubjects.length,
+        qualifiedSubjectCount: qualifiedSubjects.length,
+        reasoning: aiReasoning,
+      },
+    });
 
     await mergeTutorQualifiedSubjects({
       uid: data.uid,
@@ -612,6 +1158,19 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       qualifiedSubjects,
     });
     await refreshGlobalSubjects();
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'processing_completed',
+      status: 'success',
+      message: 'Tutor document processing completed.',
+      details: {
+        docId,
+        filePath: data.filePath,
+        extractedSubjectCount: extractedSubjects.length,
+        qualifiedSubjectCount: qualifiedSubjects.length,
+      },
+    });
 
     logger.info('Tutor document processed.', {
       docId,
@@ -625,10 +1184,34 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       uid: data.uid,
       error: error.message,
     });
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      step: 'processing_failed',
+      status: 'failed',
+      message: 'Tutor document processing failed.',
+      error: error.message || 'Document processing failed.',
+      details: {
+        docId,
+        filePath: data.filePath,
+      },
+    });
     logger.error('Tutor document processing failed.', {
       docId,
       uid: data.uid,
       error: error.message,
+    });
+    await writeAiLog({
+      userId: data.uid,
+      source: 'tutor_results_extraction',
+      status: 'failed',
+      prompt: '',
+      rawOutput: '',
+      error: error.message || 'Document processing failed.',
+      details: {
+        docId,
+        filePath: data.filePath,
+      },
     });
     if (!(await docRef.get()).exists) return;
     await docRef.set({
@@ -912,6 +1495,70 @@ function getBearerToken(req) {
 
 function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
+}
+
+function isPdfAttachmentBuffer(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.slice(0, 5).toString('utf8') === '%PDF-';
+}
+
+async function runVisionOcrOnBuffer(imageBuffer) {
+  const [ocrResponse] = await getVisionClient().documentTextDetection({
+    image: { content: imageBuffer },
+  });
+
+  const rawText = ocrResponse?.fullTextAnnotation?.text || ocrResponse?.textAnnotations?.[0]?.description || '';
+  const extractedText = normalizeExtractedText(rawText);
+
+  return {
+    extractedText,
+    textLength: extractedText.length,
+  };
+}
+
+async function runPdfVisionOcr(pdfBuffer) {
+  const images = await convertPdfToImages(pdfBuffer, {});
+  const pages = [];
+
+  for (let index = 0; index < images.length; index += 1) {
+    const ocrResult = await runVisionOcrOnBuffer(images[index]);
+    pages.push({
+      pageNumber: index + 1,
+      extractionMethod: 'vision_ocr',
+      text: ocrResult.extractedText,
+      extractedText: ocrResult.extractedText,
+      textLength: ocrResult.textLength,
+      extractionQuality: ocrResult.textLength > 0 ? 'good' : 'failed',
+      success: ocrResult.textLength > 0,
+      status: ocrResult.textLength > 0 ? 'complete' : 'failed',
+    });
+  }
+
+  const extractedText = pages
+    .map((page) => page.extractedText)
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+  const failedPageCount = pages.filter((page) => !page.success).length;
+
+  return {
+    success: extractedText.length > 0,
+    extractedText,
+    text: extractedText,
+    textLength: extractedText.length,
+    extractionMethod: 'pdf_ocr',
+    provider: 'google-vision',
+    fileType: 'pdf',
+    extractionQuality: extractedText.length > 0 ? (failedPageCount ? 'poor' : 'good') : 'failed',
+    scannedPdfDetected: true,
+    ocrStatus: failedPageCount ? (extractedText.length > 0 ? 'partial' : 'failed') : 'complete',
+    pageCount: pages.length,
+    selectedPages: pages.map((page) => page.pageNumber),
+    pages,
+    failedPageCount,
+    partialSuccess: failedPageCount > 0 && extractedText.length > 0,
+    extractedImages: [],
+    source: 'pdf',
+  };
 }
 
 async function getGlobalSubjectOptions() {
@@ -1208,42 +1855,54 @@ exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
   }
 
   try {
-    let imageBuffer;
-    if (objectPath) {
-      const bucket = admin.storage().bucket();
-      const [bytes] = await bucket.file(objectPath).download();
+      let imageBuffer;
+      if (objectPath) {
+        const bucket = admin.storage().bucket();
+        const [bytes] = await bucket.file(objectPath).download();
       imageBuffer = bytes;
-    } else {
-      imageBuffer = Buffer.from(imageBase64, 'base64');
-    }
+      } else {
+        imageBuffer = Buffer.from(imageBase64, 'base64');
+      }
 
-    const [ocrResponse] = await getVisionClient().documentTextDetection({
-      image: { content: imageBuffer },
-    });
-
-    const rawText = ocrResponse?.fullTextAnnotation?.text || ocrResponse?.textAnnotations?.[0]?.description || '';
-    const extractedText = normalizeExtractedText(rawText);
-    const textLength = extractedText.length;
-
-    logger.info('image_ocr_completed', {
-      uid: decoded.uid,
-      source: sourceLabel,
-      success: textLength > 0,
-      textLength,
-      provider: 'google-vision',
-    });
-
-    res.status(200).json({
-      success: textLength > 0,
-      extractedText,
-      textLength,
-      extractionMethod: 'ocr',
-      provider: 'google-vision',
-    });
-  } catch (error) {
-    logger.error('image_ocr_failed', {
-      uid: decoded.uid,
-      source: sourceLabel,
+      const isPdfInput = mimeType === 'application/pdf' || isPdfAttachmentBuffer(imageBuffer);
+      const extractionResult = isPdfInput
+        ? await runPdfVisionOcr(imageBuffer)
+        : await runVisionOcrOnBuffer(imageBuffer);
+      const extractedText = extractionResult.extractedText;
+      const textLength = extractionResult.textLength;
+  
+      logger.info('image_ocr_completed', {
+        uid: decoded.uid,
+        source: sourceLabel,
+        success: textLength > 0,
+        textLength,
+        provider: 'google-vision',
+        fileType: isPdfInput ? 'pdf' : 'image',
+      });
+  
+      res.status(200).json({
+        success: textLength > 0,
+        extractedText,
+        textLength,
+        text: extractionResult.text || extractedText,
+        extractionMethod: extractionResult.extractionMethod || 'ocr',
+        provider: 'google-vision',
+        fileType: extractionResult.fileType || (isPdfInput ? 'pdf' : 'image'),
+        extractionQuality: extractionResult.extractionQuality || (textLength > 0 ? 'good' : 'failed'),
+        scannedPdfDetected: Boolean(extractionResult.scannedPdfDetected),
+        ocrStatus: extractionResult.ocrStatus || (isPdfInput ? 'complete' : 'not_needed'),
+        pageCount: extractionResult.pageCount || null,
+        selectedPages: extractionResult.selectedPages || [],
+        pages: extractionResult.pages || [],
+        failedPageCount: Number(extractionResult.failedPageCount || 0),
+        partialSuccess: Boolean(extractionResult.partialSuccess),
+        extractedImages: extractionResult.extractedImages || [],
+        source: extractionResult.source || (isPdfInput ? 'pdf' : 'image'),
+      });
+    } catch (error) {
+      logger.error('image_ocr_failed', {
+        uid: decoded.uid,
+        source: sourceLabel,
       error: error?.message || 'unknown_error',
     });
     res.status(500).json({
@@ -1275,18 +1934,23 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
     return;
   }
 
-  const inputText = normalizeExtractedText(req.body?.inputText || '');
+  const inputPayload = req.body?.inputPayload && typeof req.body.inputPayload === 'object' && !Array.isArray(req.body.inputPayload)
+    ? req.body.inputPayload
+    : null;
+  const inputText = normalizeExtractedText(req.body?.inputText || inputPayload?.combinedTextPreview || inputPayload?.typedTextPreview || '');
   if (!inputText) {
     res.status(400).json({ success: false, message: 'Missing text to classify.' });
     return;
   }
 
+  let supportedSubjects = [];
   try {
     const startedAt = Date.now();
-    const supportedSubjects = await getGlobalSubjectOptions();
+    supportedSubjects = await getGlobalSubjectOptions();
     console.debug('[studentRequestAI] classification request received', {
       uid: decoded.uid,
       inputLength: inputText.length,
+      inputPayload,
       supportedSubjects,
     });
     logger.info('subject_classification_started', {
@@ -1295,10 +1959,12 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       inputLength: inputText.length,
       supportedSubjectCount: supportedSubjects.length,
       inputPreview: inputText.slice(0, 500),
+      inputPayload,
     });
 
     const aiResult = await classifySubjectWithAI({
       inputText,
+      inputPayload,
       supportedSubjects,
       firebaseConfig: getAiSecrets(),
     });
@@ -1311,6 +1977,40 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       backend: aiResult.backend,
     });
     const classification = aiResult.classification;
+    const unsupportedSubjectRecorded = Boolean(classification?.unsupportedSubjectRequested && classification?.unsupportedSubject);
+    if (unsupportedSubjectRecorded) {
+      try {
+        await recordUnsupportedSubjectRequestOnServer({
+          subject: classification.unsupportedSubject,
+          inputText,
+          uid: decoded.uid,
+        });
+      } catch (recordError) {
+        logger.warn('unsupported_subject_request_record_failed', {
+          uid: decoded.uid,
+          subject: classification.unsupportedSubject,
+          error: recordError.message,
+        });
+      }
+    }
+
+    await writeAiLog({
+      userId: decoded.uid,
+      source: 'student_subject_classification',
+      status: classification?.subject ? 'success' : 'fallback',
+      prompt: aiResult.prompt,
+      rawOutput: aiResult.rawOutput,
+      error: aiResult.error || '',
+      details: {
+        model: aiResult.model,
+        backend: aiResult.backend,
+        durationMs: Date.now() - startedAt,
+        subject: classification.subject || '',
+        subjectConfidence: classification.subjectConfidence || 'unknown',
+        needsManualSubjectSelection: Boolean(classification.needsManualSubjectSelection),
+        unsupportedSubjectRecorded,
+      },
+    });
 
     logger.info('subject_classification_completed', {
       uid: decoded.uid,
@@ -1323,17 +2023,22 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       subject: classification.subject || '',
       subjectConfidence: classification.subjectConfidence,
       needsManualSubjectSelection: classification.needsManualSubjectSelection,
+      unsupportedSubjectRecorded,
     });
     console.debug('[studentRequestAI] classification response sent', {
       uid: decoded.uid,
       classification,
     });
 
-    res.status(200).json({
-      success: true,
-      classification,
-      provider: 'firebase-ai-logic',
-    });
+      res.status(200).json({
+        success: true,
+        classification,
+        provider: 'firebase-ai-logic',
+        aiPrompt: aiResult.prompt,
+        aiRawOutput: aiResult.rawOutput,
+        aiError: aiResult.error || '',
+        unsupportedSubjectRecorded,
+      });
   } catch (error) {
     console.debug('[studentRequestAI] classification failed', {
       uid: decoded.uid,
@@ -1343,9 +2048,29 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       uid: decoded.uid,
       error: error.message,
     });
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Subject classification failed.',
+
+    const fallbackClassification = validateSubjectClassification(null, supportedSubjects);
+    await writeAiLog({
+      userId: decoded.uid,
+      source: 'student_subject_classification',
+      status: 'failed',
+      prompt: '',
+      rawOutput: '',
+      error: error.message || 'Subject classification failed.',
+      details: {
+        subject: fallbackClassification.subject || '',
+        subjectConfidence: fallbackClassification.subjectConfidence || 'unknown',
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      classification: fallbackClassification,
+      provider: 'firebase-ai-logic',
+      aiPrompt: '',
+      aiRawOutput: '',
+      aiError: error.message || 'Subject classification failed.',
+      unsupportedSubjectRecorded: false,
     });
   }
 });
@@ -1960,8 +2685,12 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
   }
 
   const endedAt = Date.now();
-  const startedAt = Number(session.billingStartedAt || session.studentJoinedAt || session.callStartedAt || endedAt);
-  const billedSeconds = Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+  const accumulatedSeconds = Math.max(0, Number(session.billedSeconds || 0));
+  const activeStartedAt = Number(session.billingStartedAt || 0);
+  const activeSeconds = activeStartedAt
+    ? Math.max(0, Math.floor((endedAt - activeStartedAt) / 1000))
+    : 0;
+  const billedSeconds = accumulatedSeconds + activeSeconds;
   const billedMinutes = Number((billedSeconds / 60).toFixed(2));
   const requestRef = session.requestId ? db.collection('classRequests').doc(session.requestId) : null;
   const requestSnap = requestRef ? await requestRef.get().catch(() => null) : null;

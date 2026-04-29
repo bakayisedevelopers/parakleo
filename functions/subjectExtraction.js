@@ -2,6 +2,12 @@ const SUBJECT_ALIASES = [
   ['Mathematical Literacy', ['mathematical literacy', 'math literacy', 'math lit', 'maths literacy']],
   ['Physical Sciences', ['physical sciences', 'physical science', 'physics', 'chemistry', 'phys sci']],
   ['Life Sciences', ['life sciences', 'life science', 'biology']],
+  ['Natural Sciences', ['natural sciences', 'natural science', 'ns']],
+  ['Technology', ['technology', 'tech']],
+  ['Social Sciences', ['social sciences', 'social science']],
+  ['Economic and Management Sciences', ['economic and management sciences', 'ems', 'economics and management sciences']],
+  ['Creative Arts', ['creative arts', 'creative art']],
+  ['Life Skills', ['life skills', 'life skill']],
   ['Computer Applications Technology', ['computer applications technology', 'cat']],
   ['Information Technology', ['information technology', 'it']],
   ['Agricultural Sciences', ['agricultural sciences', 'agricultural science', 'agriculture']],
@@ -20,9 +26,60 @@ const SUBJECT_ALIASES = [
 ];
 
 const SUBJECT_NAMES = SUBJECT_ALIASES.map(([subject]) => subject);
+const GRADE_1_TO_12_SUBJECT_NAMES = [
+  ...SUBJECT_NAMES,
+  'English',
+  'Mathematics',
+  'Zulu',
+  'IsiZulu',
+  'Sesotho',
+  'Sepedi',
+  'Setswana',
+  'Siswati',
+  'Tshivenda',
+  'Xitsonga',
+  'Ndebele',
+  'French',
+  'German',
+  'Portuguese',
+  'Latin',
+  'Arabic',
+  'Music',
+  'Dance Studies',
+  'Dramatic Arts',
+  'Visual Arts',
+  'Religion Studies',
+];
+const DISALLOWED_POST_SCHOOL_SUBJECT_PATTERNS = [
+  'financial accounting',
+  'management accounting',
+  'cost accounting',
+  'accounting science',
+  'business management',
+  'marketing management',
+  'public relations',
+  'human resource management',
+  'psychology',
+  'sociology',
+  'philosophy',
+  'political science',
+  'commercial law',
+  'law',
+  'auditing',
+  'taxation',
+  'investment management',
+  'operations management',
+];
 
 function normalizeForMatch(value = '') {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function stripSubjectQualifierSuffixes(value = '') {
+  return String(value || '')
+    .replace(/\b(first additional language|home language|additional language|second additional language|hl|fal)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function escapeRegex(value = '') {
@@ -46,7 +103,33 @@ function normalizeSubjectName(value = '') {
     return normalized === normalizedAlias || containsAlias(normalized, normalizedAlias);
   }));
 
-  return match?.[0] || '';
+  if (match?.[0]) return match[0];
+
+  const stripped = normalizeForMatch(stripSubjectQualifierSuffixes(value));
+  if (!stripped) return '';
+
+  const strippedMatch = SUBJECT_ALIASES.find(([, aliases]) => aliases.some((alias) => {
+    const normalizedAlias = normalizeForMatch(alias);
+    return stripped === normalizedAlias || containsAlias(stripped, normalizedAlias);
+  }));
+
+  return strippedMatch?.[0] || '';
+}
+
+function isAllowedGrade1To12Subject(value = '') {
+  const rawNormalized = normalizeForMatch(value);
+  if (!rawNormalized) return false;
+
+  if (DISALLOWED_POST_SCHOOL_SUBJECT_PATTERNS.some((pattern) => rawNormalized.includes(normalizeForMatch(pattern)))) {
+    return false;
+  }
+
+  const normalized = normalizeSubjectName(value) || rawNormalized;
+
+  return GRADE_1_TO_12_SUBJECT_NAMES.some((subject) => {
+    const allowed = normalizeSubjectName(subject) || normalizeForMatch(subject);
+    return allowed && allowed.toLowerCase() === normalized.toLowerCase();
+  });
 }
 
 function extractMarkNearSubject(line, subjectIndex) {
@@ -121,6 +204,9 @@ function extractSubjectsAndMarks(text = '') {
 
 module.exports = {
   SUBJECT_NAMES,
+  GRADE_1_TO_12_SUBJECT_NAMES,
+  DISALLOWED_POST_SCHOOL_SUBJECT_PATTERNS,
   normalizeSubjectName,
+  isAllowedGrade1To12Subject,
   extractSubjectsAndMarks,
 };

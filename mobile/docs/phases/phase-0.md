@@ -12,7 +12,7 @@ Status: Completed
 
 ## QA Outcomes
 
-- Reviewed current mobile package baseline: Expo SDK 53, React 19, React Native 0.79.6, Firebase 11.10.0.
+- Reviewed current mobile package baseline: Expo SDK 54, React 19.1.0, React Native 0.81.5, Firebase 11.10.0.
 - Verified `mobile/src/firebase/config.js` already supports emulator and production Functions endpoint construction.
 
 ## Pending Decisions
