@@ -3,6 +3,8 @@ import ReferralShareButton from './ReferralShareButton';
 
 export default function Topbar({
   onOpenNav,
+  onOpenNotifications,
+  unreadCount = 0,
   name,
   role,
   referralSlug,
@@ -33,11 +35,16 @@ export default function Topbar({
           ) : null}
           <button
             type="button"
+            onClick={onOpenNotifications}
             className="relative rounded-2xl border border-zinc-200 bg-zinc-50 p-2.5 text-zinc-700 transition hover:bg-zinc-100"
             aria-label="Notifications"
           >
             <Bell className="h-5 w-5" />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500" />
+            {unreadCount > 0 ? (
+              <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black leading-none text-white shadow">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            ) : null}
           </button>
           <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-2.5 py-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-dark text-white shadow-sm">

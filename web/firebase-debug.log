@@ -1,0 +1,16 @@
+[debug] [2026-05-05T15:50:21.647Z] ----------------------------------------------------------------------
+[debug] [2026-05-05T15:50:21.650Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Jabu Babb\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions
+[debug] [2026-05-05T15:50:21.651Z] CLI Version:   15.15.0
+[debug] [2026-05-05T15:50:21.651Z] Platform:      win32
+[debug] [2026-05-05T15:50:21.651Z] Node Version:  v24.15.0
+[debug] [2026-05-05T15:50:21.651Z] Time:          Tue May 05 2026 17:50:21 GMT+0200 (South Africa Standard Time)
+[debug] [2026-05-05T15:50:21.651Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-05T15:50:23.941Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-05T15:50:23.941Z] > authorizing via signed-in user (bakayise.developers@gmail.com)
+[debug] [2026-05-05T15:50:23.942Z] [iam] checking project claxi-bakayise for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-05-05T15:50:23.943Z] Checked if tokens are valid: true, expires at: 1777997516770
+[debug] [2026-05-05T15:50:23.944Z] Checked if tokens are valid: true, expires at: 1777997516770
+[debug] [2026-05-05T15:50:23.945Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions [none]
+[debug] [2026-05-05T15:50:23.946Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions  x-goog-user-project=claxi-bakayise
+[debug] [2026-05-05T15:50:23.946Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}

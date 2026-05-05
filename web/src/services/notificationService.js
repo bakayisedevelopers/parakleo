@@ -1,14 +1,84 @@
 import { getFirebaseClients } from '../firebase/config';
 
 const MOCK_NOTIFICATIONS_KEY = 'claxi_mock_notifications';
+const BROWSER_NOTIFICATION_TITLE = 'Claxi';
 
 function getMockNotifications() {
   return JSON.parse(localStorage.getItem(MOCK_NOTIFICATIONS_KEY) || '[]');
 }
 
 function setMockNotifications(notifications) {
+  if (typeof window === 'undefined') return;
   localStorage.setItem(MOCK_NOTIFICATIONS_KEY, JSON.stringify(notifications));
   window.dispatchEvent(new StorageEvent('storage'));
+}
+
+function normalizeNotification(item = {}) {
+  return {
+    ...item,
+    id: item.id || crypto.randomUUID(),
+    read: Boolean(item.read),
+  };
+}
+
+function updateMockNotification(notificationId, updater) {
+  const next = getMockNotifications().map((item) => {
+    if (item.id !== notificationId) return item;
+    return normalizeNotification(updater(item));
+  });
+  setMockNotifications(next);
+  return next.find((item) => item.id === notificationId) || null;
+}
+
+export function isBrowserNotificationSupported() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+export function getBrowserNotificationPermission() {
+  if (!isBrowserNotificationSupported()) return 'unsupported';
+  return window.Notification.permission;
+}
+
+export async function requestBrowserNotificationPermission() {
+  if (!isBrowserNotificationSupported()) return 'unsupported';
+  if (window.Notification.permission !== 'default') {
+    return window.Notification.permission;
+  }
+
+  return window.Notification.requestPermission();
+}
+
+export function showBrowserNotification(notification = {}) {
+  if (!isBrowserNotificationSupported()) return false;
+  if (window.Notification.permission !== 'granted') return false;
+
+  try {
+    const title = String(notification.title || BROWSER_NOTIFICATION_TITLE);
+    const body = String(notification.message || '');
+    const options = {
+      body,
+      tag: String(notification.id || notification.notificationId || notification.type || body || title),
+      renotify: false,
+      data: {
+        id: notification.id || notification.notificationId || null,
+        requestId: notification.requestId || null,
+        sessionId: notification.sessionId || null,
+        type: notification.type || null,
+      },
+    };
+
+    const browserNotification = new window.Notification(title, options);
+    if (typeof notification.onClick === 'function') {
+      browserNotification.onclick = (event) => {
+        event?.preventDefault?.();
+        notification.onClick(browserNotification);
+      };
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function createNotification(payload) {
@@ -20,6 +90,7 @@ export async function createNotification(payload) {
         id: crypto.randomUUID(),
         ...payload,
         read: false,
+        readAt: null,
         createdAt: new Date().toISOString(),
       },
       ...getMockNotifications(),
@@ -34,6 +105,7 @@ export async function createNotification(payload) {
   await addDoc(collection(db, 'notifications'), {
     ...payload,
     read: false,
+    readAt: null,
     createdAt: serverTimestamp(),
   });
 }
@@ -50,8 +122,10 @@ export function subscribeToNotifications(userId, callback) {
     if (!clients) {
       const emit = () => callback(getMockNotifications().filter((item) => item.userId === userId));
       emit();
-      window.addEventListener('storage', emit);
-      unsub = () => window.removeEventListener('storage', emit);
+      if (typeof window !== 'undefined') {
+        window.addEventListener('storage', emit);
+        unsub = () => window.removeEventListener('storage', emit);
+      }
       return;
     }
 
@@ -70,4 +144,80 @@ export function subscribeToNotifications(userId, callback) {
   });
 
   return () => unsub?.();
+}
+
+export async function markNotificationRead(notificationId) {
+  if (!notificationId) return null;
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    return updateMockNotification(notificationId, (item) => ({
+      ...item,
+      read: true,
+      readAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+  }
+
+  const { db, firestoreModule } = clients;
+  const { doc, serverTimestamp, updateDoc } = firestoreModule;
+
+  await updateDoc(doc(db, 'notifications', notificationId), {
+    read: true,
+    readAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return notificationId;
+}
+
+export async function markAllNotificationsRead(userId) {
+  if (!userId) return [];
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    const next = getMockNotifications().map((item) => (
+      item.userId === userId
+        ? { ...item, read: true, readAt: item.readAt || new Date().toISOString(), updatedAt: new Date().toISOString() }
+        : item
+    ));
+    setMockNotifications(next);
+    return next.filter((item) => item.userId === userId);
+  }
+
+  const { db, firestoreModule } = clients;
+  const { collection, getDocs, query, updateDoc, where, serverTimestamp } = firestoreModule;
+  const snapshot = await getDocs(
+    query(
+      collection(db, 'notifications'),
+      where('userId', '==', userId),
+      where('read', '==', false),
+    ),
+  );
+
+  await Promise.all(snapshot.docs.map((item) => updateDoc(item.ref, {
+    read: true,
+    readAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })));
+
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+export function getNotificationDestination(notification = {}, role = 'student') {
+  const requestId = String(notification?.requestId || '').trim();
+  const sessionId = String(notification?.sessionId || '').trim();
+  const normalizedRole = String(role || 'student').toLowerCase();
+
+  if (sessionId) {
+    return `/app/session/${sessionId}`;
+  }
+
+  if (!requestId) return '';
+
+  if (normalizedRole === 'tutor') {
+    return '/app/tutor/available-requests';
+  }
+
+  return `/app/student/request/${requestId}`;
 }

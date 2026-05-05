@@ -13,9 +13,9 @@ const DEFAULT_PRICING_CONFIG = {
     longSessionDiscountMultiplier: 0.97,
   },
   bands: {
-    low: { base: 11, ratePerMinute: 1.65 },
-    normal: { base: 12, ratePerMinute: 1.8 },
-    high: { base: 14, ratePerMinute: 2.2 },
+    low: { base: 5, ratePerMinute: 3.0 },
+    normal: { base: 7, ratePerMinute: 3.6 },
+    high: { base: 8, ratePerMinute: 4.5 },
   },
   multiplierCaps: {
     min: 0.9,
@@ -59,12 +59,12 @@ const DEFAULT_PRICING_CONFIG = {
 
 const LEGACY_SAFE_PRICING_SNAPSHOT = {
   pricingBand: 'normal',
-  baseAmount: 12,
-  ratePerMinute: 1.8,
-  adjustedBaseAmount: 12,
-  adjustedRatePerMinute: 1.8,
+  baseAmount: 7,
+  ratePerMinute: 3.6,
+  adjustedBaseAmount: 7,
+  adjustedRatePerMinute: 3.6,
   durationMinutes: 10,
-  totalAmount: 30,
+  totalAmount: 42,
   configVersion: `${PRICING_CONFIG_VERSION}-legacy-safe`,
   explanationLabel: 'Standard pricing',
   currency: 'ZAR',
