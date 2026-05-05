@@ -20,7 +20,7 @@ import {
   toDateValue,
 } from '../../../utils/payouts';
 
-const FILTERS = ['all', 'unpaid', 'processing', 'paid'];
+const FILTERS = ['all', 'unpaid', 'processing', 'paid', 'unsuccessful'];
 
 function maskAccountNumber(value) {
   const raw = String(value || '').replace(/\s+/g, '');

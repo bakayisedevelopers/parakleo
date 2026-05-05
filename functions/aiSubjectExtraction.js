@@ -6,6 +6,7 @@ const { normalizeSubjectName } = require('./subjectExtraction');
 const DEFAULT_MAX_PDF_PAGES = 8;
 const MAX_IMAGE_BYTES = 19 * 1024 * 1024;
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const TUTOR_RESULTS_GEMINI_MODEL = 'gemini-2.5-pro';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
 const DEFAULT_CLASSIFICATION_TIMEOUT_MS = 30 * 1000;
@@ -299,18 +300,19 @@ Rules:
   };
 }
 
-async function callGeminiForSubjects(images, options = {}) {
+async function callGeminiForTutorResults(images, options = {}) {
   const request = buildVisionPromptContent(images);
   const { prompt, ...geminiRequest } = request;
   const config = getGeminiConfig(options.firebaseConfig || {});
+  const model = options.model || TUTOR_RESULTS_GEMINI_MODEL;
 
-  console.log("=== TUTOR RESULTS AI PROMPT (TEXT) ===");
+  console.log("=== TUTOR RESULTS GEMINI PROMPT (TEXT) ===");
   console.log(prompt);
-  console.log("=== TUTOR RESULTS AI PROMPT (OBJECT) ===");
+  console.log("=== TUTOR RESULTS GEMINI PROMPT (OBJECT) ===");
   console.log(JSON.stringify({ prompt }, null, 2));
 
-  console.debug('[tutorResultsAI] vision prompt sending to Gemini', {
-    model: config.visionModel,
+  console.debug('[tutorResultsGemini] vision prompt sending to Gemini', {
+    model,
     timeoutMs: getGeminiTimeoutMs(),
     prompt,
   });
@@ -318,7 +320,7 @@ async function callGeminiForSubjects(images, options = {}) {
   const result = await withTimeout(
     getFirebaseAiModel({
       firebaseConfig: options.firebaseConfig || {},
-      model: config.visionModel,
+      model,
       generationConfig: geminiRequest.generationConfig,
     }).generateContent(geminiRequest.contents[0].parts),
     getGeminiTimeoutMs(),
@@ -326,46 +328,50 @@ async function callGeminiForSubjects(images, options = {}) {
   );
   const outputText = result.response.text();
 
-  console.log("=== TUTOR RESULTS AI OUTPUT (TEXT) ===");
+  console.log("=== TUTOR RESULTS GEMINI OUTPUT (TEXT) ===");
   console.log(outputText);
-  console.log("=== TUTOR RESULTS AI OUTPUT (OBJECT) ===");
+  console.log("=== TUTOR RESULTS GEMINI OUTPUT (OBJECT) ===");
   try {
     console.log(JSON.stringify(parseAiJson(outputText), null, 2));
   } catch(e) {
     console.log("Parse error:", e.message);
   }
 
-  console.debug('[tutorResultsAI] vision raw output received', {
-    model: config.visionModel,
+  console.debug('[tutorResultsGemini] vision raw output received', {
+    model,
     outputText,
   });
   return { prompt, outputText };
 }
 
-async function extractSubjectsWithAI(images, options = {}) {
+async function extractTutorResultsWithGemini25Pro(images, options = {}) {
   let lastError = null;
   const logger = options.logger || console;
   const logContext = options.logContext || {};
   const config = getGeminiConfig(options.firebaseConfig || {});
+  const model = options.model || TUTOR_RESULTS_GEMINI_MODEL;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const startedAt = Date.now();
     try {
-      logger.info?.('gemini_subject_extraction_started', {
+      logger.info?.('gemini_tutor_results_extraction_started', {
         ...logContext,
         attempt,
         imageCount: images.length,
         imageBytes: images.map((image) => image.length),
         provider: 'firebase-ai-logic',
         aiBackend: config.backend,
-        model: config.visionModel,
+        model,
         timeoutMs: getGeminiTimeoutMs(),
       });
-      const { prompt, outputText } = await callGeminiForSubjects(images, options);
+      const { prompt, outputText } = await callGeminiForTutorResults(images, {
+        ...options,
+        model,
+      });
       const parsed = parseAiJson(outputText);
       const validated = validateSubjectMarks(parsed);
       const aiReasoning = parsed?.aiReasoning || '';
-      console.debug('[tutorResultsAI] vision output parsed and validated', {
+      console.debug('[tutorResultsGemini] vision output parsed and validated', {
         ...logContext,
         attempt,
         prompt,
@@ -374,7 +380,7 @@ async function extractSubjectsWithAI(images, options = {}) {
         validated,
         aiReasoning,
       });
-      logger.info?.('gemini_subject_extraction_completed', {
+      logger.info?.('gemini_tutor_results_extraction_completed', {
         ...logContext,
         attempt,
         durationMs: Date.now() - startedAt,
@@ -390,12 +396,12 @@ async function extractSubjectsWithAI(images, options = {}) {
       };
     } catch (error) {
       lastError = error;
-      console.debug('[tutorResultsAI] vision extraction attempt failed', {
+      console.debug('[tutorResultsGemini] vision extraction attempt failed', {
         ...logContext,
         attempt,
         error: error.message,
       });
-      logger.warn?.('gemini_subject_extraction_attempt_failed', {
+      logger.warn?.('gemini_tutor_results_extraction_attempt_failed', {
         ...logContext,
         attempt,
         durationMs: Date.now() - startedAt,
@@ -714,7 +720,7 @@ async function classifySubjectWithAI({ inputText = '', inputPayload = null, supp
 module.exports = {
   MAX_PDF_PAGES: DEFAULT_MAX_PDF_PAGES,
   convertPdfToImages,
-  extractSubjectsWithAI,
+  extractTutorResultsWithGemini25Pro,
   classifySubjectWithAI,
   validateSubjectClassification,
   validateSubjectMarks,

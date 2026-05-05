@@ -58,7 +58,14 @@ export function getTutorOnboardingStatus(user) {
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
   const hasQualification = qualifiedSubjects.length > 0;
   const qualified = hasQualification;
-  const hasPayout = Boolean(tutorProfile.payout?.bankName && tutorProfile.payout?.accountNumber && tutorProfile.payout?.accountHolder);
+  const hasPayout = Boolean(
+    tutorProfile.payout?.bankName
+    && tutorProfile.payout?.accountNumber
+    && tutorProfile.payout?.accountHolder
+    && tutorProfile.payout?.bankCode
+    && tutorProfile.payout?.paystackRecipientCode
+    && tutorProfile.payout?.verified,
+  );
   const hasProfile = Boolean(user?.selfieVerified && user?.selfieUrl && tutorProfile.gradesToTutor?.length && activeSubjects.length);
   if (qualified && hasPayout && hasProfile) {
     return {

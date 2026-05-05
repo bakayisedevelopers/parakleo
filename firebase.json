@@ -30,6 +30,22 @@
         "function": "finalizeSessionBilling"
       },
       {
+        "source": "/pay-outstanding-balance",
+        "function": "payOutstandingBalance"
+      },
+      {
+        "source": "/delete-payment-method",
+        "function": "deletePaymentMethod"
+      },
+      {
+        "source": "/verify-tutor-payout-account",
+        "function": "verifyTutorPayoutAccount"
+      },
+      {
+        "source": "/list-tutor-payout-banks",
+        "function": "listTutorPayoutBanks"
+      },
+      {
         "source": "/pricing-quote",
         "function": "getPricingQuote"
       },
@@ -44,6 +60,10 @@
       {
         "source": "/classify-subject",
         "function": "classifySubject"
+      },
+      {
+        "source": "/extract-attachment-ai",
+        "function": "extractAttachmentAi"
       },
       {
         "source": "**",

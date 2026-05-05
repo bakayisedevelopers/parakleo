@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
@@ -6,9 +6,11 @@ import FormField from '../../components/ui/FormField';
 import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
 import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
 import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
+import SelectField from '../../components/ui/SelectField';
 import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { updateUserProfile } from '../../services/userService';
+import { listTutorPayoutBanks, verifyTutorPayoutAccount } from '../../services/tutorPayoutService';
 import {
   getStudentOnboardingStatus,
   getTutorOnboardingStatus,
@@ -16,6 +18,15 @@ import {
 } from '../../utils/onboarding';
 import PaymentMethodsManager from '../../components/app/PaymentMethodsManager';
 import { syncStudentGrowth } from '../../services/studentGrowthService';
+
+const PAYOUT_ACCOUNT_TYPE_OPTIONS = [
+  { value: 'personal', label: 'Personal' },
+];
+
+const PAYOUT_DOCUMENT_TYPE_OPTIONS = [
+  { value: 'identityNumber', label: 'South African ID number' },
+  { value: 'passportNumber', label: 'Passport number' },
+];
 
 export default function OnboardingPage() {
   const { user, setUser } = useAuth();
@@ -26,9 +37,43 @@ export default function OnboardingPage() {
   const role = queryRole === 'tutor' ? 'tutor' : 'student';
   const [statusMessage, setStatusMessage] = useState('');
   const [isSavingTutorProfile, setIsSavingTutorProfile] = useState(false);
+  const [payoutBanks, setPayoutBanks] = useState([]);
+  const [selectedPayoutBankCode, setSelectedPayoutBankCode] = useState(currentUser?.tutorProfile?.payout?.bankCode || '');
+  const [payoutDocumentType, setPayoutDocumentType] = useState(currentUser?.tutorProfile?.payout?.documentType || 'identityNumber');
 
   const studentStatus = useMemo(() => getStudentOnboardingStatus(currentUser), [currentUser]);
   const tutorStatus = useMemo(() => getTutorOnboardingStatus(currentUser), [currentUser]);
+  const selectedPayoutBank = payoutBanks.find((bank) => bank.code === selectedPayoutBankCode)
+    || (currentUser?.tutorProfile?.payout?.bankCode === selectedPayoutBankCode
+      ? {
+        name: currentUser?.tutorProfile?.payout?.bankName || '',
+        code: selectedPayoutBankCode,
+      }
+      : null);
+  const payoutDocumentNumberLabel = payoutDocumentType === 'passportNumber' ? 'Passport number' : 'South African ID number';
+
+  useEffect(() => {
+    if (role !== 'tutor' || !user?.uid) return undefined;
+
+    let cancelled = false;
+    listTutorPayoutBanks()
+      .then((banks) => {
+        if (cancelled) return;
+        setPayoutBanks(banks);
+        if (!selectedPayoutBankCode && banks[0]?.code) {
+          setSelectedPayoutBankCode(banks[0].code);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatusMessage(error.message || 'Unable to load payout banks.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [role, selectedPayoutBankCode, user?.uid]);
 
   const saveStudentProfile = async (event) => {
     event.preventDefault();
@@ -57,22 +102,29 @@ export default function OnboardingPage() {
 
     try {
       setIsSavingTutorProfile(true);
+      setStatusMessage('Verifying payout account details...');
+
+      const verifiedPayout = await verifyTutorPayoutAccount({
+        bankName: selectedPayoutBank?.name || '',
+        bankCode: selectedPayoutBank?.code || '',
+        accountNumber: formData.get('accountNumber')?.toString().trim() || '',
+        accountHolder: formData.get('accountHolder')?.toString().trim() || '',
+        accountType: formData.get('accountType')?.toString().trim() || 'personal',
+        documentType: payoutDocumentType,
+        documentNumber: formData.get('documentNumber')?.toString().trim() || '',
+      });
 
       const profile = await updateUserProfile(user.uid, {
         tutorProfile: {
           ...(user?.tutorProfile || {}),
           gradesToTutor: (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean),
           verificationStatus: (currentUser?.qualifiedSubjects || []).length ? TUTOR_VERIFICATION_STATUSES.VERIFIED : TUTOR_VERIFICATION_STATUSES.PENDING,
-          payout: {
-            bankName: formData.get('bankName')?.toString().trim() || '',
-            accountNumber: formData.get('accountNumber')?.toString().trim() || '',
-            accountHolder: formData.get('accountHolder')?.toString().trim() || '',
-          },
+          payout: verifiedPayout,
         },
       });
 
       setUser((prev) => ({ ...prev, ...profile }));
-      setStatusMessage('Tutor profile details saved.');
+      setStatusMessage('Tutor profile details saved and payout account verified.');
     } catch (error) {
       setStatusMessage(error.message || 'Unable to upload documents and save tutor profile.');
     } finally {
@@ -131,12 +183,32 @@ export default function OnboardingPage() {
               <label className="mb-2 block text-sm font-semibold text-zinc-700">Subjects you qualify to tutor</label>
               <QualifiedSubjectsManager user={currentUser} setUser={setUser} onMessage={setStatusMessage} />
             </div>
-            <FormField label="Bank name" name="bankName" defaultValue={currentUser?.tutorProfile?.payout?.bankName || ''} required />
+            <SelectField
+              label="Bank"
+              name="bankCode"
+              value={selectedPayoutBankCode}
+              onChange={(event) => setSelectedPayoutBankCode(event.target.value)}
+              options={[
+                { value: '', label: payoutBanks.length ? 'Select bank' : 'Loading banks...' },
+                ...payoutBanks.map((bank) => ({ value: bank.code, label: bank.name })),
+              ]}
+              required
+            />
             <FormField label="Account number" name="accountNumber" defaultValue={currentUser?.tutorProfile?.payout?.accountNumber || ''} required />
             <FormField label="Account holder" name="accountHolder" defaultValue={currentUser?.tutorProfile?.payout?.accountHolder || ''} required />
+            <SelectField label="Account type" name="accountType" defaultValue={currentUser?.tutorProfile?.payout?.accountType || 'personal'} options={PAYOUT_ACCOUNT_TYPE_OPTIONS} required />
+            <SelectField
+              label="Verification document"
+              name="documentType"
+              value={payoutDocumentType}
+              onChange={(event) => setPayoutDocumentType(event.target.value)}
+              options={PAYOUT_DOCUMENT_TYPE_OPTIONS}
+              required
+            />
+            <FormField label={payoutDocumentNumberLabel} name="documentNumber" defaultValue={currentUser?.tutorProfile?.payout?.documentNumber || ''} required />
             <div className="md:col-span-2">
               <button type="submit" disabled={isSavingTutorProfile} className="rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
-                {isSavingTutorProfile ? 'Uploading files...' : 'Save tutor profile'}
+                {isSavingTutorProfile ? 'Verifying payout details...' : 'Save tutor profile'}
               </button>
             </div>
           </form>

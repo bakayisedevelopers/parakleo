@@ -1,5 +1,7 @@
 import { getUserProfile, updateUserProfile } from './userService';
-import { fundWalletWithCard } from './paymentGatewayService';
+import { getFirebaseClients } from '../firebase/config';
+
+const PAY_OUTSTANDING_BALANCE_ENDPOINT = import.meta.env.VITE_PAY_OUTSTANDING_BALANCE_ENDPOINT || '/pay-outstanding-balance';
 
 function normalizeWallet(wallet = {}) {
   return {
@@ -28,35 +30,37 @@ export async function applyWalletDebt(userId, amount) {
   });
 }
 
-export async function addMoneyToWallet({ user, amount, cardId }) {
-  const targetAmount = Number(amount || 0);
-  if (!targetAmount || targetAmount <= 0) {
-    throw new Error('Enter a valid amount.');
+export async function payOutstandingBalance({ user, cardId }) {
+  const outstandingAmount = getOutstandingAmount(user?.wallet);
+  if (!outstandingAmount) {
+    throw new Error('There is no outstanding balance to pay.');
   }
 
-  const card = (user?.paymentMethods || []).find((item) => item.id === cardId)
-    || (user?.paymentMethods || []).find((item) => item.isDefault)
-    || user?.paymentMethods?.[0];
-
-  const charge = await fundWalletWithCard({ amount: targetAmount, card });
-
-  if (!charge.ok) {
-    throw new Error('Wallet top-up failed. Please check your card and try again.');
+  const selectedCardId = cardId || user?.paymentMethods?.find((item) => item.isDefault)?.id || user?.paymentMethods?.[0]?.id || '';
+  if (!selectedCardId) {
+    throw new Error('Select a payment card before paying the outstanding balance.');
   }
 
-  const wallet = normalizeWallet(user?.wallet);
-  const nextBalance = Number((wallet.balance + targetAmount).toFixed(2));
+  const clients = await getFirebaseClients();
+  const idToken = await clients?.auth?.currentUser?.getIdToken?.();
 
-  const profile = await updateUserProfile(user.uid, {
-    wallet: {
-      ...wallet,
-      balance: nextBalance,
-      updatedAt: new Date().toISOString(),
+  if (!idToken) {
+    throw new Error('You must be signed in before paying an outstanding balance.');
+  }
+
+  const response = await fetch(PAY_OUTSTANDING_BALANCE_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
     },
+    body: JSON.stringify({ cardId: selectedCardId }),
   });
 
-  return {
-    profile,
-    charge,
-  };
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.message || 'Outstanding balance payment failed. Please check your card and try again.');
+  }
+
+  return payload;
 }

@@ -1,4 +1,7 @@
 import { updateUserProfile } from './userService';
+import { getFirebaseClients } from '../firebase/config';
+
+const DELETE_PAYMENT_METHOD_ENDPOINT = import.meta.env.VITE_DELETE_PAYMENT_METHOD_ENDPOINT || '/delete-payment-method';
 
 export async function addPaymentMethod(user, { nickname, paystackAuthorization }) {
   const nextMethod = {
@@ -27,11 +30,26 @@ export async function setDefaultPaymentMethod(user, methodId) {
 }
 
 export async function removePaymentMethod(user, methodId) {
-  const existing = sanitizeMethods((user?.paymentMethods || []).filter((method) => method.id !== methodId));
+  const clients = await getFirebaseClients();
+  const idToken = await clients?.auth?.currentUser?.getIdToken?.();
 
-  if (existing.length && !existing.some((method) => method.isDefault)) {
-    existing[0].isDefault = true;
+  if (!idToken) {
+    throw new Error('You must be signed in before removing a card.');
   }
 
-  return updateUserProfile(user.uid, { paymentMethods: existing });
+  const response = await fetch(DELETE_PAYMENT_METHOD_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ methodId }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.message || 'Unable to remove this card right now.');
+  }
+
+  return payload.profile;
 }

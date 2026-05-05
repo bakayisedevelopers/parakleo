@@ -28,7 +28,7 @@ import {
 import { createWebRtcSessionController } from '../../services/webrtcService';
 import { fetchIceServers } from '../../services/iceServerService';
 import { debugLog } from '../../utils/devLogger';
-import { parseQuestionsFromExtraction } from '../../services/questionParsingService';
+import { parseQuestionsFromExtraction, parseQuestionsFromGptExtraction } from '../../services/questionParsingService';
 import { prepareWhiteboardLayout } from '../../services/whiteboardPreparationService';
 
 const RATABLE_STATUSES = new Set([
@@ -259,6 +259,7 @@ export default function SessionRoomPage() {
   const getSessionBoardSeedContent = useCallback(() => {
     const boardPreparationSource = session?.boardPreparationSource || request?.boardPreparationSource || null;
     const attachmentExtractions = boardPreparationSource?.attachmentExtractions || [];
+    const gptExtraction = boardPreparationSource?.gptExtraction || null;
     const attachments = session?.attachments
       || request?.attachments
       || (session?.requestAttachment ? [session.requestAttachment] : [])
@@ -287,6 +288,7 @@ export default function SessionRoomPage() {
       attachments,
       attachmentExtractions,
       ocrImageReferences,
+      gptExtraction,
     };
   }, [request, session]);
 
@@ -298,6 +300,7 @@ export default function SessionRoomPage() {
       attachments,
       attachmentExtractions,
       ocrImageReferences,
+      gptExtraction,
     } = getSessionBoardSeedContent();
     if (!String(extractedText || '').trim() && !(attachments || []).length) {
       debugLog('sessionRoom', '[whiteboardPreparation] skipped injection because no board source data was available.', {
@@ -308,12 +311,17 @@ export default function SessionRoomPage() {
 
     try {
       const { AssetRecordType, createShapeId, toRichText } = await import('tldraw');
-      const parsedQuestions = parseQuestionsFromExtraction({
-        extractedText,
-        attachments,
-        attachmentExtractions,
-        ocrImageReferences,
-      });
+      const parsedQuestions = gptExtraction
+        ? parseQuestionsFromGptExtraction({
+            gptExtraction,
+            attachments,
+          })
+        : parseQuestionsFromExtraction({
+            extractedText,
+            attachments,
+            attachmentExtractions,
+            ocrImageReferences,
+          });
       const layout = prepareWhiteboardLayout(parsedQuestions);
 
       debugLog('sessionRoom', '[whiteboardPreparation] parsing finished.', {
@@ -939,12 +947,21 @@ export default function SessionRoomPage() {
     }
   };
 
-  const toggleStudentControls = () => {
-    setShowStudentControls((prev) => !prev);
-  };
+  const revealStudentControls = useCallback(() => {
+    if (role !== 'student') return;
+
+    if (studentControlsTimeoutRef.current) {
+      clearTimeout(studentControlsTimeoutRef.current);
+    }
+
+    setShowStudentControls(true);
+    studentControlsTimeoutRef.current = setTimeout(() => {
+      setShowStudentControls(false);
+    }, 5000);
+  }, [role]);
 
   const controlsCompact = isMobileViewport;
-  const showStudentOverlay = role !== 'student' || !isMobileViewport || showStudentControls;
+  const showStudentOverlay = role !== 'student' || showStudentControls;
   const closeHref = role === 'tutor' ? '/app/tutor/sessions' : '/app';
 
   const renderTutorStageHeader = () => (
@@ -964,6 +981,10 @@ export default function SessionRoomPage() {
       className={`absolute left-20 right-4 top-4 z-20 transition-opacity duration-200 ${
         showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        revealStudentControls();
+      }}
     >
       <div className="rounded-[22px] border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-2">
@@ -1018,13 +1039,13 @@ export default function SessionRoomPage() {
   const renderStudentStage = () => (
     <div
       className="relative h-full w-full overflow-hidden bg-black"
-      onClick={toggleStudentControls}
+      onPointerDown={revealStudentControls}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          toggleStudentControls();
+          revealStudentControls();
         }
       }}
     >
@@ -1106,6 +1127,10 @@ export default function SessionRoomPage() {
                 : 'pointer-events-none opacity-0'
               : 'opacity-100'
           } transition-opacity duration-200`}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            revealStudentControls();
+          }}
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex flex-col gap-2 rounded-[24px] border border-zinc-200 bg-white/95 p-2 shadow-xl backdrop-blur-md">
@@ -1153,6 +1178,10 @@ export default function SessionRoomPage() {
             className={`absolute bottom-4 right-4 z-30 transition-opacity duration-200 ${
               showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
             }`}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              revealStudentControls();
+            }}
           >
             <button
               onClick={() => initializeCall({ shouldJoinStudent: true })}

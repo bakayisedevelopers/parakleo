@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock } from 'lucide-react';
+import { CalendarClock, ChevronDown } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
 import LoadingState from '../../../components/ui/LoadingState';
@@ -43,6 +43,7 @@ export default function TutorPaymentsPage() {
   const { sessions, isLoading } = useTutorSessions(user?.uid);
   const [weeklyPayoutRecords, setWeeklyPayoutRecords] = useState([]);
   const [isLoadingPayoutRecords, setIsLoadingPayoutRecords] = useState(false);
+  const [expandedWeekKey, setExpandedWeekKey] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -165,13 +166,23 @@ export default function TutorPaymentsPage() {
           <div className="space-y-4">
             {weeklyGroups.map((group) => {
               const paidAt = toDateValue(group.paidAt);
+              const isExpanded = expandedWeekKey === group.weekKey;
 
               return (
                 <div key={group.weekKey} className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <p className="text-base font-black text-zinc-900">{formatWeekRangeLabel(group.weekStart, group.weekEnd)}</p>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWeekKey((current) => (current === group.weekKey ? '' : group.weekKey))}
+                    className="flex w-full flex-col gap-3 text-left md:flex-row md:items-start md:justify-between"
+                    aria-expanded={isExpanded}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        <p className="text-base font-black text-zinc-900">{formatWeekRangeLabel(group.weekStart, group.weekEnd)}</p>
+                      </div>
                       <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">{group.weekKey}</p>
+                      <p className="mt-2 text-sm font-semibold text-emerald-700">Total made: {formatCurrency(group.grossAmount)}</p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -185,35 +196,37 @@ export default function TutorPaymentsPage() {
                         </span>
                       ) : null}
                     </div>
-                  </div>
+                  </button>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-xs text-zinc-500">Sessions</p>
-                      <p className="text-lg font-bold text-zinc-900">{group.totalSessions}</p>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-xs text-zinc-500">Gross</p>
-                      <p className="text-lg font-bold text-zinc-900">{formatCurrency(group.grossAmount)}</p>
-                    </div>
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                      <p className="text-xs text-emerald-700">Tutor payout</p>
-                      <p className="text-lg font-bold text-emerald-800">{formatCurrency(group.tutorAmount)}</p>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <p className="text-xs text-zinc-500">Platform amount</p>
-                      <p className="text-lg font-bold text-zinc-900">{formatCurrency(group.platformAmount)}</p>
-                    </div>
-                  </div>
+                  {isExpanded ? (
+                    <>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <p className="text-xs text-zinc-500">Sessions</p>
+                          <p className="text-lg font-bold text-zinc-900">{group.totalSessions}</p>
+                        </div>
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <p className="text-xs text-zinc-500">Gross</p>
+                          <p className="text-lg font-bold text-zinc-900">{formatCurrency(group.grossAmount)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                          <p className="text-xs text-emerald-700">Tutor payout</p>
+                          <p className="text-lg font-bold text-emerald-800">{formatCurrency(group.tutorAmount)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <p className="text-xs text-zinc-500">Platform amount</p>
+                          <p className="text-lg font-bold text-zinc-900">{formatCurrency(group.platformAmount)}</p>
+                        </div>
+                      </div>
 
-                  {group.notes ? (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                      <span className="font-semibold">Admin note:</span> {group.notes}
-                    </div>
-                  ) : null}
+                      {group.notes ? (
+                        <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                          <span className="font-semibold">Admin note:</span> {group.notes}
+                        </div>
+                      ) : null}
 
-                  <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-200">
-                    <table className="min-w-full divide-y divide-zinc-200 text-sm">
+                      <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-200">
+                        <table className="min-w-full divide-y divide-zinc-200 text-sm">
                       <thead className="bg-zinc-50 text-zinc-600">
                         <tr>
                           <th className="px-3 py-2 text-left font-semibold">Session</th>
@@ -239,8 +252,10 @@ export default function TutorPaymentsPage() {
                           );
                         })}
                       </tbody>
-                    </table>
-                  </div>
+                        </table>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               );
             })}

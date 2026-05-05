@@ -1,4 +1,16 @@
-import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
 import { getFirebaseClients } from '../firebase/config';
 
 const ACTIVE_CREATE_BLOCKING_STATUSES = ['pending', 'matching', 'offered', 'no_tutor_available'];
@@ -106,4 +118,66 @@ export function subscribeToStudentRequests(studentId, callback, onError) {
     (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
     onError,
   );
+}
+
+export function subscribeToRequestById(requestId, callback, onError) {
+  if (!requestId) {
+    callback(null);
+    return () => {};
+  }
+
+  const { db } = getFirebaseClients();
+  return onSnapshot(
+    doc(db, 'classRequests', requestId),
+    (snapshot) => callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null),
+    onError,
+  );
+}
+
+export async function cancelClassRequest({ requestId, canceledBy, reason }) {
+  const trimmedReason = String(reason || '').trim();
+  const { db } = getFirebaseClients();
+  const canceledAt = Date.now();
+  const requestPatch = {
+    status: 'canceled',
+    statusDetail: 'Request canceled by student.',
+    canceledAt,
+    canceledBy: canceledBy || 'student',
+    canceledReason: trimmedReason,
+    currentOfferTutorId: null,
+    offerExpiresAt: null,
+    updatedAt: serverTimestamp(),
+  };
+
+  await updateDoc(doc(db, 'classRequests', requestId), requestPatch);
+
+  const sessionsQuery = query(collection(db, 'sessions'), where('requestId', '==', requestId));
+  const sessionsSnapshot = await getDocs(sessionsQuery);
+  if (!sessionsSnapshot.docs.length) {
+    return;
+  }
+
+  const batch = writeBatch(db);
+  let updatesCount = 0;
+
+  sessionsSnapshot.docs.forEach((sessionDoc) => {
+    const session = sessionDoc.data() || {};
+    if (!['waiting_student', 'in_progress', 'in_session'].includes(String(session.status || '').toLowerCase())) {
+      return;
+    }
+
+    updatesCount += 1;
+    batch.update(sessionDoc.ref, {
+      status: 'canceled',
+      endedAt: canceledAt,
+      canceledAt,
+      canceledBy: canceledBy || 'student',
+      canceledReason: trimmedReason,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  if (updatesCount) {
+    await batch.commit();
+  }
 }

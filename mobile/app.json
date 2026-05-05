@@ -2,8 +2,9 @@
   "expo": {
     "name": "Claxi",
     "slug": "claxi-mobile",
+    "scheme": "claxi",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"

@@ -242,6 +242,16 @@ Migration rule for this phase: copy the web dashboard-first request creation flo
 
 ### Phase 4 — Request tracking + notifications + sessions list
 
+Status: Completed
+
+Results:
+- Replaced the placeholder mobile request/session lists with parity-driven "My Classes" and session-entry surfaces in `mobile/src/screens/student/RequestsScreen.js` and `mobile/src/screens/student/SessionsScreen.js`.
+- Added a live request tracker screen and full request details screen so students can follow lifecycle state, review pricing/attachments, cancel a request, and jump into the linked session entry from mobile.
+- Added an in-app notification center with unread indicator, Firestore-backed notification subscriptions, and request/session routing from topbar alerts.
+- Added a mobile session-room entry shell and deep-link support for `claxi://request/:id`, `claxi://request-details/:id`, and `claxi://session/:id` so request/session detail routes are stable before Phase 5 live RTC work.
+- Added session rating prompt handling for completed/canceled sessions, including request/session rating status writes and tutor/student rating summary updates.
+- Migration rule for this phase: request status, request detail, notification routing, session card data, and join/re-open entry must stay aligned with the web student flow; the live RTC/whiteboard surface itself remains Phase 5.
+
 Migration rule for this phase: copy the web request list, request detail/status timeline, notification behavior, session card data, lifecycle labels, and join/re-open class logic exactly.
 
 **Goal:** keep student informed in real-time.
@@ -262,6 +272,16 @@ Migration rule for this phase: copy the web request list, request detail/status 
 ---
 
 ### Phase 5 — Session room (WebRTC + whiteboard)
+
+Status: Completed
+
+Results:
+- Replaced the Phase 4 placeholder with a full-screen student session room in `mobile/src/screens/student/SessionRoomScreen.js` and removed the standard app-shell chrome for that route so the live classroom can take over the viewport.
+- Added live production session actions in `mobile/src/services/sessionService.js` for join, billing-clock sync, cancellation with reason, and `finalizeSessionBilling` closure through the existing backend endpoint.
+- Added `mobile/src/components/student/StudentRtcSessionView.js`, a WebView-hosted RTC receiver that uses the signed-in Firebase ID token, live Firestore signaling documents, tutor candidate polling, `getIceConfig`, remote audio, and tutor screen-share rendering without changing the web application.
+- Added `mobile/src/services/iceServerService.js` and switched the Expo app orientation to `default` in `mobile/app.json` so landscape session use is possible while preserving the rest of the student app flow.
+- Kept the existing post-session rating flow intact, so completed/canceled sessions still trigger the student rating prompt from the shared mobile session listener.
+- Migration rule for this phase: React Native uses a WebView-hosted browser WebRTC receiver plus Firestore REST signaling because the current mobile baseline already ships `react-native-webview` while native `react-native-webrtc` installation could not be completed inside this restricted environment.
 
 Migration rule for this phase: copy the web session room control flow, full-screen treatment, WebRTC lifecycle, screen-share viewing, duration/grace handling, whiteboard preparation behavior, and rating prompt as exactly as React Native allows.
 

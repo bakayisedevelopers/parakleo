@@ -373,7 +373,7 @@ export function StudentRequestComposer({
         attachmentExtractionByKey,
       });
 
-      await createClassRequest({
+      const requestId = await createClassRequest({
         studentId: user.uid,
         studentName: user.fullName || user.displayName || 'Student',
         studentEmail: user.email || '',
@@ -392,7 +392,7 @@ export function StudentRequestComposer({
 
       resetComposerState();
       setSuccessMessage('Your class request is live and matching tutors.');
-      navigate('Requests');
+      navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
     } catch (nextError) {
       setError(nextError.message || 'Unable to submit request right now.');
     } finally {
@@ -428,7 +428,7 @@ export function StudentRequestComposer({
           </Text>
           <Text style={styles.currentTitle}>{activeOrOngoingRequest?.subject || 'Current request'}</Text>
           <Text style={styles.currentCopy}>{activeOrOngoingRequest?.topic || 'Live request'}</Text>
-          <Button onPress={() => navigate('Requests')}>View current request</Button>
+          <Button onPress={() => navigate({ key: 'RequestStatus', params: { requestId: activeOrOngoingRequest?.id, parentTab: 'Requests' } })}>View current request</Button>
         </Card>
       ) : null}
 
@@ -441,7 +441,7 @@ export function StudentRequestComposer({
           </Text>
           <Text style={styles.currentTitle}>{latestOpenSession?.subject || 'Current class'}</Text>
           <Text style={styles.currentCopy}>{latestOpenSession?.topic || latestOpenSession?.requestTopic || 'Live class session'}</Text>
-          <Button onPress={() => navigate('Sessions')}>Continue current class</Button>
+          <Button onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: latestOpenSession?.id, parentTab: 'Sessions' } })}>Continue current class</Button>
         </Card>
       ) : null}
 

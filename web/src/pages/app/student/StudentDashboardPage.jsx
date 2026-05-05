@@ -21,22 +21,18 @@ import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
 import { appendUserAiLog, subscribeToUserAiLogs } from '../../../services/aiLogService';
 import {
-  extractAttachments,
-} from '../../../services/attachmentExtractionService';
+  LOCAL_VISUAL_CROP_FILE,
+  attachVisualCropsToExtraction,
+  extractAttachmentsWithGPT,
+} from '../../../services/gptExtractionService';
 import { createClassRequest } from '../../../services/classRequestService';
 import { fetchPricingQuote } from '../../../services/pricingService';
 import { uploadUserFile } from '../../../services/storageService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
-import {
-  buildSubjectClassificationInput,
-  classifySubjectFromText,
-} from '../../../services/subjectClassificationService';
 import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSubjectService';
 import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
 import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { getStudentOnboardingStatus } from '../../../utils/onboarding';
-
-const CLASSIFICATION_OVERLAY_TIMEOUT_MS = 15000;
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -94,7 +90,7 @@ function getExtractionStatusLabel(status = '') {
     return 'Low confidence';
   }
 
-  return 'Queued';
+  return 'Scanning...';
 }
 
 function renderExtractionStatusIcon(status = '') {
@@ -127,7 +123,16 @@ function renderExtractionStatusIcon(status = '') {
   return null;
 }
 
-function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {} }) {
+function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {}, gptExtraction = null }) {
+  if (gptExtraction) {
+    return {
+      extractedText: '',
+      attachmentExtractions: [],
+      ocrImageReferences: [],
+      gptExtraction,
+    };
+  }
+
   const attachmentExtractions = attachments.map((file, index) => {
     const fileKey = getAttachmentKey(file);
     const extraction = attachmentExtractionByKey[fileKey] || null;
@@ -164,6 +169,74 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
     attachmentExtractions,
     ocrImageReferences: [],
   };
+}
+
+function stripLocalExtractionPayload(extraction = null) {
+  if (!extraction || typeof extraction !== 'object') return extraction;
+  const { sourceImages: _sourceImages, ...safeExtraction } = extraction;
+
+  return {
+    ...safeExtraction,
+    pages: Array.isArray(safeExtraction.pages)
+      ? safeExtraction.pages.map((page) => ({
+        ...page,
+        questions: Array.isArray(page?.questions)
+          ? page.questions.map((question) => ({
+            ...question,
+            images: Array.isArray(question?.images)
+              ? question.images.map((image) => {
+                const { [LOCAL_VISUAL_CROP_FILE]: _localFile, ...safeImage } = image || {};
+                return safeImage;
+              })
+              : [],
+          }))
+          : [],
+      }))
+      : [],
+  };
+}
+
+async function uploadGptExtractionVisualCrops({ extraction = null, userId = '' } = {}) {
+  if (!extraction || !userId) return stripLocalExtractionPayload(extraction);
+  const { sourceImages: _sourceImages, ...safeExtraction } = extraction;
+
+  const nextExtraction = {
+    ...safeExtraction,
+    pages: Array.isArray(safeExtraction.pages)
+      ? await Promise.all(safeExtraction.pages.map(async (page) => ({
+        ...page,
+        questions: Array.isArray(page?.questions)
+          ? await Promise.all(page.questions.map(async (question) => ({
+            ...question,
+            images: Array.isArray(question?.images)
+              ? await Promise.all(question.images.map(async (image) => {
+                const localFile = image?.[LOCAL_VISUAL_CROP_FILE];
+                const { [LOCAL_VISUAL_CROP_FILE]: _localFile, ...safeImage } = image || {};
+                if (!localFile) return safeImage;
+
+                const uploadResult = await uploadUserFile({
+                  userId,
+                  file: localFile,
+                  pathPrefix: 'request-attachment-crops',
+                });
+
+                return {
+                  ...safeImage,
+                  src: uploadResult.downloadUrl,
+                  downloadUrl: uploadResult.downloadUrl,
+                  path: uploadResult.objectPath,
+                  size: Number(localFile.size || 0),
+                  mimeType: localFile.type || safeImage.mimeType || 'image/jpeg',
+                };
+              }))
+              : [],
+          })))
+          : [],
+      })))
+      : [],
+  };
+
+  return stripLocalExtractionPayload(nextExtraction);
 }
 
 function normalizeEstimatedDuration(estimatedMinutes) {
@@ -208,12 +281,9 @@ export default function StudentDashboardPage() {
   const attachmentsRef = useRef([]);
   const isManualSubjectRef = useRef(false);
   const loggedUnsupportedSubjectsRef = useRef(new Set());
-  const extractionRunCounterRef = useRef(0);
-  const activeExtractionTokenByKeyRef = useRef({});
-  const classificationRunCounterRef = useRef(0);
   const extractionOverlayRedirectTimeoutRef = useRef(null);
-  const classificationOverlayTimeoutRef = useRef(null);
   const loggedAiLogIdsRef = useRef(new Set());
+  const visualCropPromiseRef = useRef(null);
 
   const [stage, setStage] = useState('input');
   const [advanceIntent, setAdvanceIntent] = useState('');
@@ -224,6 +294,7 @@ export default function StudentDashboardPage() {
   const [attachments, setAttachments] = useState([]);
   const [attachmentExtractionByKey, setAttachmentExtractionByKey] = useState({});
   const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
+  const [gptExtraction, setGptExtraction] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [classifiedTopic, setClassifiedTopic] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(DEFAULT_LESSON_DURATION);
@@ -398,7 +469,7 @@ export default function StudentDashboardPage() {
     setTimeout(() => resizeTextarea(), 0);
   };
 
-  const onFileChange = (event) => {
+  const onFileChange = async (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
 
@@ -427,88 +498,96 @@ export default function StudentDashboardPage() {
     const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
+    setGptExtraction(null);
+    visualCropPromiseRef.current = null;
 
-    const extractionTokenByFileKey = {};
-
-    setAttachmentExtractionStatusByKey((prev) => {
-      const next = { ...prev };
-      newFilesForExtraction.forEach((file) => {
-        const fileKey = getAttachmentKey(file);
-        const token = extractionRunCounterRef.current + 1;
-        extractionRunCounterRef.current = token;
-        activeExtractionTokenByKeyRef.current[fileKey] = token;
-        extractionTokenByFileKey[fileKey] = token;
-        next[fileKey] = 'extracting';
-      });
-      return next;
-    });
-
-    appendUserAiLog(user?.uid, {
-      source: 'student_attachment_upload',
-      step: 'upload_started',
-      status: 'info',
-      message: 'Attachment upload started.',
-      details: {
-        fileCount: newFilesForExtraction.length,
-        fileNames: newFilesForExtraction.map((file) => file.name),
-      },
-    }).catch(() => null);
-
-    extractAttachments(newFilesForExtraction, (result, index) => {
-      const file = newFilesForExtraction[index];
-      const fileKey = getAttachmentKey(file);
-      const tokenForThisResult = extractionTokenByFileKey[fileKey];
-      const activeToken = activeExtractionTokenByKeyRef.current[fileKey];
-
-      if (!tokenForThisResult || tokenForThisResult !== activeToken) {
-        return;
+    try {
+      setClassificationState('running');
+      setClassificationStatus('Analyzing your request...');
+      
+      const extractionResult = await extractAttachmentsWithGPT(nextAttachments);
+      
+      setGptExtraction(extractionResult);
+      const cropPromise = attachVisualCropsToExtraction(extractionResult)
+        .then((croppedExtraction) => {
+          setGptExtraction((current) => (current === extractionResult ? croppedExtraction : current));
+          return croppedExtraction;
+        })
+        .catch((cropError) => {
+          console.debug('[studentAttachmentExtraction] background visual cropping failed', {
+            error: cropError?.message,
+          });
+          return extractionResult;
+        });
+      visualCropPromiseRef.current = cropPromise;
+      setClassifiedTopic(extractionResult.topics?.[0] || '');
+      setEstimatedMinutes(extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION);
+      
+      // Check subject compatibility
+      let foundSubject = '';
+      let isSupported = false;
+      const normalizedDetected = (extractionResult.subject || '').toLowerCase();
+      
+      if (normalizedDetected && normalizedDetected !== 'unknown') {
+        const matched = subjectOptions.find((opt) => opt.value.toLowerCase() === normalizedDetected || opt.label.toLowerCase() === normalizedDetected);
+        if (matched) {
+          foundSubject = matched.value;
+          isSupported = true;
+        } else {
+          // Check aliases
+          const aliasMatch = subjectOptions.find((opt) => {
+             const aliases = SUBJECT_ALIASES[opt.value] || [];
+             return aliases.some(alias => normalizedDetected.includes(alias));
+          });
+          if (aliasMatch) {
+            foundSubject = aliasMatch.value;
+            isSupported = true;
+          }
+        }
       }
 
-      setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
-      setAttachmentExtractionStatusByKey((prev) => ({
-        ...prev,
-        [fileKey]: result.success
-          ? 'text extracted'
-          : result.requiresPageSelection
-            ? 'ocr processing'
-            : result.extractionMethod === 'fallback'
-              ? 'fallback needed'
-              : 'extraction weak',
-      }));
-
-      appendUserAiLog(user?.uid, {
-        source: 'student_attachment_extraction',
-        step: 'file_extracted',
-        status: result.success ? 'success' : 'partial',
-        message: `Processed ${file?.name || 'attachment'}.`,
-        details: {
-          fileName: file?.name || '',
-          fileType: file?.type || '',
-          extractionMethod: result.extractionMethod || '',
-          extractionQuality: result.extractionQuality || '',
-          success: Boolean(result.success),
-          textLength: Number(result.textLength || 0),
-          extractedText: String(result.extractedText || '').slice(0, 5000),
-          scannedPdfDetected: Boolean(result.scannedPdfDetected),
-          ocrStatus: result.ocrStatus || '',
-          pageCount: result.pageCount || null,
-          failedPageCount: result.failedPageCount || 0,
-        },
-      }).catch(() => null);
-
-    }).finally(() => {
-      setAttachmentExtractionStatusByKey((prev) => {
-        const next = { ...prev };
-        newFilesForExtraction.forEach((file) => {
-          const fileKey = getAttachmentKey(file);
-          if (next[fileKey] === 'extracting') {
-            next[fileKey] = 'fallback needed';
-          }
-        });
-        return next;
+      setClassificationState('done');
+      if (isSupported) {
+        setSelectedSubject(foundSubject);
+        setClassificationStatus('Subject and study focus detected from your request.');
+        setUnsupportedSubjectRequest(null);
+      } else {
+        setSelectedSubject('');
+        setClassificationStatus(extractionResult.subject && extractionResult.subject !== 'Unknown' ? `Sorry, ${extractionResult.subject} is not offered yet.` : 'Choose the subject manually before sending.');
+        if (extractionResult.subject && extractionResult.subject !== 'Unknown') {
+          setUnsupportedSubjectRequest({
+            subject: extractionResult.subject,
+            inputText: '',
+            recorded: false,
+          });
+        }
+      }
+      if (!hasManualDurationOverride) {
+        setDurationMinutes(extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION);
+      }
+      
+      // Update dummy extraction status so the icons show "Done"
+      const statusUpdates = {};
+      nextAttachments.forEach(file => {
+         statusUpdates[getAttachmentKey(file)] = 'text extracted';
       });
-    });
-
+      setAttachmentExtractionStatusByKey(statusUpdates);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Extraction failed. Please try again or upload a clearer image.');
+      setClassificationState('done');
+      setClassificationStatus('Choose the subject manually before sending.');
+      
+      // Update dummy extraction status so the icons show "Error"
+      const statusUpdates = {};
+      nextAttachments.forEach(file => {
+         statusUpdates[getAttachmentKey(file)] = 'fallback needed';
+      });
+      setAttachmentExtractionStatusByKey(statusUpdates);
+    } finally {
+      setExtractionOverlayState('done');
+    }
+    
     event.target.value = '';
   };
 
@@ -516,7 +595,6 @@ export default function StudentDashboardPage() {
     const removed = attachmentsRef.current[indexToRemove];
     if (removed) {
       const removedKey = getAttachmentKey(removed);
-      delete activeExtractionTokenByKeyRef.current[removedKey];
       setAttachmentExtractionByKey((current) => {
         const updated = { ...current };
         delete updated[removedKey];
@@ -532,8 +610,32 @@ export default function StudentDashboardPage() {
     const nextAttachments = attachmentsRef.current.filter((_, index) => index !== indexToRemove);
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
+    setGptExtraction(null);
+    visualCropPromiseRef.current = null;
+    setClassifiedTopic('');
+    setEstimatedMinutes(DEFAULT_LESSON_DURATION);
+    setClassificationStatus('');
+    setClassificationState('idle');
+    setUnsupportedSubjectRequest(null);
+    setQuote(null);
+    setError('');
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(topic.trim() ? resolveSubjectFromText(topic, subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS) : '');
+    }
+    if (!nextAttachments.length && !hasManualDurationOverride) {
+      setDurationMinutes(DEFAULT_LESSON_DURATION);
+    }
     setStage('input');
     setAdvanceIntent(nextAttachments.length ? 'attachment' : '');
+  };
+
+  const openAttachmentReview = () => {
+    if (stage !== 'input') return;
+    if (!readyForReview) {
+      setAdvanceIntent('attachment');
+      return;
+    }
+    maybeAdvanceToReview('attachment');
   };
 
   const confirmRequest = async () => {
@@ -602,10 +704,21 @@ export default function StudentDashboardPage() {
         );
       }
 
+      const croppedExtraction = visualCropPromiseRef.current
+        ? await visualCropPromiseRef.current.catch(() => gptExtraction)
+        : gptExtraction;
+      const persistedGptExtraction = croppedExtraction
+        ? await uploadGptExtractionVisualCrops({
+          extraction: croppedExtraction,
+          userId: user.uid,
+        })
+        : null;
+
       const boardPreparationSource = buildBoardPreparationSource({
         attachments,
         uploadedAttachments,
         attachmentExtractionByKey,
+        gptExtraction: persistedGptExtraction,
       });
 
       const requestId = await createClassRequest({
@@ -681,191 +794,37 @@ export default function StudentDashboardPage() {
   }, [flowState, hasRequestContent]);
 
   useEffect(() => {
-    if (isManualSubjectRef.current) return;
+    const hasAttachments = attachmentsRef.current.length > 0;
+    if (hasAttachments) return;
 
-    const extractionResults = Object.values(attachmentExtractionByKey || {});
-    const { combinedText, hasUsableText, structuredPayload } = buildSubjectClassificationInput({
-      typedText: topic,
-      attachmentExtractions: extractionResults,
-      supportedSubjects: subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS,
-    });
-
-    console.debug('[studentRequestAI] classification effect evaluated input', {
-      topic,
-      attachmentCount: attachmentsRef.current.length,
-      hasUsableText,
-      combinedText,
-      structuredPayload,
-    });
-
-    if (!hasUsableText) {
-      console.debug('[studentRequestAI] classification skipped due to no usable text', {
-        attachmentCount: attachmentsRef.current.length,
-      });
-      appendUserAiLog(user?.uid, {
-        source: 'student_subject_classification',
-        step: 'classification_skipped_no_text',
-        status: 'info',
-        message: 'Classification skipped because there was no usable text.',
-        details: {
-          attachmentCount: attachmentsRef.current.length,
-          topic,
-        },
-      }).catch(() => null);
+    if (!topic.trim()) {
       setClassifiedTopic('');
       setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-      setClassificationStatus(
-        attachmentsRef.current.length
-          ? 'We could not read enough text from the upload. Choose the subject manually before sending.'
-          : '',
-      );
-      setClassificationState(attachmentsRef.current.length ? 'done' : 'idle');
+      setClassificationStatus('');
+      setClassificationState('idle');
       setUnsupportedSubjectRequest(null);
-      if (attachmentsRef.current.length && !isManualSubjectRef.current) {
-        setSelectedSubject('');
-      }
       if (!hasManualDurationOverride) {
         setDurationMinutes(DEFAULT_LESSON_DURATION);
       }
       return;
     }
 
-    const runId = classificationRunCounterRef.current + 1;
-    classificationRunCounterRef.current = runId;
-    let isCancelled = false;
+    const inferredSubject = isManualSubjectRef.current
+      ? selectedSubject
+      : resolveSubjectFromText(topic, subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS);
 
-    console.debug('[studentRequestAI] classification effect started', {
-      runId,
-      combinedText,
-      structuredPayload,
-      supportedSubjectCount: subjectOptions.length || SUBJECT_OPTIONS.length,
-    });
-    appendUserAiLog(user?.uid, {
-      source: 'student_subject_classification',
-      step: 'classification_input_prepared',
-      status: 'info',
-      message: 'Classification input prepared.',
-      details: {
-        runId,
-        attachmentCount: attachmentsRef.current.length,
-        supportedSubjectCount: subjectOptions.length || SUBJECT_OPTIONS.length,
-        combinedText,
-        structuredPayload,
-      },
-    }).catch(() => null);
-    setClassificationState('running');
-    setClassificationStatus('Analyzing your request...');
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        const result = await classifySubjectFromText({
-          inputText: combinedText,
-          inputPayload: structuredPayload,
-          supportedSubjects: subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS,
-        });
-
-        if (isCancelled || classificationRunCounterRef.current !== runId) return;
-
-        console.debug('[studentRequestAI] classification effect received result', {
-          runId,
-          result,
-        });
-        appendUserAiLog(user?.uid, {
-          source: 'student_subject_classification',
-          step: 'classification_result_received',
-          status: result.subject ? 'success' : 'fallback',
-          message: 'Classification result received.',
-          details: {
-            runId,
-            result,
-          },
-          prompt: '',
-          rawOutput: '',
-        }).catch(() => null);
-
-        const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
-        setClassifiedTopic(result.topic || '');
-        setEstimatedMinutes(nextEstimatedMinutes);
-        setClassificationState('done');
-
-        if (result.subject) {
-          setUnsupportedSubjectRequest(null);
-          setSelectedSubject(result.subject);
-          setClassificationStatus(
-            result.needsManualSubjectSelection || result.subjectConfidence === 'low'
-              ? 'Subject detected. Please confirm before sending.'
-              : 'Subject and study focus detected from your request.',
-          );
-        } else if (result.unsupportedSubjectRequested && result.unsupportedSubject) {
-          setSelectedSubject('');
-          setUnsupportedSubjectRequest({
-            subject: result.unsupportedSubject,
-            inputText: combinedText,
-            recorded: Boolean(result.unsupportedSubjectRecorded),
-          });
-          setClassificationStatus(`Sorry, ${result.unsupportedSubject} is not offered yet.`);
-          if (result.unsupportedSubjectRecorded) {
-            console.debug('[studentRequestAI] unsupported subject saved in Firestore', {
-              runId,
-              subject: result.unsupportedSubject,
-            });
-          } else {
-            recordUnsupportedSubjectOnce();
-          }
-          console.debug('[studentRequestAI] unsupported subject detected', {
-            runId,
-            unsupportedSubject: result.unsupportedSubject,
-            classification: result,
-          });
-        } else {
-          setUnsupportedSubjectRequest(null);
-          setSelectedSubject('');
-          setClassificationStatus('Choose the subject manually before sending.');
-          console.debug('[studentRequestAI] classification fell back to manual selection', {
-            runId,
-            classification: result,
-          });
-        }
-
-        if (!hasManualDurationOverride) {
-          setDurationMinutes(nextEstimatedMinutes);
-        }
-      } catch (classificationError) {
-        if (isCancelled || classificationRunCounterRef.current !== runId) return;
-        console.debug('[studentRequestAI] classification effect failed', {
-          runId,
-          error: classificationError?.message,
-        });
-        appendUserAiLog(user?.uid, {
-          source: 'student_subject_classification',
-          step: 'classification_failed',
-          status: 'failed',
-          message: 'Classification failed.',
-          error: classificationError?.message || '',
-          details: {
-            runId,
-            combinedText,
-          },
-        }).catch(() => null);
-        setClassifiedTopic('');
-        setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-        setClassificationState('done');
-        setClassificationStatus('Choose the subject manually before sending.');
-        setUnsupportedSubjectRequest(null);
-        if (!isManualSubjectRef.current) {
-          setSelectedSubject('');
-        }
-        if (!hasManualDurationOverride) {
-          setDurationMinutes(DEFAULT_LESSON_DURATION);
-        }
-      }
-    }, 450);
-
-    return () => {
-      isCancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [topic, attachmentExtractionByKey, hasManualDurationOverride, subjectOptions]);
+    if (!isManualSubjectRef.current) {
+      setSelectedSubject(inferredSubject);
+    }
+    setClassifiedTopic('');
+    setEstimatedMinutes(DEFAULT_LESSON_DURATION);
+    setClassificationState('done');
+    setUnsupportedSubjectRequest(null);
+    setClassificationStatus(inferredSubject ? 'Subject inferred from typed request.' : 'Choose the subject manually before sending.');
+    if (!hasManualDurationOverride) {
+      setDurationMinutes(DEFAULT_LESSON_DURATION);
+    }
+  }, [topic, hasManualDurationOverride, selectedSubject, subjectOptions]);
 
   useEffect(() => {
     if (!onboardingStatus.complete) return;
@@ -890,7 +849,7 @@ export default function StudentDashboardPage() {
 
     const timeoutId = setTimeout(() => {
       setShowSlowExtractionMessage(true);
-    }, 5000);
+    }, 10000);
 
     return () => clearTimeout(timeoutId);
   }, [shouldShowExtractionOverlay, extractionOverlayState]);
@@ -910,39 +869,6 @@ export default function StudentDashboardPage() {
     setShowSlowExtractionMessage(false);
     return undefined;
   }, [shouldShowExtractionOverlay, hasRunningExtraction, classificationState]);
-
-  useEffect(() => {
-    if (!shouldShowExtractionOverlay || classificationState !== 'running') {
-      if (classificationOverlayTimeoutRef.current) {
-        clearTimeout(classificationOverlayTimeoutRef.current);
-        classificationOverlayTimeoutRef.current = null;
-      }
-      return undefined;
-    }
-
-    classificationOverlayTimeoutRef.current = setTimeout(() => {
-      classificationRunCounterRef.current += 1;
-      setClassifiedTopic('');
-      setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-      setClassificationState('done');
-      setClassificationStatus('Choose the subject manually before sending.');
-      setUnsupportedSubjectRequest(null);
-      if (!isManualSubjectRef.current) {
-        setSelectedSubject('');
-      }
-      if (!hasManualDurationOverride) {
-        setDurationMinutes(DEFAULT_LESSON_DURATION);
-      }
-      console.debug('[studentRequestAI] classification overlay timed out; falling back to manual subject selection');
-    }, CLASSIFICATION_OVERLAY_TIMEOUT_MS);
-
-    return () => {
-      if (classificationOverlayTimeoutRef.current) {
-        clearTimeout(classificationOverlayTimeoutRef.current);
-        classificationOverlayTimeoutRef.current = null;
-      }
-    };
-  }, [shouldShowExtractionOverlay, classificationState, hasManualDurationOverride]);
 
   useEffect(() => {
     if (!shouldShowExtractionOverlay) return undefined;
@@ -976,10 +902,6 @@ export default function StudentDashboardPage() {
       clearTimeout(extractionOverlayRedirectTimeoutRef.current);
       extractionOverlayRedirectTimeoutRef.current = null;
     }
-    if (classificationOverlayTimeoutRef.current) {
-      clearTimeout(classificationOverlayTimeoutRef.current);
-      classificationOverlayTimeoutRef.current = null;
-    }
 
     return undefined;
   }, [stage]);
@@ -987,9 +909,6 @@ export default function StudentDashboardPage() {
   useEffect(() => () => {
     if (extractionOverlayRedirectTimeoutRef.current) {
       clearTimeout(extractionOverlayRedirectTimeoutRef.current);
-    }
-    if (classificationOverlayTimeoutRef.current) {
-      clearTimeout(classificationOverlayTimeoutRef.current);
     }
   }, []);
 
@@ -1013,7 +932,20 @@ export default function StudentDashboardPage() {
     const extractionStatus = attachmentExtractionStatusByKey[fileKey];
     const extractionStatusIcon = renderExtractionStatusIcon(extractionStatus);
     return (
-      <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="space-y-2 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
+      <div
+        key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+        role="button"
+        tabIndex={0}
+        onClick={openAttachmentReview}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openAttachmentReview();
+          }
+        }}
+        className="space-y-2 rounded-3xl border border-zinc-200 bg-white p-3 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/40"
+        aria-label={`Review ${file.name}`}
+      >
         <div className="flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-700">
             {isImage ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
@@ -1026,7 +958,10 @@ export default function StudentDashboardPage() {
           {extractionStatusIcon}
           <button
             type="button"
-            onClick={() => removeAttachment(index)}
+            onClick={(event) => {
+              event.stopPropagation();
+              removeAttachment(index);
+            }}
             className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-500 transition hover:text-zinc-900"
             aria-label={`Remove ${file.name}`}
           >

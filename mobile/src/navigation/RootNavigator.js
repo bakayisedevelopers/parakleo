@@ -1,17 +1,25 @@
-import { useState } from 'react';
-import { Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Linking, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LoadingState } from '../components/ui/States';
+import { NotificationCenterModal } from '../components/student/NotificationCenterModal';
+import { SessionRatingPrompt } from '../components/student/SessionRatingPrompt';
 import { useAuth } from '../context/AuthContext';
 import { HomeScreen } from '../screens/auth/HomeScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignupScreen } from '../screens/auth/SignupScreen';
 import { DashboardScreen } from '../screens/student/DashboardScreen';
 import { OnboardingScreen } from '../screens/student/OnboardingScreen';
+import { ProfileScreen } from '../screens/student/ProfileScreen';
+import { RequestDetailsScreen } from '../screens/student/RequestDetailsScreen';
+import { RequestStatusScreen } from '../screens/student/RequestStatusScreen';
 import { RequestsScreen } from '../screens/student/RequestsScreen';
+import { SessionRoomScreen } from '../screens/student/SessionRoomScreen';
 import { SessionsScreen } from '../screens/student/SessionsScreen';
 import { WalletScreen } from '../screens/student/WalletScreen';
-import { ProfileScreen } from '../screens/student/ProfileScreen';
+import { markNotificationsRead, subscribeToNotifications } from '../services/notificationService';
+import { subscribeToStudentSessions } from '../services/sessionService';
 import { colors } from '../theme/colors';
+import { RATABLE_SESSION_STATUSES, isLiveSessionStatus } from '../utils/sessionStatus';
 
 const authScreens = {
   Home: HomeScreen,
@@ -22,17 +30,137 @@ const authScreens = {
 const studentTabs = [
   { key: 'Dashboard', label: 'Home', component: DashboardScreen },
   { key: 'Onboarding', label: 'Complete Profile', component: OnboardingScreen },
-  { key: 'Requests', label: 'Classes', component: RequestsScreen },
-  { key: 'Sessions', label: 'Classes', component: SessionsScreen },
+  { key: 'Requests', label: 'My Classes', component: RequestsScreen },
+  { key: 'Sessions', label: 'Sessions', component: SessionsScreen },
   { key: 'Wallet', label: 'Payment', component: WalletScreen },
   { key: 'Profile', label: 'Profile', component: ProfileScreen },
 ];
 
+const detailScreens = {
+  RequestStatus: RequestStatusScreen,
+  RequestDetails: RequestDetailsScreen,
+  SessionRoom: SessionRoomScreen,
+};
+
+function resolveDeepLink(url) {
+  if (!url) {
+    return null;
+  }
+
+  const cleaned = String(url || '').replace(/^[a-z]+:\/\//i, '');
+  const parts = cleaned.split('/').filter(Boolean);
+  const host = String(parts[0] || '').toLowerCase();
+  const firstPathSegment = parts[1] || '';
+
+  if (host === 'request' && firstPathSegment) {
+    return { key: 'RequestStatus', params: { requestId: firstPathSegment, parentTab: 'Requests' } };
+  }
+
+  if (host === 'request-details' && firstPathSegment) {
+    return { key: 'RequestDetails', params: { requestId: firstPathSegment, parentTab: 'Requests' } };
+  }
+
+  if (host === 'session' && firstPathSegment) {
+    return { key: 'SessionRoom', params: { sessionId: firstPathSegment, parentTab: 'Sessions' } };
+  }
+
+  return null;
+}
+
+function getParentTab(routeKey, params) {
+  if (params?.parentTab) {
+    return params.parentTab;
+  }
+
+  if (routeKey === 'RequestStatus' || routeKey === 'RequestDetails') {
+    return 'Requests';
+  }
+
+  if (routeKey === 'SessionRoom') {
+    return 'Sessions';
+  }
+
+  return routeKey;
+}
+
 export function RootNavigator() {
   const { initializing, logout, user } = useAuth();
   const [authRoute, setAuthRoute] = useState('Home');
-  const [activeTab, setActiveTab] = useState('Dashboard');
+  const [activeRoute, setActiveRoute] = useState({ key: 'Dashboard', params: {} });
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [sessions, setSessions] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    Linking.getInitialURL().then((url) => {
+      if (!mounted) {
+        return;
+      }
+
+      const route = resolveDeepLink(url);
+      if (route) {
+        setActiveRoute(route);
+      }
+    });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      const route = resolveDeepLink(url);
+      if (route) {
+        setActiveRoute(route);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNotifications([]);
+      setNotificationsLoading(false);
+      return () => {};
+    }
+
+    return subscribeToNotifications(
+      user.uid,
+      (items) => {
+        setNotifications(items);
+        setNotificationsLoading(false);
+      },
+      () => {
+        setNotifications([]);
+        setNotificationsLoading(false);
+      },
+    );
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setSessions([]);
+      return () => {};
+    }
+
+    return subscribeToStudentSessions(
+      user.uid,
+      (items) => setSessions(items),
+      () => setSessions([]),
+    );
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!isNotificationsOpen) {
+      return;
+    }
+
+    const unreadIds = notifications.filter((item) => !item?.read).map((item) => item.id);
+    markNotificationsRead(unreadIds).catch(() => null);
+  }, [isNotificationsOpen, notifications]);
 
   if (initializing) {
     return (
@@ -51,45 +179,75 @@ export function RootNavigator() {
     );
   }
 
-  const active = studentTabs.find((tab) => tab.key === activeTab) || studentTabs[0];
-  const ActiveScreen = active.component;
-  const openRoute = (route) => {
-    setActiveTab(route);
+  const openRoute = (target) => {
+    if (typeof target === 'string') {
+      setActiveRoute({ key: target, params: {} });
+    } else if (target?.key) {
+      setActiveRoute({ key: target.key, params: target.params || {} });
+    }
+
     setIsNavOpen(false);
   };
+
+  const goBack = (fallbackKey = 'Dashboard') => {
+    openRoute(activeRoute?.params?.parentTab || fallbackKey);
+  };
+
+  const activeTabKey = getParentTab(activeRoute.key, activeRoute.params);
+  const active = studentTabs.find((tab) => tab.key === activeTabKey) || studentTabs[0];
+  const ActiveScreen = detailScreens[activeRoute.key] || active.component;
+  const isFullscreenRoute = activeRoute.key === 'SessionRoom';
+  const unreadCount = notifications.filter((item) => !item?.read).length;
+  const liveSession = sessions.find((session) => isLiveSessionStatus(session.status)) || null;
+  const ratingTarget = useMemo(
+    () => sessions.find((session) => RATABLE_SESSION_STATUSES.includes(String(session.status || '').toLowerCase()) && (session?.ratingStatus?.student || 'pending') === 'pending') || null,
+    [sessions],
+  );
+
   const handleLogout = async () => {
     setAuthRoute('Home');
     setIsNavOpen(false);
+    setActiveRoute({ key: 'Dashboard', params: {} });
     await logout();
   };
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.shell}>
-        <View style={styles.topbar}>
-          <Pressable accessibilityRole="button" onPress={() => setIsNavOpen(true)} style={styles.menuButton}>
-            <Text style={styles.menuIcon}>☰</Text>
-          </Pressable>
-          <View style={styles.topbarSpacer} />
-          <View style={styles.topbarActions}>
-            <Pressable accessibilityRole="button" style={styles.iconButton}>
-              <Text style={styles.iconText}>↗</Text>
+        {!isFullscreenRoute ? (
+          <View style={styles.topbar}>
+            <Pressable accessibilityRole="button" onPress={() => setIsNavOpen(true)} style={styles.menuButton}>
+              <Text style={styles.menuIcon}>Menu</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" style={styles.iconButton}>
-              <Text style={styles.iconText}>•</Text>
-              <View style={styles.notificationDot} />
-            </Pressable>
-            <View style={styles.identityPill}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>U</Text>
+            <View style={styles.topbarSpacer} />
+            <View style={styles.topbarActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => openRoute(liveSession?.id ? { key: 'SessionRoom', params: { sessionId: liveSession.id, parentTab: 'Sessions' } } : 'Requests')}
+                style={styles.iconButton}
+              >
+                <Text style={styles.iconText}>Go</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={() => setIsNotificationsOpen(true)} style={styles.iconButton}>
+                <Text style={styles.iconText}>Bell</Text>
+                {unreadCount ? <View style={styles.notificationDot} /> : null}
+              </Pressable>
+              <View style={styles.identityPill}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{String(user?.fullName || user?.displayName || 'U').slice(0, 1).toUpperCase()}</Text>
+                </View>
+                <Text style={styles.identityName} numberOfLines={1}>{user?.fullName || user?.displayName || 'Claxi User'}</Text>
               </View>
-              <Text style={styles.identityName} numberOfLines={1}>{user?.fullName || user?.displayName || 'Claxi User'}</Text>
             </View>
           </View>
-        </View>
-        <ScrollView contentContainerStyle={styles.content}>
-          <ActiveScreen navigate={setActiveTab} />
-        </ScrollView>
+        ) : null}
+        {isFullscreenRoute ? (
+          <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
+        ) : (
+          <ScrollView contentContainerStyle={styles.content}>
+            <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
+          </ScrollView>
+        )}
         <Modal animationType="fade" transparent visible={isNavOpen} onRequestClose={() => setIsNavOpen(false)}>
           <View style={styles.overlay}>
             <Pressable accessibilityRole="button" onPress={() => setIsNavOpen(false)} style={styles.scrim} />
@@ -105,15 +263,15 @@ export function RootNavigator() {
               </View>
               <View style={styles.navList}>
                 {studentTabs
-                  .filter((tab) => ['Dashboard', 'Requests', 'Wallet'].includes(tab.key))
+                  .filter((tab) => ['Dashboard', 'Requests', 'Sessions', 'Wallet'].includes(tab.key))
                   .map((tab) => (
                     <Pressable
                       accessibilityRole="button"
                       key={tab.key}
                       onPress={() => openRoute(tab.key)}
-                      style={[styles.navItem, active.key === tab.key && styles.navItemActive]}
+                      style={[styles.navItem, activeTabKey === tab.key && styles.navItemActive]}
                     >
-                      <Text style={[styles.navText, active.key === tab.key && styles.navTextActive]}>{tab.label}</Text>
+                      <Text style={[styles.navText, activeTabKey === tab.key && styles.navTextActive]}>{tab.label}</Text>
                     </Pressable>
                   ))}
               </View>
@@ -121,16 +279,16 @@ export function RootNavigator() {
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => openRoute('Onboarding')}
-                  style={[styles.navItem, active.key === 'Onboarding' && styles.navItemDark]}
+                  style={[styles.navItem, activeTabKey === 'Onboarding' && styles.navItemDark]}
                 >
-                  <Text style={[styles.navText, active.key === 'Onboarding' && styles.navTextDark]}>Complete Profile</Text>
+                  <Text style={[styles.navText, activeTabKey === 'Onboarding' && styles.navTextDark]}>Complete Profile</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => openRoute('Profile')}
-                  style={[styles.navItem, active.key === 'Profile' && styles.navItemDark]}
+                  style={[styles.navItem, activeTabKey === 'Profile' && styles.navItemDark]}
                 >
-                  <Text style={[styles.navText, active.key === 'Profile' && styles.navTextDark]}>Profile</Text>
+                  <Text style={[styles.navText, activeTabKey === 'Profile' && styles.navTextDark]}>Profile</Text>
                 </Pressable>
                 <Pressable accessibilityRole="button" onPress={handleLogout} style={styles.navItem}>
                   <Text style={styles.navText}>Log out</Text>
@@ -139,6 +297,21 @@ export function RootNavigator() {
             </View>
           </View>
         </Modal>
+        <NotificationCenterModal
+          visible={isNotificationsOpen}
+          notifications={notifications}
+          isLoading={notificationsLoading}
+          onClose={() => setIsNotificationsOpen(false)}
+          onOpenRequest={(requestId) => {
+            setIsNotificationsOpen(false);
+            openRoute({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
+          }}
+          onOpenSession={(sessionId) => {
+            setIsNotificationsOpen(false);
+            openRoute({ key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } });
+          }}
+        />
+        <SessionRatingPrompt session={ratingTarget} role="student" onHandled={() => null} />
       </View>
     </SafeAreaView>
   );
@@ -171,12 +344,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 44,
     justifyContent: 'center',
-    width: 44,
+    minWidth: 66,
+    paddingHorizontal: 12,
   },
   menuIcon: {
     color: '#3f3f46',
-    fontSize: 22,
+    fontSize: 12,
     fontWeight: '900',
+    textTransform: 'uppercase',
   },
   topbarSpacer: {
     flex: 1,
@@ -195,13 +370,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 42,
     justifyContent: 'center',
+    minWidth: 52,
+    paddingHorizontal: 10,
     position: 'relative',
-    width: 42,
   },
   iconText: {
     color: '#3f3f46',
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: '900',
+    textTransform: 'uppercase',
   },
   notificationDot: {
     backgroundColor: '#f43f5e',

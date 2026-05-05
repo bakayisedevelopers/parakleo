@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
 const vision = require('@google-cloud/vision');
@@ -20,10 +21,11 @@ const {
 } = require('./subjectExtraction');
 const {
   convertPdfToImages,
-  extractSubjectsWithAI,
+  extractTutorResultsWithGemini25Pro,
   classifySubjectWithAI,
   validateSubjectClassification,
 } = require('./aiSubjectExtraction');
+const { extractStudentAttachmentWithGemini25Pro } = require('./geminiExtraction');
 
 admin.initializeApp();
 
@@ -88,6 +90,108 @@ async function recordUnsupportedSubjectRequestOnServer({
   return { subject: normalizedSubject };
 }
 
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toDateFromMillis(value) {
+  const millis = timestampToMillis(value);
+  return millis ? new Date(millis) : null;
+}
+
+function getWeekRange(dateInput = new Date()) {
+  const date = toDateFromMillis(dateInput) || new Date();
+  const utcDay = date.getUTCDay();
+  const dayOffsetFromMonday = (utcDay + 6) % 7;
+  const weekStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  weekStart.setUTCDate(weekStart.getUTCDate() - dayOffsetFromMonday);
+  const weekEnd = new Date(weekStart.getTime() + (6 * 24 * 60 * 60 * 1000));
+  weekEnd.setUTCHours(23, 59, 59, 999);
+  return { weekStart, weekEnd };
+}
+
+function getWeekKey(dateInput = new Date()) {
+  const { weekStart } = getWeekRange(dateInput);
+  const thursday = new Date(weekStart.getTime());
+  thursday.setUTCDate(thursday.getUTCDate() + 3);
+  const year = thursday.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4UtcDay = jan4.getUTCDay();
+  const jan4Offset = (jan4UtcDay + 6) % 7;
+  const firstWeekStart = new Date(Date.UTC(year, 0, 4 - jan4Offset));
+  const weekNumber = Math.floor((weekStart.getTime() - firstWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return `${year}-W${String(Math.max(weekNumber, 1)).padStart(2, '0')}`;
+}
+
+function buildPayoutDocId(weekKey, tutorId) {
+  return `${weekKey}_${tutorId}`;
+}
+
+function computeFullSessionAmounts(session = {}) {
+  const totalAmount = Number(
+    session.originalPrice
+    ?? session.pricingSnapshot?.originalPrice
+    ?? session.pricingSnapshot?.totalAmount
+    ?? session.totalAmount
+    ?? 0,
+  );
+  const tutorAmount = Number(
+    Number.isFinite(Number(session.payoutBreakdown?.tutorAmount))
+      ? Number(session.payoutBreakdown.tutorAmount)
+      : (totalAmount * BILLING_RULES.TUTOR_PAYOUT_RATE),
+  );
+  const platformAmount = Number(
+    Number.isFinite(Number(session.payoutBreakdown?.platformAmount))
+      ? Number(session.payoutBreakdown.platformAmount)
+      : (totalAmount * BILLING_RULES.PLATFORM_FEE_RATE),
+  );
+
+  return {
+    totalAmount: Number(totalAmount.toFixed(2)),
+    tutorAmount: Number(tutorAmount.toFixed(2)),
+    platformAmount: Number(platformAmount.toFixed(2)),
+  };
+}
+
+function isDeletableClassUploadPath(value) {
+  const path = String(value || '').trim();
+  return DELETABLE_CLASS_UPLOAD_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+function collectClassUploadPaths(value, paths = new Set()) {
+  if (!value) return paths;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectClassUploadPaths(item, paths));
+    return paths;
+  }
+
+  if (typeof value === 'object') {
+    ['path', 'objectPath', 'filePath'].forEach((key) => {
+      if (isDeletableClassUploadPath(value[key])) {
+        paths.add(String(value[key]).trim());
+      }
+    });
+    Object.values(value).forEach((item) => collectClassUploadPaths(item, paths));
+  }
+
+  return paths;
+}
+
+async function deleteStorageObjectIfPresent(bucket, objectPath) {
+  try {
+    await bucket.file(objectPath).delete();
+    return true;
+  } catch (error) {
+    if (error?.code === 404) return false;
+    throw error;
+  }
+}
+
 const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
 const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
 const CLAXI_REALTIME_SECRETS = defineSecret('CLAXI_REALTIME_SECRETS');
@@ -117,6 +221,13 @@ const DEFAULT_ACCEPTANCE_RATE = 0.75;
 const DEFAULT_COMPLETION_RATE = 0.9;
 const DEFAULT_RATING = 4.5;
 const DEFAULT_AVG_RESPONSE_SECONDS = 30;
+const CLASS_UPLOAD_RETENTION_MS = 72 * 60 * 60 * 1000;
+const DELETABLE_CLASS_UPLOAD_PREFIXES = [
+  'request-attachments/',
+  'request-attachment-crops/',
+];
+const PAYOUT_COLLECTION = 'tutorWeeklyPayouts';
+const PAYOUT_LOOKBACK_WEEKS = 12;
 const DEFAULT_CANCELLATION_RATE = 0.08;
 const FAIRNESS_WORKLOAD_CAP = 10;
 const TUTOR_STATS_MAX_EVENTS = 100;
@@ -1002,13 +1113,14 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       imageCount: images.length,
       imageBytes: images.map((image) => image.length),
     });
-    const aiResult = await extractSubjectsWithAI(images, {
+    const aiResult = await extractTutorResultsWithGemini25Pro(images, {
       logger,
       logContext: {
         docId,
         uid: data.uid,
       },
       firebaseConfig: aiConfig,
+      model: 'gemini-2.5-pro',
     });
     const extractedSubjects = aiResult.validated;
     const aiPrompt = aiResult.prompt;
@@ -1804,6 +1916,85 @@ exports.getPricingQuote = onRequest({ cors: true }, async (req, res) => {
 
   res.status(200).json({ success: true, quote: sanitizePricingSnapshot(quotePayload) });
 });
+
+
+async function extractAttachmentGemini(req, res) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const images = req.body?.images;
+  if (!Array.isArray(images) || images.length === 0) {
+    res.status(400).json({ error: true, message: 'No images provided for extraction.' });
+    return;
+  }
+
+  if (images.length > 5) {
+    res.status(400).json({ error: true, message: 'Please upload a maximum of 5 pages or images.' });
+    return;
+  }
+
+  try {
+    const aiConfig = getAiSecrets();
+    let result = null;
+    let lastError = null;
+
+    // Retry once
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        result = await extractStudentAttachmentWithGemini25Pro({
+          images,
+          firebaseConfig: aiConfig,
+          model: 'gemini-2.5-pro',
+        });
+        break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (!result) {
+      logger.error('extract_attachment_ai_failed', {
+        uid: decoded.uid,
+        error: lastError?.message,
+      });
+      res.status(500).json({ error: true, message: 'Extraction failed. Please try again or upload a clearer image.' });
+      return;
+    }
+
+    logger.info('extract_attachment_ai_completed', {
+      uid: decoded.uid,
+      model: 'gemini-2.5-pro',
+      imagesSent: images.length,
+      inputTokens: result.usage?.promptTokenCount,
+      outputTokens: result.usage?.candidatesTokenCount,
+      totalTokens: result.usage?.totalTokenCount,
+    });
+
+    res.status(200).json({ success: true, extraction: result.parsedContent });
+  } catch (error) {
+    logger.error('extract_attachment_ai_error', {
+      uid: decoded.uid,
+      error: error?.message,
+    });
+    res.status(500).json({ error: true, message: 'Extraction failed. Please try again or upload a clearer image.' });
+  }
+}
+
+exports.extractAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, extractAttachmentGemini);
 
 exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== 'POST') {
@@ -2603,6 +2794,142 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRET
   }
 });
 
+exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const payout = normalizePayoutInput(req.body || {});
+  try {
+    assertValidPayoutInput(payout);
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+    return;
+  }
+
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('Payment configuration is unavailable while verifying tutor payout account.', {
+      uid: decoded.uid,
+      error: error.message,
+    });
+    res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
+    return;
+  }
+
+  try {
+    const verifiedPayout = await verifyAndCreateTutorTransferRecipient({
+      paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+      payout,
+      email: decoded.email || '',
+      uid: decoded.uid,
+    });
+
+    logger.info('tutor_payout_account_verified', {
+      uid: decoded.uid,
+      bankCode: verifiedPayout.bankCode,
+      recipientCreated: Boolean(verifiedPayout.paystackRecipientCode),
+    });
+
+    const userRef = db.collection('users').doc(decoded.uid);
+    const userSnap = await userRef.get();
+    const existing = userSnap.exists ? (userSnap.data() || {}) : {};
+    await userRef.set({
+      tutorProfile: {
+        ...(existing.tutorProfile || {}),
+        payout: verifiedPayout,
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.status(200).json({
+      success: true,
+      payout: verifiedPayout,
+    });
+  } catch (error) {
+    logger.warn('tutor_payout_account_verification_failed', {
+      uid: decoded.uid,
+      error: error.message,
+      status: error.status || null,
+    });
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Unable to verify payout account.',
+    });
+  }
+});
+
+exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+  if (req.method !== 'GET') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('Payment configuration is unavailable while listing tutor payout banks.', {
+      uid: decoded.uid,
+      error: error.message,
+    });
+    res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
+    return;
+  }
+
+  try {
+    const payload = await callPaystackApi({
+      paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+      path: '/bank?country=south%20africa&currency=ZAR&enabled_for_verification=true&perPage=100',
+    });
+
+    const banks = Array.isArray(payload?.data)
+      ? payload.data.map((bank) => ({
+        id: bank.id ? String(bank.id) : String(bank.code || bank.slug || bank.name || ''),
+        name: bank.name || '',
+        code: String(bank.code || ''),
+        slug: bank.slug || '',
+      })).filter((bank) => bank.name && bank.code)
+      : [];
+
+    res.status(200).json({ success: true, banks });
+  } catch (error) {
+    logger.warn('tutor_payout_banks_list_failed', {
+      uid: decoded.uid,
+      error: error.message,
+      status: error.status || null,
+    });
+    res.status(500).json({ success: false, message: 'Unable to load payout banks right now.' });
+  }
+});
+
 const BILLING_RULES = {
   PLATFORM_FEE_RATE: 0.3,
   TUTOR_PAYOUT_RATE: 0.7,
@@ -2636,6 +2963,140 @@ async function chargeAuthorizationWithPaystack({ paystackSecretKey, email, amoun
     reason: succeeded ? null : (chargePayload?.message || 'gateway_declined'),
     transactionId: chargeData?.id ? String(chargeData.id) : null,
   };
+}
+
+async function callPaystackApi({ paystackSecretKey, path, method = 'GET', body = null }) {
+  const response = await fetch(`https://api.paystack.co${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${paystackSecretKey}`,
+      'Content-Type': 'application/json',
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || payload?.status !== true) {
+    const error = new Error(payload?.message || `Paystack request failed (${response.status})`);
+    error.payload = payload;
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload;
+}
+
+function normalizePayoutInput(input = {}) {
+  return {
+    bankName: String(input.bankName || '').trim(),
+    bankCode: String(input.bankCode || '').trim(),
+    accountNumber: String(input.accountNumber || '').replace(/\s+/g, '').trim(),
+    accountHolder: String(input.accountHolder || '').trim(),
+    accountType: String(input.accountType || 'personal').trim().toLowerCase(),
+    documentType: String(input.documentType || 'identityNumber').trim(),
+    documentNumber: String(input.documentNumber || '').replace(/\s+/g, '').trim(),
+  };
+}
+
+function assertValidPayoutInput(input = {}) {
+  const missing = [];
+  ['bankName', 'bankCode', 'accountNumber', 'accountHolder', 'accountType', 'documentType', 'documentNumber']
+    .forEach((field) => {
+      if (!input[field]) missing.push(field);
+    });
+  if (missing.length) {
+    throw new Error(`Missing payout field(s): ${missing.join(', ')}`);
+  }
+  if (!['identityNumber', 'passportNumber'].includes(input.documentType)) {
+    throw new Error('Choose South African ID or Passport for payout verification.');
+  }
+}
+
+async function verifyAndCreateTutorTransferRecipient({ paystackSecretKey, payout, email, uid }) {
+  const validationPayload = {
+    account_name: payout.accountHolder,
+    account_number: payout.accountNumber,
+    account_type: payout.accountType,
+    bank_code: payout.bankCode,
+    country_code: 'ZA',
+    document_type: payout.documentType,
+    document_number: payout.documentNumber,
+  };
+
+  const validation = await callPaystackApi({
+    paystackSecretKey,
+    path: '/bank/validate',
+    method: 'POST',
+    body: validationPayload,
+  });
+  const validationData = validation?.data || {};
+  const validationPassed = validationData.verified === true
+    && validationData.accountHolderMatch === true
+    && validationData.accountOpen === true
+    && validationData.accountAcceptsCredits === true;
+
+  if (!validationPassed) {
+    const validationError = new Error(
+      validationData.verificationMessage
+      || 'We could not verify this bank account. Please check the bank, account number, account holder, and ID/passport number.',
+    );
+    validationError.payload = validation;
+    throw validationError;
+  }
+
+  const recipient = await callPaystackApi({
+    paystackSecretKey,
+    path: '/transferrecipient',
+    method: 'POST',
+    body: {
+      type: 'basa',
+      name: payout.accountHolder,
+      account_number: payout.accountNumber,
+      bank_code: payout.bankCode,
+      currency: 'ZAR',
+      description: `Claxi tutor payout recipient ${uid}`,
+      metadata: {
+        uid,
+        email: email || '',
+        bankName: payout.bankName,
+      },
+    },
+  });
+
+  return {
+    ...payout,
+    countryCode: 'ZA',
+    currency: 'ZAR',
+    paystackRecipientCode: recipient?.data?.recipient_code || '',
+    paystackRecipientId: recipient?.data?.id ? String(recipient.data.id) : '',
+    verified: true,
+    verifiedAt: new Date().toISOString(),
+    validationMessage: validationData.verificationMessage || validation?.message || 'Account validated.',
+    validationChecks: {
+      accountAcceptsCredits: validationData.accountAcceptsCredits === true,
+      accountHolderMatch: validationData.accountHolderMatch === true,
+      accountOpen: validationData.accountOpen === true,
+      verified: validationData.verified === true,
+    },
+  };
+}
+
+async function initiatePaystackTransfer({ paystackSecretKey, amount, recipientCode, reason, reference }) {
+  const payload = await callPaystackApi({
+    paystackSecretKey,
+    path: '/transfer',
+    method: 'POST',
+    body: {
+      source: 'balance',
+      amount: Math.round(Number(amount || 0) * 100),
+      recipient: recipientCode,
+      reason,
+      reference,
+      currency: 'ZAR',
+    },
+  });
+
+  return payload?.data || {};
 }
 
 exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
@@ -2883,6 +3344,424 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
     success: true,
     session: updatedSession,
     charge: { ok: charge.ok, reason: charge.reason || null },
+  });
+});
+
+exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const cardId = req.body?.cardId ? String(req.body.cardId).trim() : '';
+  if (!cardId) {
+    res.status(400).json({ success: false, message: 'Select a payment card.' });
+    return;
+  }
+
+  const studentRef = db.collection('users').doc(decoded.uid);
+  const studentSnap = await studentRef.get();
+  if (!studentSnap.exists) {
+    res.status(404).json({ success: false, message: 'Student profile not found.' });
+    return;
+  }
+
+  const studentData = studentSnap.data() || {};
+  const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
+  const walletBalance = Number(wallet.balance || 0);
+  const outstandingAmount = walletBalance < 0 ? Number(Math.abs(walletBalance).toFixed(2)) : 0;
+  if (!outstandingAmount) {
+    res.status(200).json({
+      success: true,
+      message: 'No outstanding balance to pay.',
+      profile: { uid: decoded.uid, ...studentData },
+      charge: { ok: true, reason: null, transactionId: null },
+    });
+    return;
+  }
+
+  const paymentMethods = Array.isArray(studentData.paymentMethods) ? studentData.paymentMethods : [];
+  const selectedCard = paymentMethods.find((card) => card.id === cardId) || null;
+  if (!selectedCard) {
+    res.status(400).json({ success: false, message: 'Selected payment card was not found.' });
+    return;
+  }
+
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('Payment configuration is unavailable while paying outstanding balance.', {
+      uid: decoded.uid,
+      error: error.message,
+    });
+    res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
+    return;
+  }
+
+  const charge = await chargeAuthorizationWithPaystack({
+    paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+    email: studentData.email || decoded.email || '',
+    amount: outstandingAmount,
+    authorizationCode: selectedCard.paystackAuthorizationCode || '',
+  });
+
+  if (!charge.ok) {
+    logger.warn('Outstanding balance payment declined.', {
+      uid: decoded.uid,
+      amount: outstandingAmount,
+      reason: charge.reason || 'gateway_declined',
+    });
+    res.status(402).json({
+      success: false,
+      message: 'Card payment was not successful. Please try another card or contact your bank.',
+      charge: { ok: false, reason: charge.reason || 'gateway_declined' },
+    });
+    return;
+  }
+
+  await studentRef.set({
+    wallet: {
+      ...wallet,
+      balance: 0,
+      currency: wallet.currency || 'ZAR',
+      updatedAt: new Date().toISOString(),
+      lastOutstandingPayment: {
+        amount: outstandingAmount,
+        cardLast4: selectedCard.last4 || null,
+        transactionId: charge.transactionId || null,
+        paidAt: new Date().toISOString(),
+      },
+    },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const updatedSnap = await studentRef.get();
+  res.status(200).json({
+    success: true,
+    message: 'Outstanding balance paid successfully.',
+    profile: { uid: updatedSnap.id, ...updatedSnap.data() },
+    charge: { ok: true, reason: null, transactionId: charge.transactionId || null },
+    amount: outstandingAmount,
+  });
+});
+
+exports.deletePaymentMethod = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const methodId = req.body?.methodId ? String(req.body.methodId).trim() : '';
+  if (!methodId) {
+    res.status(400).json({ success: false, message: 'Missing payment method.' });
+    return;
+  }
+
+  const userRef = db.collection('users').doc(decoded.uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    res.status(404).json({ success: false, message: 'User profile not found.' });
+    return;
+  }
+
+  const userData = userSnap.data() || {};
+  const paymentMethods = Array.isArray(userData.paymentMethods) ? userData.paymentMethods : [];
+  const remainingMethods = paymentMethods
+    .filter((method) => method?.id !== methodId)
+    .map((method) => ({ ...method }));
+
+  if (remainingMethods.length === paymentMethods.length) {
+    res.status(404).json({ success: false, message: 'Payment method not found.' });
+    return;
+  }
+
+  if (remainingMethods.length && !remainingMethods.some((method) => method.isDefault)) {
+    remainingMethods[0].isDefault = true;
+  }
+
+  await userRef.set({
+    paymentMethods: remainingMethods,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const updatedSnap = await userRef.get();
+  res.status(200).json({
+    success: true,
+    message: 'Card removed.',
+    profile: { uid: updatedSnap.id, ...updatedSnap.data() },
+  });
+});
+
+exports.deleteCompletedClassUploads = onSchedule('every 60 minutes', async () => {
+  const cutoffMs = Date.now() - CLASS_UPLOAD_RETENTION_MS;
+  const sessionsSnap = await db
+    .collection('sessions')
+    .where('status', '==', 'completed')
+    .limit(100)
+    .get();
+
+  const bucket = admin.storage().bucket();
+  let checkedCount = 0;
+  let cleanedCount = 0;
+  let deletedObjectCount = 0;
+
+  for (const sessionDoc of sessionsSnap.docs) {
+    const session = sessionDoc.data() || {};
+    if (session.uploadedFilesCleanupStatus === 'deleted') continue;
+
+    const completedAtMs = timestampToMillis(session.endedAt || session.completedAt || session.updatedAt);
+    if (!completedAtMs || completedAtMs > cutoffMs) continue;
+    checkedCount += 1;
+
+    let requestData = {};
+    if (session.requestId) {
+      const requestSnap = await db.collection('classRequests').doc(session.requestId).get().catch(() => null);
+      requestData = requestSnap?.exists ? (requestSnap.data() || {}) : {};
+    }
+
+    const paths = collectClassUploadPaths([
+      session.requestAttachment,
+      session.attachments,
+      session.boardPreparationSource,
+      requestData.attachment,
+      requestData.attachments,
+      requestData.boardPreparationSource,
+    ]);
+
+    const uniquePaths = [...paths];
+    let deletedForSession = 0;
+    for (const objectPath of uniquePaths) {
+      const deleted = await deleteStorageObjectIfPresent(bucket, objectPath);
+      if (deleted) {
+        deletedForSession += 1;
+        deletedObjectCount += 1;
+      }
+    }
+
+    await sessionDoc.ref.set({
+      uploadedFilesCleanupStatus: 'deleted',
+      uploadedFilesDeletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      uploadedFilesDeletedCount: deletedForSession,
+      uploadedFilesCleanupCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    if (session.requestId) {
+      await db.collection('classRequests').doc(session.requestId).set({
+        uploadedFilesCleanupStatus: 'deleted',
+        uploadedFilesDeletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    cleanedCount += 1;
+  }
+
+  logger.info('completed_class_upload_cleanup_finished', {
+    checkedCount,
+    cleanedCount,
+    deletedObjectCount,
+  });
+});
+
+async function syncBackendWeeklyPayoutRecords() {
+  const startWindow = Date.now() - (PAYOUT_LOOKBACK_WEEKS * 7 * 24 * 60 * 60 * 1000);
+  const currentWeekStart = getWeekRange(new Date()).weekStart.getTime();
+  const sessionsSnap = await db
+    .collection('sessions')
+    .where('status', '==', 'completed')
+    .limit(1000)
+    .get();
+
+  const grouped = new Map();
+  sessionsSnap.docs.forEach((sessionDoc) => {
+    const session = { id: sessionDoc.id, ...(sessionDoc.data() || {}) };
+    if (!session.tutorId) return;
+
+    const completedAtMs = timestampToMillis(session.endedAt || session.completedAt || session.updatedAt);
+    if (!completedAtMs || completedAtMs < startWindow || completedAtMs >= currentWeekStart) return;
+
+    const completedDate = new Date(completedAtMs);
+    const weekKey = getWeekKey(completedDate);
+    const { weekStart, weekEnd } = getWeekRange(completedDate);
+    const groupId = buildPayoutDocId(weekKey, session.tutorId);
+    const amounts = computeFullSessionAmounts(session);
+    const existing = grouped.get(groupId) || {
+      tutorId: session.tutorId,
+      tutorName: session.tutorName || '',
+      tutorEmail: session.tutorEmail || '',
+      weekKey,
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+      totalSessions: 0,
+      grossAmount: 0,
+      tutorAmount: 0,
+      platformAmount: 0,
+      sessionIds: [],
+    };
+
+    existing.totalSessions += 1;
+    existing.grossAmount = Number((existing.grossAmount + amounts.totalAmount).toFixed(2));
+    existing.tutorAmount = Number((existing.tutorAmount + amounts.tutorAmount).toFixed(2));
+    existing.platformAmount = Number((existing.platformAmount + amounts.platformAmount).toFixed(2));
+    existing.sessionIds.push(session.id);
+    if (!existing.tutorName && session.tutorName) existing.tutorName = session.tutorName;
+    if (!existing.tutorEmail && session.tutorEmail) existing.tutorEmail = session.tutorEmail;
+
+    grouped.set(groupId, existing);
+  });
+
+  const upserted = [];
+  for (const [docId, record] of grouped.entries()) {
+    const payoutRef = db.collection(PAYOUT_COLLECTION).doc(docId);
+    const existingSnap = await payoutRef.get();
+    const existing = existingSnap.exists ? (existingSnap.data() || {}) : {};
+    if (existing.status === 'paid') {
+      upserted.push({ id: docId, ...existing });
+      continue;
+    }
+
+    await payoutRef.set({
+      ...record,
+      status: existing.status || 'unpaid',
+      paidAt: existing.paidAt || null,
+      paidBy: existing.paidBy || null,
+      notes: existing.notes || '',
+      transferAttempts: existing.transferAttempts || 0,
+      createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    const saved = await payoutRef.get();
+    upserted.push({ id: saved.id, ...saved.data() });
+  }
+
+  return upserted;
+}
+
+exports.processWeeklyTutorPayouts = onSchedule({
+  schedule: '0 0 * * 1',
+  timeZone: 'Africa/Johannesburg',
+  secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY],
+}, async () => {
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('weekly_tutor_payouts_missing_payment_config', { error: error.message });
+    return;
+  }
+
+  const syncedRecords = await syncBackendWeeklyPayoutRecords();
+  let paidCount = 0;
+  let failedCount = 0;
+  let skippedCount = 0;
+
+  for (const payout of syncedRecords) {
+    const status = String(payout.status || 'unpaid').toLowerCase();
+    if (!['unpaid', 'unsuccessful', 'failed'].includes(status)) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const amount = Number(payout.tutorAmount || 0);
+    if (!amount || amount <= 0) {
+      await db.collection(PAYOUT_COLLECTION).doc(payout.id).set({
+        status: 'paid',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        paidBy: { system: 'automatic', reason: 'zero_amount' },
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      paidCount += 1;
+      continue;
+    }
+
+    const tutorSnap = await db.collection('users').doc(payout.tutorId).get();
+    const tutorData = tutorSnap.exists ? (tutorSnap.data() || {}) : {};
+    const payoutDetails = tutorData?.tutorProfile?.payout || {};
+    const recipientCode = payoutDetails.paystackRecipientCode || '';
+    if (!recipientCode || payoutDetails.verified !== true) {
+      await db.collection(PAYOUT_COLLECTION).doc(payout.id).set({
+        status: 'unsuccessful',
+        failureReason: 'Tutor payout account is not verified.',
+        transferAttempts: Number(payout.transferAttempts || 0) + 1,
+        lastTransferAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      failedCount += 1;
+      continue;
+    }
+
+    const reference = `claxi-${payout.weekKey}-${payout.tutorId}-${Date.now()}`.replace(/[^a-zA-Z0-9-_]/g, '-').slice(0, 100);
+    const payoutRef = db.collection(PAYOUT_COLLECTION).doc(payout.id);
+    await payoutRef.set({
+      status: 'processing',
+      transferReference: reference,
+      transferAttempts: Number(payout.transferAttempts || 0) + 1,
+      lastTransferAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    try {
+      const transfer = await initiatePaystackTransfer({
+        paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+        amount,
+        recipientCode,
+        reason: `Claxi tutor payout ${payout.weekKey}`,
+        reference,
+      });
+
+      await payoutRef.set({
+        status: 'paid',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        paidBy: { system: 'automatic', provider: 'paystack' },
+        transferReference: reference,
+        transferCode: transfer.transfer_code || null,
+        transferId: transfer.id ? String(transfer.id) : null,
+        transferStatus: transfer.status || null,
+        failureReason: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      paidCount += 1;
+    } catch (error) {
+      await payoutRef.set({
+        status: 'unsuccessful',
+        failureReason: error.message || 'Paystack transfer failed.',
+        transferReference: reference,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      failedCount += 1;
+    }
+  }
+
+  logger.info('weekly_tutor_payouts_processed', {
+    syncedCount: syncedRecords.length,
+    paidCount,
+    failedCount,
+    skippedCount,
   });
 });
 

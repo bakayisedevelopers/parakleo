@@ -76,7 +76,13 @@ export function formatWeekRangeLabel(weekStartInput, weekEndInput) {
 }
 
 export function computeSessionAmounts(session) {
-  const totalAmount = Number(session?.totalAmount || 0);
+  const totalAmount = Number(
+    session?.originalPrice
+    ?? session?.pricingSnapshot?.originalPrice
+    ?? session?.pricingSnapshot?.totalAmount
+    ?? session?.totalAmount
+    ?? 0,
+  );
   const storedTutorAmount = Number(session?.payoutBreakdown?.tutorAmount);
   const storedPlatformAmount = Number(session?.payoutBreakdown?.platformAmount);
 
@@ -107,6 +113,9 @@ export function getPayoutStatusBadgeClasses(status) {
   }
   if (normalized === 'processing') {
     return 'border-amber-300 bg-amber-50 text-amber-700';
+  }
+  if (normalized === 'unsuccessful' || normalized === 'failed') {
+    return 'border-rose-300 bg-rose-50 text-rose-700';
   }
   return 'border-zinc-300 bg-zinc-100 text-zinc-700';
 }

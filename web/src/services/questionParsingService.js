@@ -346,3 +346,67 @@ export function parseQuestionsFromExtraction({
 
   return finalBlocks;
 }
+
+export function parseQuestionsFromGptExtraction({
+  gptExtraction = null,
+  attachments = [],
+} = {}) {
+  const pages = Array.isArray(gptExtraction?.pages) ? gptExtraction.pages : [];
+  const attachmentFiles = dedupeFiles((attachments || []).map((item) => normalizeFileAttachment(item)).filter(Boolean));
+  const blocks = [];
+
+  pages.forEach((page) => {
+    const pageNumber = Number(page?.pageNumber || 0);
+    const questions = Array.isArray(page?.questions) ? page.questions : [];
+
+    questions.forEach((question, questionIndex) => {
+      const questionText = String(question?.text || '').trim();
+      const options = Array.isArray(question?.options) ? question.options : [];
+      const visualRegions = Array.isArray(question?.visualRegions) ? question.visualRegions : [];
+      const warnings = Array.isArray(question?.warnings) ? question.warnings : [];
+      const questionImages = Array.isArray(question?.images)
+        ? dedupeImages(question.images.map((image) => normalizeImageAttachment(image)).filter(Boolean))
+        : [];
+
+      const optionsText = options.length
+        ? `\n\nOptions:\n${options
+          .map((option) => `${String(option?.label || '').trim() || '-'} ${String(option?.text || '').trim()}`.trim())
+          .join('\n')}`
+        : '';
+      const visualsText = visualRegions.length
+        ? `\n\nVisual regions:\n${visualRegions
+          .map((region, regionIndex) => {
+            const type = String(region?.type || 'other');
+            const description = String(region?.description || '').trim();
+            const x = Number(region?.x || 0);
+            const y = Number(region?.y || 0);
+            const width = Number(region?.width || 0);
+            const height = Number(region?.height || 0);
+            return `${regionIndex + 1}. ${type} (${x}, ${y}, ${width}, ${height})${description ? `: ${description}` : ''}`;
+          })
+          .join('\n')}`
+        : '';
+      const warningsText = warnings.length ? `\n\nWarnings: ${warnings.join('; ')}` : '';
+      const prefix = question?.questionNumber ? `Question ${question.questionNumber}` : `Question ${questionIndex + 1}`;
+
+      blocks.push({
+        questionNumber: String(question?.questionNumber || ''),
+        text: `${prefix}${questionText ? `\n${questionText}` : ''}${optionsText}${visualsText}${warningsText}`.trim(),
+        images: questionImages,
+        files: [],
+        pageNumber,
+        questionId: String(question?.questionId || ''),
+        type: String(question?.type || 'unknown'),
+        hasVisuals: Boolean(question?.hasVisuals),
+        visualRegions,
+      });
+    });
+  });
+
+  if (!blocks.length) {
+    return buildFallbackQuestion('', [], attachmentFiles);
+  }
+
+  blocks[0].files = attachmentFiles;
+  return blocks;
+}

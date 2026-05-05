@@ -140,7 +140,9 @@ export default function ProfilePage() {
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Email</dt><dd className="mt-1 text-lg font-semibold">{currentUser?.email}</dd></div>
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Role</dt><dd className="mt-1 text-lg font-semibold capitalize">{currentUser?.activeRole || currentUser?.role}</dd></div>
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Student onboarding</dt><dd className="mt-1 text-sm">{studentStatus.complete ? 'Complete' : studentStatus.message}</dd></div>
-          <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? 'Complete' : tutorStatus.message}</dd></div>
+          {isTutorRole || (currentUser?.roles || []).includes('tutor') ? (
+            <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? 'Complete' : tutorStatus.message}</dd></div>
+          ) : null}
         </dl>
       </SectionCard>
 

@@ -33,7 +33,7 @@ export const statusConfig = {
   },
   [REQUEST_STATUSES.COMPLETED]: {
     label: 'Completed',
-    className: 'bg-zinc-500/10 text-zinc-300 border-zinc-500/30',
+    className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
   },
   [REQUEST_STATUSES.CANCELED]: {
     label: 'Canceled',
