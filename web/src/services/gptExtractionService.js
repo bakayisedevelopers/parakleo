@@ -3,8 +3,11 @@ import { getAuth } from 'firebase/auth';
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 const EXTRACT_ATTACHMENT_ENDPOINT = import.meta.env.VITE_EXTRACT_ATTACHMENT_ENDPOINT || '/extract-attachment-ai';
+const CLOUD_FUNCTIONS_BASE_URL = String(import.meta.env.VITE_CLOUD_FUNCTIONS_URL || '').trim();
+const STREAM_BOARD_EXTRACTION_ENDPOINT = import.meta.env.VITE_STREAM_BOARD_EXTRACTION_ENDPOINT
+  || (CLOUD_FUNCTIONS_BASE_URL ? `${CLOUD_FUNCTIONS_BASE_URL}/streamAttachmentAi` : '/stream-board-extraction');
 export const LOCAL_VISUAL_CROP_FILE = Symbol('localVisualCropFile');
-const VISUAL_CROP_TYPES = new Set(['diagram', 'table', 'graph', 'figure', 'image']);
+const VISUAL_CROP_TYPES = new Set(['diagram', 'table', 'graph', 'figure', 'image', 'formula', 'equation', 'math']);
 let cachedPdfJs = null;
 
 async function loadPdfJs() {
@@ -78,6 +81,7 @@ function cloneExtraction(extraction) {
         questions: Array.isArray(page?.questions)
           ? page.questions.map((question) => ({
             ...question,
+            sourceImageIndex: Number.isFinite(Number(question?.sourceImageIndex)) ? Number(question.sourceImageIndex) : null,
             options: Array.isArray(question?.options) ? question.options.map((option) => ({ ...option })) : [],
             visualRegions: Array.isArray(question?.visualRegions) ? question.visualRegions.map((region) => ({ ...region })) : [],
             warnings: Array.isArray(question?.warnings) ? [...question.warnings] : [],
@@ -118,7 +122,17 @@ function getCropRect(region = {}, sourceImage = {}) {
     height = (height / 100) * sourceHeight;
   }
 
-  const padding = 12;
+  const regionType = String(region?.type || 'other').toLowerCase();
+  const padding = ({
+    table: 24,
+    graph: 24,
+    diagram: 20,
+    figure: 20,
+    image: 16,
+    formula: 28,
+    equation: 28,
+    math: 28,
+  })[regionType] || 18;
   const cropX = Math.max(0, Math.floor(x - padding));
   const cropY = Math.max(0, Math.floor(y - padding));
   const cropWidth = Math.min(sourceWidth - cropX, Math.ceil(width + padding * 2));
@@ -180,7 +194,11 @@ export async function attachVisualCropsToExtraction(extraction) {
   const nextExtraction = cloneExtraction(extraction);
 
   for (const page of nextExtraction.pages) {
-    const sourceImageIndex = Number(page?.sourceImageIndex || 0);
+    const pageSourceImageIndex = Number(page?.sourceImageIndex);
+    const fallbackSourceImageIndex = Number(page?.pageNumber || 1) - 1;
+    const sourceImageIndex = Number.isFinite(pageSourceImageIndex) && pageSourceImageIndex >= 0
+      ? Math.floor(pageSourceImageIndex)
+      : Math.max(0, fallbackSourceImageIndex);
     const sourceImage = sourceImages[sourceImageIndex];
     if (!sourceImage) continue;
 
@@ -237,7 +255,7 @@ export async function attachVisualCropsToExtraction(extraction) {
   return nextExtraction;
 }
 
-export async function extractAttachmentsWithGPT(files) {
+async function buildPayloadImages(files) {
   let totalVisualCount = 0;
   const pdfDocs = [];
   const MAX_VISUALS = 5;
@@ -289,21 +307,330 @@ export async function extractAttachmentsWithGPT(files) {
     }
   }
 
+  return payloadImages;
+}
+
+function truncateForLog(value = '', maxChars = 320) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...`;
+}
+
+function normalizeStreamJsonLine(line = '') {
+  let normalized = String(line || '').replace(/\r/g, '').trim();
+  if (!normalized) return '';
+
+  if (/^data:\s*/i.test(normalized)) {
+    normalized = normalized.replace(/^data:\s*/i, '').trim();
+  }
+
+  if (/^```(?:json)?$/i.test(normalized) || normalized === '```') {
+    return '';
+  }
+
+  if (normalized.startsWith('```')) {
+    normalized = normalized.replace(/^```(?:json)?/i, '').trim();
+  }
+
+  if (normalized.endsWith('```')) {
+    normalized = normalized.replace(/```+$/i, '').trim();
+  }
+
+  return normalized.trim();
+}
+
+function parseJsonLine(line = '') {
+  const normalizedLine = normalizeStreamJsonLine(line);
+  if (!normalizedLine) {
+    return { parsed: null, normalizedLine: '', skipped: true };
+  }
+
+  try {
+    return { parsed: JSON.parse(normalizedLine), normalizedLine, skipped: false };
+  } catch (error) {
+    return { parsed: null, normalizedLine, skipped: false, error };
+  }
+}
+
+function buildExtractionFromStreamState(streamState = {}, streamMeta = {}) {
+  const pagesByNumber = streamState.pagesByNumber || new Map();
+  const pages = Array.from(pagesByNumber.keys())
+    .sort((a, b) => a - b)
+    .map((pageNumber) => {
+      const questions = pagesByNumber.get(pageNumber) || [];
+      const explicitSourceImage = questions.find((question) => Number.isFinite(Number(question?.sourceImageIndex)) && Number(question.sourceImageIndex) >= 0);
+      return {
+        pageNumber,
+        sourceImageIndex: explicitSourceImage
+          ? Math.floor(Number(explicitSourceImage.sourceImageIndex))
+          : Math.max(0, pageNumber - 1),
+        questions,
+      };
+    });
+
+  const questionsCount = pages.reduce((sum, page) => sum + (Array.isArray(page.questions) ? page.questions.length : 0), 0);
+
+  return {
+    subject: streamState.subject || '',
+    topics: Array.isArray(streamState.topics) ? streamState.topics : [],
+    estimatedMinutes: Number.isFinite(Number(streamState.estimatedMinutes))
+      ? Number(streamState.estimatedMinutes)
+      : 10,
+    pages,
+    warnings: [],
+    extractionStatus: streamState.complete ? 'SUCCESS' : 'PARTIAL',
+    sourceImages: streamState.sourceImages || [],
+    summary: {
+      questionsCount,
+      pageCount: pages.length,
+    },
+    streamMeta: {
+      rawChunkCount: Number(streamMeta.rawChunkCount || 0),
+      parsedEventCount: Number(streamMeta.parsedEventCount || 0),
+      classificationCount: Number(streamMeta.classificationCount || 0),
+      questionCount: Number(streamMeta.questionCount || 0),
+      completeCount: Number(streamMeta.completeCount || 0),
+      parseFailureCount: Number(streamMeta.parseFailureCount || 0),
+      errorCount: Number(streamMeta.errorCount || 0),
+      sawClassification: Boolean(streamMeta.sawClassification),
+      sawComplete: Boolean(streamMeta.sawComplete),
+      hadError: Boolean(streamMeta.hadError),
+      lastError: String(streamMeta.lastError || ''),
+    },
+  };
+}
+
+export async function streamAttachmentsWithGPT(files, {
+  requestId = '',
+  topicHint = '',
+  onEvent,
+} = {}) {
+  console.debug('[studentAttachmentExtraction] stream start', {
+    requestId,
+    topicHint: truncateForLog(topicHint, 200),
+    fileCount: Array.isArray(files) ? files.length : 0,
+  });
+
+  const payloadImages = await buildPayloadImages(files);
+
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated.');
   }
-  
+
   const token = await user.getIdToken();
-  
+
+  const response = await fetch(STREAM_BOARD_EXTRACTION_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      requestId,
+      topic: topicHint,
+      images: payloadImages,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const fallbackPayload = await response.json().catch(() => ({}));
+    throw new Error(fallbackPayload?.message || 'Streaming extraction failed. Please try again.');
+  }
+
+  const streamState = {
+    subject: '',
+    topics: [],
+    estimatedMinutes: 10,
+    pagesByNumber: new Map(),
+    complete: false,
+    sourceImages: payloadImages.map((image, index) => ({
+      index,
+      mimeType: image.mimeType,
+      base64: image.base64,
+      dataUrl: image.dataUrl,
+      width: image.width,
+      height: image.height,
+      sourceFileName: image.sourceFileName || '',
+      sourcePageNumber: image.sourcePageNumber || null,
+    })),
+  };
+  const streamMeta = {
+    rawChunkCount: 0,
+    parsedEventCount: 0,
+    classificationCount: 0,
+    questionCount: 0,
+    completeCount: 0,
+    parseFailureCount: 0,
+    errorCount: 0,
+    hadError: false,
+    lastError: '',
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let questionCounter = 0;
+
+  const pushQuestion = (event) => {
+    questionCounter += 1;
+    const pageNumber = Number.isFinite(Number(event?.pageNumber)) && Number(event.pageNumber) > 0
+      ? Number(event.pageNumber)
+      : 1;
+    const visualRegions = Array.isArray(event?.visualRegions)
+      ? event.visualRegions.map((region = {}) => ({
+        type: String(region?.type || 'other').toLowerCase() || 'other',
+        x: Number.isFinite(Number(region?.x)) ? Number(region.x) : 0,
+        y: Number.isFinite(Number(region?.y)) ? Number(region.y) : 0,
+        width: Number.isFinite(Number(region?.width)) ? Number(region.width) : 0,
+        height: Number.isFinite(Number(region?.height)) ? Number(region.height) : 0,
+        description: String(region?.description || '').trim(),
+      })).filter((region) => region.width > 0 && region.height > 0)
+      : [];
+    const questions = streamState.pagesByNumber.get(pageNumber) || [];
+    questions.push({
+      questionId: String(event?.questionId || `q_${String(questionCounter).padStart(3, '0')}`),
+      questionNumber: String(event?.questionNumber || ''),
+      text: String(event?.text || '').trim(),
+      type: 'question',
+      marks: Number.isFinite(Number(event?.marks)) ? Number(event.marks) : null,
+      sourceImageIndex: Number.isFinite(Number(event?.sourceImageIndex)) && Number(event.sourceImageIndex) >= 0
+        ? Math.floor(Number(event.sourceImageIndex))
+        : null,
+      visualRegions,
+      options: [],
+      warnings: [],
+      hasVisuals: Boolean(visualRegions.length || event?.diagramImageRef),
+      images: event?.diagramImageRef
+        ? [{ type: 'image', url: String(event.diagramImageRef), mimeType: 'image/png' }]
+        : [],
+    });
+    streamState.pagesByNumber.set(pageNumber, questions);
+  };
+
+  const handleParsedEvent = (event) => {
+    if (!event || typeof event !== 'object') return;
+    const type = String(event?.type || '').toLowerCase();
+    streamMeta.parsedEventCount += 1;
+    console.debug('[studentAttachmentExtraction] parsed event received', {
+      type,
+      rawEventPreview: truncateForLog(JSON.stringify(event), 240),
+    });
+
+    if (type === 'classification') {
+      streamMeta.classificationCount += 1;
+      streamState.subject = String(event?.subject || '').trim();
+      const eventTopics = Array.isArray(event?.topics)
+        ? event.topics.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      const eventTopic = String(event?.topic || '').trim();
+      streamState.topics = eventTopics.length ? eventTopics : (eventTopic ? [eventTopic] : []);
+      streamState.estimatedMinutes = Number.isFinite(Number(event?.estimatedMinutes))
+        ? Number(event.estimatedMinutes)
+        : streamState.estimatedMinutes;
+      return;
+    }
+
+    if (type === 'question') {
+      streamMeta.questionCount += 1;
+      pushQuestion(event);
+      return;
+    }
+
+    if (type === 'complete') {
+      streamMeta.completeCount += 1;
+      streamState.complete = true;
+      return;
+    }
+
+    if (type === 'error') {
+      streamMeta.errorCount += 1;
+      streamMeta.hadError = true;
+      streamMeta.lastError = String(event?.message || event?.error || 'Streaming extraction failed.');
+      console.warn('[studentAttachmentExtraction] stream error event received', {
+        message: streamMeta.lastError,
+        rawEventPreview: truncateForLog(JSON.stringify(event), 240),
+      });
+      throw new Error(streamMeta.lastError);
+    }
+  };
+
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop
+    const { value, done } = await reader.read();
+    if (done) break;
+    const decodedChunk = decoder.decode(value, { stream: true });
+    streamMeta.rawChunkCount += 1;
+    console.debug('[studentAttachmentExtraction] raw stream chunk received', {
+      chunkIndex: streamMeta.rawChunkCount,
+      chunkLength: decodedChunk.length,
+      chunkPreview: truncateForLog(decodedChunk),
+    });
+    buffer += decodedChunk;
+    const lines = buffer.replace(/\r\n?/g, '\n').split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const parsed = parseJsonLine(line);
+      if (parsed?.skipped) continue;
+      if (!parsed?.parsed || typeof parsed.parsed !== 'object') {
+        streamMeta.parseFailureCount += 1;
+        console.warn('[studentAttachmentExtraction] failed to parse stream line', {
+          linePreview: truncateForLog(line),
+          normalizedPreview: truncateForLog(parsed?.normalizedLine || ''),
+          parseFailureCount: streamMeta.parseFailureCount,
+        });
+        continue;
+      }
+
+      handleParsedEvent(parsed.parsed);
+      if (typeof onEvent === 'function') {
+        onEvent(parsed.parsed, buildExtractionFromStreamState(streamState, streamMeta));
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseJsonLine(buffer.trim());
+    if (parsed?.skipped) {
+      // nothing to do
+    } else if (!parsed?.parsed || typeof parsed.parsed !== 'object') {
+      streamMeta.parseFailureCount += 1;
+      console.warn('[studentAttachmentExtraction] failed to parse trailing stream line', {
+        linePreview: truncateForLog(buffer.trim()),
+        normalizedPreview: truncateForLog(parsed?.normalizedLine || ''),
+        parseFailureCount: streamMeta.parseFailureCount,
+      });
+    } else {
+      handleParsedEvent(parsed.parsed);
+      if (typeof onEvent === 'function') {
+        onEvent(parsed.parsed, buildExtractionFromStreamState(streamState, streamMeta));
+      }
+    }
+  }
+
+  return buildExtractionFromStreamState(streamState, streamMeta);
+}
+
+export async function extractAttachmentsWithGPT(files) {
+  const payloadImages = await buildPayloadImages(files);
+
+  const auth = getAuth();
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User not authenticated.');
+  }
+
+  const token = await user.getIdToken();
+
   const response = await fetch(EXTRACT_ATTACHMENT_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ images: payloadImages })
+    body: JSON.stringify({ images: payloadImages }),
   });
 
   const data = await response.json();
@@ -323,5 +650,5 @@ export async function extractAttachmentsWithGPT(files) {
       sourceFileName: image.sourceFileName || '',
       sourcePageNumber: image.sourcePageNumber || null,
     })),
-  }; // structured JSON plus local source images for background visual crops
+  };
 }

@@ -79,46 +79,6 @@ function buildSupportedSubjectHints({ text = '', supportedSubjects = [] } = {}) 
   return [...new Set(hints)].slice(0, 10);
 }
 
-function estimateMinutesFromPayload({ structuredPayload = {}, supportedSubjects = [] } = {}) {
-  const questionCount = Array.isArray(structuredPayload?.questionBlocks) ? structuredPayload.questionBlocks.length : 0;
-  const attachmentCount = Number(structuredPayload?.totalAttachmentCount || 0);
-  const textLength = Number(structuredPayload?.combinedTextPreview?.length || 0);
-
-  const roughEstimate = 10
-    + (questionCount * 4)
-    + (attachmentCount * 6)
-    + Math.round(textLength / 1200);
-
-  return clampEstimatedMinutes(roughEstimate || supportedSubjects.length || 10);
-}
-
-function inferDirectSubjectClassification({ structuredPayload = {}, supportedSubjects = [] } = {}) {
-  const subjectHints = Array.isArray(structuredPayload?.subjectHints) ? structuredPayload.subjectHints : [];
-  const supportedMap = getSupportedSubjectMap(supportedSubjects);
-  const normalizedHints = subjectHints
-    .map((hint) => supportedMap.get(normalizeText(hint).toLowerCase()) || '')
-    .filter(Boolean);
-
-  const uniqueHints = [...new Set(normalizedHints)];
-  if (uniqueHints.length !== 1) {
-    return null;
-  }
-
-  const subject = uniqueHints[0];
-  return {
-    subject,
-    unsupportedSubject: '',
-    topic: '',
-    estimatedMinutes: estimateMinutesFromPayload({ structuredPayload, supportedSubjects }),
-    subjectConfidence: 'high',
-    needsManualSubjectSelection: false,
-    unsupportedSubjectRequested: false,
-    unsupportedSubjectRecorded: false,
-    isFallback: false,
-    isDirectMatch: true,
-  };
-}
-
 function buildQuestionBlocksForClassification({ typedText = '', attachmentExtractions = [] } = {}) {
   const blocks = parseQuestionsFromExtraction({
     extractedText: typedText,
@@ -232,31 +192,6 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       supportedSubjectCount: supportedSubjects.length,
     });
     return buildFallbackClassification(supportedSubjects);
-  }
-
-  const directClassification = inferDirectSubjectClassification({
-    structuredPayload: inputPayload || {},
-    supportedSubjects,
-  });
-  if (directClassification) {
-    console.debug('[studentRequestAI] frontend direct subject match', {
-      supportedSubjects,
-      inputPayload,
-      directClassification,
-    });
-    getFirebaseClients()
-      .then((clients) => appendUserAiLog(clients?.auth?.currentUser?.uid, {
-        source: 'student_subject_classification',
-        step: 'classification_direct_match',
-        status: 'success',
-        message: 'Classification resolved from direct subject match.',
-        details: {
-          inputPayload,
-          directClassification,
-        },
-      }))
-      .catch(() => null);
-    return directClassification;
   }
 
   try {

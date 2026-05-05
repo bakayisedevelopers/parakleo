@@ -66,6 +66,10 @@
         "function": "extractAttachmentAi"
       },
       {
+        "source": "/stream-board-extraction",
+        "function": "streamAttachmentAi"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

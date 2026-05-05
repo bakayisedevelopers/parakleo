@@ -21,11 +21,12 @@ const {
 } = require('./subjectExtraction');
 const {
   convertPdfToImages,
-  extractTutorResultsWithGemini25Pro,
+  extractTutorResultsWithGemini25Flash,
   classifySubjectWithAI,
+  streamBoardExtractionWithAI,
   validateSubjectClassification,
 } = require('./aiSubjectExtraction');
-const { extractStudentAttachmentWithGemini25Pro } = require('./geminiExtraction');
+const { extractStudentAttachmentWithGemini25Flash } = require('./geminiExtraction');
 
 admin.initializeApp();
 
@@ -578,6 +579,143 @@ function hasCompletedStudentProfile(user = {}) {
   );
 }
 
+async function applyStudentReferralReward(transaction, {
+  userRef,
+  userData = {},
+  uid = '',
+  pendingReferralSlug = '',
+  source = 'unknown',
+  baseUpdates = null,
+} = {}) {
+  if (!userRef || !uid) return { rewarded: false, reason: 'missing_context' };
+
+  const isStudent = (userData.activeRole || userData.role || '').toLowerCase() === 'student';
+  if (!isStudent) return { rewarded: false, reason: 'not_student' };
+
+  const alreadyProcessed = Boolean((userData.growth || {}).accountCompletionRewardProcessed);
+  const studentProfileComplete = hasCompletedStudentProfile(userData);
+  const referralSlug = String(pendingReferralSlug || userData.pendingReferralSlug || userData.pendingReferralCode || '').trim();
+
+  const nextBaseUpdates = baseUpdates || {
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    referralSlug: userData.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+    growth: {
+      ...(userData.growth || {}),
+      completionRequirements: {
+        ...((userData.growth || {}).completionRequirements || {}),
+        studentProfileComplete,
+      },
+      lastGrowthSyncedAt: new Date().toISOString(),
+    },
+  };
+
+  const existingFreeMinutes = Number(userData.freeMinutesRemaining ?? DEFAULT_STUDENT_FREE_MINUTES);
+  const existingEarned = Number(userData.totalFreeMinutesEarned ?? DEFAULT_STUDENT_FREE_MINUTES);
+  transaction.set(userRef, {
+    ...nextBaseUpdates,
+    freeMinutesRemaining: Number.isFinite(existingFreeMinutes) ? existingFreeMinutes : DEFAULT_STUDENT_FREE_MINUTES,
+    totalFreeMinutesEarned: Number.isFinite(existingEarned) ? existingEarned : DEFAULT_STUDENT_FREE_MINUTES,
+    totalFreeMinutesUsed: Number(userData.totalFreeMinutesUsed || 0),
+    referralRewardCount: Number(userData.referralRewardCount || 0),
+  }, { merge: true });
+
+  if (!studentProfileComplete || alreadyProcessed) {
+    return {
+      rewarded: false,
+      reason: !studentProfileComplete ? 'incomplete_profile' : 'already_processed',
+    };
+  }
+
+  if (!referralSlug) {
+    transaction.set(userRef, {
+      pendingReferralSlug: null,
+      pendingReferralCode: null,
+      growth: {
+        ...(userData.growth || {}),
+        accountCompletionRewardProcessed: true,
+        accountCompletionQualifiedAt: new Date().toISOString(),
+      },
+    }, { merge: true });
+    return { rewarded: false, reason: 'no_referral_slug', source };
+  }
+
+  let referrerDoc = null;
+  const referrerSlugQuery = db.collection('users').where('referralSlug', '==', referralSlug).limit(1);
+  const referrerSlugSnap = await transaction.get(referrerSlugQuery);
+  referrerDoc = referrerSlugSnap.docs[0] || null;
+
+  if (!referrerDoc) {
+    const legacyReferrerQuery = db.collection('users').where('referralCode', '==', referralSlug.toUpperCase()).limit(1);
+    const legacyReferrerSnap = await transaction.get(legacyReferrerQuery);
+    referrerDoc = legacyReferrerSnap.docs[0] || null;
+  }
+
+  const referrerId = referrerDoc?.id || null;
+  const referrerData = referrerDoc?.data() || {};
+  const referrerIsStudent = (referrerData.activeRole || referrerData.role || '').toLowerCase() === 'student';
+
+  if (!referrerId || referrerId === uid || !referrerIsStudent) {
+    transaction.set(userRef, {
+      pendingReferralSlug: null,
+      pendingReferralCode: null,
+      growth: {
+        ...(userData.growth || {}),
+        accountCompletionRewardProcessed: true,
+        accountCompletionQualifiedAt: new Date().toISOString(),
+      },
+    }, { merge: true });
+    return {
+      rewarded: false,
+      reason: !referrerId ? 'referrer_not_found' : (referrerId === uid ? 'self_referral' : 'referrer_not_student'),
+      source,
+    };
+  }
+
+  const referralRef = db.collection('referrals').doc(`${referrerId}_${uid}`);
+  const referralSnap = await transaction.get(referralRef);
+  const rewardAlreadyGranted = Boolean(referralSnap.exists && referralSnap.data()?.rewardGranted);
+
+  transaction.set(referralRef, {
+    referrerId,
+    referredUserId: uid,
+    referralSlug,
+    status: 'completed',
+    rewardGranted: true,
+    rewardMinutesGranted: REFERRAL_REWARD_MINUTES,
+    createdAt: referralSnap.exists ? (referralSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp()) : admin.firestore.FieldValue.serverTimestamp(),
+    completedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  if (!rewardAlreadyGranted) {
+    const referrerRef = db.collection('users').doc(referrerId);
+    transaction.set(referrerRef, {
+      freeMinutesRemaining: admin.firestore.FieldValue.increment(REFERRAL_REWARD_MINUTES),
+      totalFreeMinutesEarned: admin.firestore.FieldValue.increment(REFERRAL_REWARD_MINUTES),
+      referralRewardCount: admin.firestore.FieldValue.increment(1),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  transaction.set(userRef, {
+    referredBy: referrerId,
+    pendingReferralSlug: null,
+    pendingReferralCode: null,
+    growth: {
+      ...(userData.growth || {}),
+      accountCompletionRewardProcessed: true,
+      accountCompletionQualifiedAt: new Date().toISOString(),
+    },
+  }, { merge: true });
+
+  return {
+    rewarded: !rewardAlreadyGranted,
+    reason: rewardAlreadyGranted ? 'duplicate_reward' : 'reward_granted',
+    source,
+    referrerId,
+  };
+}
+
 function isTruthyFlag(value) {
   if (typeof value === 'boolean') return value;
   const normalized = String(value || '').trim().toLowerCase();
@@ -1113,14 +1251,14 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       imageCount: images.length,
       imageBytes: images.map((image) => image.length),
     });
-    const aiResult = await extractTutorResultsWithGemini25Pro(images, {
+    const aiResult = await extractTutorResultsWithGemini25Flash(images, {
       logger,
       logContext: {
         docId,
         uid: data.uid,
       },
       firebaseConfig: aiConfig,
-      model: 'gemini-2.5-pro',
+      model: 'gemini-2.5-flash',
     });
     const extractedSubjects = aiResult.validated;
     const aiPrompt = aiResult.prompt;
@@ -1375,6 +1513,48 @@ exports.updateGlobalSubjects = onDocumentWritten('users/{uid}', async (event) =>
 });
 
 exports.refreshGlobalSubjectsOnTutorChange = exports.updateGlobalSubjects;
+
+exports.syncStudentReferralRewardsOnUserWrite = onDocumentWritten('users/{uid}', async (event) => {
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+
+  const isStudent = (after.activeRole || after.role || '').toLowerCase() === 'student';
+  if (!isStudent) return;
+
+  const studentProfileComplete = hasCompletedStudentProfile(after);
+  const alreadyProcessed = Boolean((after.growth || {}).accountCompletionRewardProcessed);
+  if (!studentProfileComplete || alreadyProcessed) return;
+
+  const userRef = db.collection('users').doc(event.params.uid);
+  await db.runTransaction(async (transaction) => {
+    const userSnap = await transaction.get(userRef);
+    if (!userSnap.exists) return;
+    const userData = userSnap.data() || {};
+    if ((userData.activeRole || userData.role || '').toLowerCase() !== 'student') return;
+    if (!hasCompletedStudentProfile(userData)) return;
+    if (Boolean((userData.growth || {}).accountCompletionRewardProcessed)) return;
+
+    await applyStudentReferralReward(transaction, {
+      userRef,
+      userData,
+      uid: event.params.uid,
+      pendingReferralSlug: String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim(),
+      source: 'userWriteTrigger',
+      baseUpdates: {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        referralSlug: userData.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        growth: {
+          ...(userData.growth || {}),
+          completionRequirements: {
+            ...((userData.growth || {}).completionRequirements || {}),
+            studentProfileComplete: true,
+          },
+          lastGrowthSyncedAt: new Date().toISOString(),
+        },
+      },
+    });
+  });
+});
 
 function sanitizeCloudflareIceServers(iceServers) {
   if (!Array.isArray(iceServers)) return [];
@@ -1955,10 +2135,10 @@ async function extractAttachmentGemini(req, res) {
     // Retry once
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        result = await extractStudentAttachmentWithGemini25Pro({
+        result = await extractStudentAttachmentWithGemini25Flash({
           images,
           firebaseConfig: aiConfig,
-          model: 'gemini-2.5-pro',
+          model: 'gemini-2.5-flash',
         });
         break;
       } catch (e) {
@@ -1977,7 +2157,7 @@ async function extractAttachmentGemini(req, res) {
 
     logger.info('extract_attachment_ai_completed', {
       uid: decoded.uid,
-      model: 'gemini-2.5-pro',
+      model: 'gemini-2.5-flash',
       imagesSent: images.length,
       inputTokens: result.usage?.promptTokenCount,
       outputTokens: result.usage?.candidatesTokenCount,
@@ -1995,6 +2175,403 @@ async function extractAttachmentGemini(req, res) {
 }
 
 exports.extractAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, extractAttachmentGemini);
+
+const BOARD_EXTRACTION_MODE = 'gemini_2_5_flash_stream';
+
+function normalizeTopicList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeExtractedText(entry))
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+  const topic = normalizeExtractedText(value);
+  return topic ? [topic] : [];
+}
+
+function normalizeConfidenceBand(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'unknown';
+  if (numeric >= 0.75) return 'high';
+  if (numeric >= 0.45) return 'low';
+  return 'unknown';
+}
+
+function sanitizeQuestionId(value, fallbackIndex) {
+  const normalized = normalizeExtractedText(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (normalized) return normalized.slice(0, 80);
+  return `q_${String(fallbackIndex).padStart(3, '0')}`;
+}
+
+function buildQuestionDisplayText(event = {}) {
+  const mainText = normalizeExtractedText(event?.text || '');
+  if (!mainText) return '';
+  const questionNumber = normalizeExtractedText(event?.questionNumber || '');
+  if (questionNumber) return `Question ${questionNumber}\n${mainText}`.trim();
+  return mainText;
+}
+
+function normalizeVisualRegion(region = {}) {
+  const x = Number(region?.x);
+  const y = Number(region?.y);
+  const width = Number(region?.width);
+  const height = Number(region?.height);
+
+  return {
+    type: normalizeExtractedText(region?.type || 'other').toLowerCase() || 'other',
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+    width: Number.isFinite(width) ? width : 0,
+    height: Number.isFinite(height) ? height : 0,
+    description: normalizeExtractedText(region?.description || ''),
+  };
+}
+
+exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  logger.info('stream_attachment_ai_started', {
+    method: req.method,
+    contentType: req.headers['content-type'] || '',
+    userAgent: req.headers['user-agent'] || '',
+  });
+
+  const token = getBearerToken(req);
+  if (!token) {
+    logger.warn('stream_attachment_ai_auth_missing', {
+      method: req.method,
+    });
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    logger.warn('stream_attachment_ai_auth_failed', {
+      hasToken: Boolean(token),
+    });
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  logger.info('stream_attachment_ai_auth_verified', {
+    uid: decoded.uid,
+  });
+
+  const images = Array.isArray(req.body?.images) ? req.body.images : [];
+  if (!images.length) {
+    logger.warn('stream_attachment_ai_empty_payload', {
+      uid: decoded.uid,
+      imageCount: 0,
+    });
+    res.status(400).json({ success: false, message: 'No images provided for extraction.' });
+    return;
+  }
+  if (images.length > 5) {
+    logger.warn('stream_attachment_ai_payload_too_large', {
+      uid: decoded.uid,
+      imageCount: images.length,
+    });
+    res.status(400).json({ success: false, message: 'Please upload a maximum of 5 pages or images.' });
+    return;
+  }
+
+  const requestId = normalizeExtractedText(req.body?.requestId || '');
+  const requestRef = requestId ? db.collection('classRequests').doc(requestId) : null;
+  let requestData = {};
+  const startedAtMs = Date.now();
+  const aiConfig = getAiSecrets();
+  const selectedModel = String(aiConfig.GEMINI_MODEL || aiConfig.FIREBASE_AI_MODEL || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+  let classificationLatencyMs = null;
+  let firstQuestionLatencyMs = null;
+  let totalQuestions = 0;
+  let sortOrder = 0;
+  let streamMeta = {};
+
+  logger.info('stream_attachment_ai_payload_received', {
+    uid: decoded.uid,
+    requestId: requestId || null,
+    imageCount: images.length,
+    selectedModel,
+    hasRequestRef: Boolean(requestRef),
+  });
+
+  if (requestRef) {
+    const requestSnap = await requestRef.get().catch(() => null);
+    if (!requestSnap?.exists) {
+      logger.warn('stream_attachment_ai_request_missing', {
+        uid: decoded.uid,
+        requestId,
+      });
+      res.status(404).json({ success: false, message: 'Class request not found.' });
+      return;
+    }
+    requestData = requestSnap.data() || {};
+    const canAccess = requestData.studentId === decoded.uid
+      || requestData.tutorId === decoded.uid
+      || requestData.currentOfferTutorId === decoded.uid;
+    if (!canAccess) {
+      logger.warn('stream_attachment_ai_request_forbidden', {
+        uid: decoded.uid,
+        requestId,
+      });
+      res.status(403).json({ success: false, message: 'Not allowed to stream extraction for this request.' });
+      return;
+    }
+  }
+
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const writeEvent = (event) => {
+    try {
+      res.write(`${JSON.stringify(event)}\n`);
+    } catch (error) {
+      logger.warn('stream_attachment_ai_write_failed', {
+        uid: decoded.uid,
+        message: error?.message,
+      });
+    }
+  };
+
+  try {
+    if (requestRef) {
+      await requestRef.set({
+        extractionStatus: 'streaming',
+        extractionMode: BOARD_EXTRACTION_MODE,
+        extractionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        extractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        extractionCompletedAt: null,
+        extractionError: '',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    await writeAiLog({
+      userId: requestData.studentId || decoded.uid,
+      source: 'board_stream_extraction',
+      status: 'started',
+      details: {
+        requestId: requestId || null,
+        extractionMode: BOARD_EXTRACTION_MODE,
+        imageCount: images.length,
+      },
+    });
+
+    const questionCollection = requestRef ? requestRef.collection('questions') : null;
+    if (questionCollection) {
+      const existingQuestions = await questionCollection.where('source', '==', BOARD_EXTRACTION_MODE).get().catch(() => null);
+      if (existingQuestions?.docs?.length) {
+        const batch = db.batch();
+        existingQuestions.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+    }
+
+    logger.info('stream_attachment_ai_gemini_stream_start', {
+      uid: decoded.uid,
+      requestId: requestId || null,
+      imageCount: images.length,
+      selectedModel,
+      requestRefExists: Boolean(requestRef),
+    });
+
+    streamMeta = await streamBoardExtractionWithAI({
+      images,
+      requestContext: {
+        topic: requestData.topic || '',
+        description: requestData.description || '',
+      },
+      firebaseConfig: aiConfig,
+      logger,
+      onEvent: async (event) => {
+        const type = normalizeExtractedText(event?.type).toLowerCase();
+        if (!type) return;
+
+        writeEvent(event);
+
+        logger.info('stream_attachment_ai_event_received', {
+          uid: decoded.uid,
+          requestId: requestId || null,
+          eventType: type,
+        });
+
+        if (!requestRef) return;
+
+        if (type === 'classification') {
+          if (classificationLatencyMs === null) classificationLatencyMs = Date.now() - startedAtMs;
+          const topics = normalizeTopicList(event?.topics);
+          const topic = normalizeExtractedText(event?.topic || topics[0] || '');
+          const subject = normalizeExtractedText(event?.subject || requestData.subject || '');
+          const estimatedMinutes = Math.min(90, Math.max(10, Math.round(Number(event?.estimatedMinutes || requestData.estimatedMinutes || 10))));
+          await requestRef.set({
+            extractionStatus: 'partial_ready',
+            extractionMode: BOARD_EXTRACTION_MODE,
+            subject: subject || requestData.subject || '',
+            topic: topic || requestData.topic || '',
+            topics: topics.length ? topics : (topic ? [topic] : []),
+            estimatedMinutes,
+            subjectConfidence: normalizeConfidenceBand(event?.confidence),
+            extractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            extractionError: '',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          logger.info('stream_attachment_ai_classification_saved', {
+            uid: decoded.uid,
+            requestId: requestId || null,
+            subject: subject || '',
+            topic: topic || '',
+          });
+          return;
+        }
+
+        if (type === 'question' && questionCollection) {
+          totalQuestions += 1;
+          if (firstQuestionLatencyMs === null) firstQuestionLatencyMs = Date.now() - startedAtMs;
+          sortOrder += 1;
+          const questionId = sanitizeQuestionId(event?.questionId, sortOrder);
+          const questionText = buildQuestionDisplayText(event);
+          const visualRegions = Array.isArray(event?.visualRegions)
+            ? event.visualRegions.map((region) => normalizeVisualRegion(region)).filter((region) => region.width > 0 && region.height > 0)
+            : [];
+          if (!questionText) return;
+          await questionCollection.doc(questionId).set({
+            type: 'question',
+            requestId,
+            questionId,
+            pageNumber: Number.isFinite(Number(event?.pageNumber)) ? Number(event.pageNumber) : null,
+            sourceImageIndex: Number.isFinite(Number(event?.sourceImageIndex)) && Number(event.sourceImageIndex) >= 0
+              ? Math.floor(Number(event.sourceImageIndex))
+              : null,
+            questionNumber: normalizeExtractedText(event?.questionNumber) || null,
+            text: questionText,
+            marks: Number.isFinite(Number(event?.marks)) ? Number(event.marks) : null,
+            diagramImageUrl: normalizeExtractedText(event?.diagramImageRef || '') || null,
+            visualRegions,
+            hasVisuals: Boolean(visualRegions.length || normalizeExtractedText(event?.diagramImageRef || '')),
+            status: 'ready',
+            source: BOARD_EXTRACTION_MODE,
+            sortOrder,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          await requestRef.set({
+            extractionStatus: 'partial_ready',
+            extractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          logger.info('stream_attachment_ai_question_saved', {
+            uid: decoded.uid,
+            requestId: requestId || null,
+            questionId,
+            pageNumber: Number.isFinite(Number(event?.pageNumber)) ? Number(event.pageNumber) : null,
+            questionNumber: normalizeExtractedText(event?.questionNumber) || null,
+          });
+          return;
+        }
+
+        if (type === 'complete') {
+          await requestRef.set({
+            extractionStatus: 'ready',
+            extractionMode: BOARD_EXTRACTION_MODE,
+            extractionCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+            extractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            extractionError: '',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          logger.info('stream_attachment_ai_complete_saved', {
+            uid: decoded.uid,
+            requestId: requestId || null,
+          });
+        }
+      },
+    });
+
+    await writeAiLog({
+      userId: requestData.studentId || decoded.uid,
+      source: 'board_stream_extraction',
+      status: 'success',
+      prompt: streamMeta?.prompt || '',
+      rawOutput: '',
+      details: {
+        requestId: requestId || null,
+        model: streamMeta?.model || '',
+        provider: streamMeta?.provider || '',
+        backend: streamMeta?.backend || '',
+        extractionMode: BOARD_EXTRACTION_MODE,
+        classificationLatencyMs,
+        firstQuestionLatencyMs,
+        totalQuestions,
+        durationMs: Date.now() - startedAtMs,
+      },
+    });
+
+    logger.info('stream_attachment_ai_completed', {
+      uid: decoded.uid,
+      requestId: requestId || null,
+      selectedModel,
+      durationMs: Date.now() - startedAtMs,
+      streamStats: streamMeta?.streamStats || {},
+      sawClassification: Boolean(streamMeta?.sawClassification),
+      sawComplete: Boolean(streamMeta?.sawComplete),
+    });
+
+    res.end();
+  } catch (error) {
+    if (requestRef) {
+      await requestRef.set({
+        extractionStatus: 'failed',
+        extractionMode: BOARD_EXTRACTION_MODE,
+        extractionError: error.message || 'Board extraction failed.',
+        extractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        extractionCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => null);
+    }
+
+    logger.error('stream_attachment_ai_failed', {
+      uid: decoded.uid,
+      requestId: requestId || null,
+      selectedModel,
+      durationMs: Date.now() - startedAtMs,
+      message: error.message || 'Board extraction failed.',
+      stack: error.stack || '',
+      streamStats: streamMeta?.streamStats || {},
+    });
+
+    await writeAiLog({
+      userId: requestData.studentId || decoded.uid,
+      source: 'board_stream_extraction',
+      status: 'failed',
+      prompt: streamMeta?.prompt || '',
+      rawOutput: '',
+      error: error.message || 'Board extraction failed.',
+      details: {
+        requestId: requestId || null,
+        model: streamMeta?.model || '',
+        extractionMode: BOARD_EXTRACTION_MODE,
+        classificationLatencyMs,
+        firstQuestionLatencyMs,
+        totalQuestions,
+        durationMs: Date.now() - startedAtMs,
+      },
+    }).catch(() => null);
+
+    writeEvent({
+      type: 'error',
+      message: error.message || 'Board extraction failed.',
+    });
+    res.end();
+  }
+});
 
 exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== 'POST') {
@@ -2318,98 +2895,14 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
       return;
     }
 
-    const existingFreeMinutes = Number(userData.freeMinutesRemaining ?? DEFAULT_STUDENT_FREE_MINUTES);
-    const existingEarned = Number(userData.totalFreeMinutesEarned ?? DEFAULT_STUDENT_FREE_MINUTES);
-    transaction.set(userRef, {
-      ...baseUpdates,
-      freeMinutesRemaining: Number.isFinite(existingFreeMinutes) ? existingFreeMinutes : DEFAULT_STUDENT_FREE_MINUTES,
-      totalFreeMinutesEarned: Number.isFinite(existingEarned) ? existingEarned : DEFAULT_STUDENT_FREE_MINUTES,
-      totalFreeMinutesUsed: Number(userData.totalFreeMinutesUsed || 0),
-      referralRewardCount: Number(userData.referralRewardCount || 0),
-    }, { merge: true });
-
-    const alreadyProcessed = Boolean((userData.growth || {}).accountCompletionRewardProcessed);
-    const studentProfileComplete = hasCompletedStudentProfile(userData);
-    if (!studentProfileComplete || alreadyProcessed) return;
-
-    const pendingReferralSlug = String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim();
-    if (!pendingReferralSlug) {
-      transaction.set(userRef, {
-        pendingReferralSlug: null,
-        pendingReferralCode: null,
-        growth: {
-          ...(userData.growth || {}),
-          accountCompletionRewardProcessed: true,
-          accountCompletionQualifiedAt: new Date().toISOString(),
-        },
-      }, { merge: true });
-      return;
-    }
-
-    let referrerDoc = null;
-    const referrerSlugQuery = db.collection('users').where('referralSlug', '==', pendingReferralSlug).limit(1);
-    const referrerSlugSnap = await transaction.get(referrerSlugQuery);
-    referrerDoc = referrerSlugSnap.docs[0] || null;
-
-    if (!referrerDoc) {
-      const legacyReferrerQuery = db.collection('users').where('referralCode', '==', pendingReferralSlug.toUpperCase()).limit(1);
-      const legacyReferrerSnap = await transaction.get(legacyReferrerQuery);
-      referrerDoc = legacyReferrerSnap.docs[0] || null;
-    }
-
-    const referrerId = referrerDoc?.id || null;
-    const referrerData = referrerDoc?.data() || {};
-    const referrerIsStudent = (referrerData.activeRole || referrerData.role || '').toLowerCase() === 'student';
-
-    if (!referrerId || referrerId === decoded.uid || !referrerIsStudent) {
-      transaction.set(userRef, {
-        pendingReferralSlug: null,
-        pendingReferralCode: null,
-        growth: {
-          ...(userData.growth || {}),
-          accountCompletionRewardProcessed: true,
-          accountCompletionQualifiedAt: new Date().toISOString(),
-        },
-      }, { merge: true });
-      return;
-    }
-
-    const referralRef = db.collection('referrals').doc(`${referrerId}_${decoded.uid}`);
-    const referralSnap = await transaction.get(referralRef);
-    const rewardAlreadyGranted = Boolean(referralSnap.exists && referralSnap.data()?.rewardGranted);
-
-    transaction.set(referralRef, {
-      referrerId,
-      referredUserId: decoded.uid,
-      referralSlug: pendingReferralSlug,
-      status: 'completed',
-      rewardGranted: true,
-      rewardMinutesGranted: REFERRAL_REWARD_MINUTES,
-      createdAt: referralSnap.exists ? (referralSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp()) : admin.firestore.FieldValue.serverTimestamp(),
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    if (!rewardAlreadyGranted) {
-      const referrerRef = db.collection('users').doc(referrerId);
-      transaction.set(referrerRef, {
-        freeMinutesRemaining: admin.firestore.FieldValue.increment(REFERRAL_REWARD_MINUTES),
-        totalFreeMinutesEarned: admin.firestore.FieldValue.increment(REFERRAL_REWARD_MINUTES),
-        referralRewardCount: admin.firestore.FieldValue.increment(1),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    }
-
-    transaction.set(userRef, {
-      referredBy: referrerId,
-      pendingReferralSlug: null,
-      pendingReferralCode: null,
-      growth: {
-        ...(userData.growth || {}),
-        accountCompletionRewardProcessed: true,
-        accountCompletionQualifiedAt: new Date().toISOString(),
-      },
-    }, { merge: true });
+    await applyStudentReferralReward(transaction, {
+      userRef,
+      userData,
+      uid: decoded.uid,
+      pendingReferralSlug: String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim(),
+      source: 'syncStudentGrowth',
+      baseUpdates,
+    });
   });
 
   const profileSnap = await userRef.get();

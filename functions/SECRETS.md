@@ -43,7 +43,7 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
   "GEMINI_VISION_MODEL": "REPLACE_ME",
   "GEMINI_CLASSIFICATION_MODEL": "REPLACE_ME",
   "GEMINI_CLASSIFICATION_TIMEOUT_MS": "30000",
-  "MAX_PDF_PAGES": "8"
+  "MAX_PDF_PAGES": "30"
 }
 ```
 

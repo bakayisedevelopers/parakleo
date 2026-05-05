@@ -62,6 +62,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/extract-attachment-ai/, '/extractAttachmentAi'),
       },
+      '/stream-board-extraction': {
+        target: functionsEmulatorTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/stream-board-extraction/, '/streamAttachmentAi'),
+      },
     },
   },
 })

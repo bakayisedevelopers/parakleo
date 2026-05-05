@@ -14,7 +14,7 @@ Tasks:
 3. Extract only the actual questions that the student is expected to answer.
 4. Preserve question numbering where visible.
 5. If the question is multiple choice, extract the answer options separately.
-6. Detect diagrams, tables, graphs, figures, geometry drawings, or visual elements linked to each question.
+6. Detect diagrams, tables, graphs, figures, formulas, equations, geometry drawings, or visual elements linked to each question.
 7. For each detected visual element, return bounding box coordinates relative to the image/page.
 8. Exclude standalone exam/worksheet instructions, section directions, page setup text, headers, footers, marks guidance, timing notes, source labels, watermarks, logos, and copyright text unless that text is directly required to answer a specific question.
 9. Keep paragraphs, data, diagrams, tables, images, graphs, captions, or formulas only when they are referred to by, or necessary for, an actual question.
@@ -23,7 +23,7 @@ Tasks:
 12. If text is unreadable, mark it as unreadable instead of guessing.
 13. Return valid JSON only. No markdown. No explanation.`;
 
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-pro';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 function getFirebaseAiConfig(overrides = {}) {
   const config = {
@@ -134,7 +134,7 @@ function buildExtractionSchema() {
                     items: {
                       type: 'OBJECT',
                       properties: {
-                        type: { type: 'STRING', enum: ['diagram', 'table', 'graph', 'figure', 'image', 'other'] },
+                        type: { type: 'STRING', enum: ['diagram', 'table', 'graph', 'figure', 'image', 'formula', 'equation', 'other'] },
                         x: { type: 'NUMBER' },
                         y: { type: 'NUMBER' },
                         width: { type: 'NUMBER' },
@@ -205,7 +205,7 @@ function normalizeExtractionResponse(parsedContent) {
   return normalized;
 }
 
-async function extractStudentAttachmentWithGemini25Pro({ images, firebaseConfig = {}, model = DEFAULT_GEMINI_MODEL } = {}) {
+async function extractStudentAttachmentWithGemini25Flash({ images, firebaseConfig = {}, model = DEFAULT_GEMINI_MODEL } = {}) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new Error('No images provided for extraction.');
   }
@@ -214,7 +214,7 @@ async function extractStudentAttachmentWithGemini25Pro({ images, firebaseConfig 
     contents: [{
       role: 'user',
       parts: [
-        { text: `${SYSTEM_PROMPT}\n\nExtract the structured content from these pages. Return only actual answerable questions and any directly related paragraphs, data, diagrams, tables, images, graphs, captions, or formulas needed to answer those questions. Do not return general document instructions as questions.` },
+        { text: `${SYSTEM_PROMPT}\n\nExtract the structured content from these pages. Return only actual answerable questions and any directly related paragraphs, data, diagrams, tables, images, graphs, captions, formulas, or equations needed to answer those questions. Do not return general document instructions as questions.` },
         ...images.map((img) => ({
           inlineData: {
             mimeType: img.mimeType || 'image/png',
@@ -249,4 +249,4 @@ async function extractStudentAttachmentWithGemini25Pro({ images, firebaseConfig 
   };
 }
 
-module.exports = { extractStudentAttachmentWithGemini25Pro };
+module.exports = { extractStudentAttachmentWithGemini25Flash };

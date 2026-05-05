@@ -56,6 +56,12 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.studentId == request.auth.uid;
       allow update: if isAdmin() || isRequestParticipant(resource.data) || isRequestParticipant(request.resource.data);
       allow delete: if isAdmin();
+
+      match /questions/{questionId} {
+        allow read: if isAdmin()
+          || isRequestParticipant(get(/databases/$(database)/documents/classRequests/$(requestId)).data);
+        allow create, update, delete: if isAdmin();
+      }
     }
 
     match /sessions/{sessionId} {

@@ -3,13 +3,14 @@ const { getAI, getGenerativeModel, GoogleAIBackend } = require('firebase/ai');
 const { pdfToPng } = require('pdf-to-png-converter');
 const { normalizeSubjectName } = require('./subjectExtraction');
 
-const DEFAULT_MAX_PDF_PAGES = 8;
+const DEFAULT_MAX_PDF_PAGES = 30;
 const MAX_IMAGE_BYTES = 19 * 1024 * 1024;
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-const TUTOR_RESULTS_GEMINI_MODEL = 'gemini-2.5-pro';
+const TUTOR_RESULTS_GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
 const DEFAULT_CLASSIFICATION_TIMEOUT_MS = 30 * 1000;
+const DEFAULT_STREAM_EXTRACTION_TIMEOUT_MS = 45 * 1000;
 
 function getGeminiConfig(overrides = {}) {
   return {
@@ -88,6 +89,16 @@ function getClassificationTimeoutMs(overrides = {}) {
   );
   if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_CLASSIFICATION_TIMEOUT_MS;
   return Math.min(30000, Math.max(5000, Math.round(numeric)));
+}
+
+function getStreamExtractionTimeoutMs(overrides = {}) {
+  const numeric = Number(
+    overrides.GEMINI_TIMEOUT_MS
+      || process.env.GEMINI_TIMEOUT_MS
+      || DEFAULT_STREAM_EXTRACTION_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_STREAM_EXTRACTION_TIMEOUT_MS;
+  return Math.min(120000, Math.max(5000, Math.round(numeric)));
 }
 
 function withTimeout(promise, timeoutMs, label) {
@@ -344,7 +355,7 @@ async function callGeminiForTutorResults(images, options = {}) {
   return { prompt, outputText };
 }
 
-async function extractTutorResultsWithGemini25Pro(images, options = {}) {
+async function extractTutorResultsWithGemini25Flash(images, options = {}) {
   let lastError = null;
   const logger = options.logger || console;
   const logContext = options.logContext || {};
@@ -647,6 +658,383 @@ function buildClassificationPrompt({ supportedSubjects = [], inputPayload = {}, 
   return prompt;
 }
 
+function buildBoardStreamPrompt({ topicHint = '', descriptionHint = '' } = {}) {
+  const safeTopic = normalizeText(topicHint || '');
+  const safeDescription = normalizeText(descriptionHint || '');
+
+  return [
+    'You are extracting tutoring questions from uploaded homework pages.',
+    'Output must be NDJSON only.',
+    'Return one complete JSON object per line.',
+    'Do not use markdown, code fences, arrays, or pretty-printed JSON.',
+    'Do not wrap the output in ```json or ``` fences.',
+    'All coordinates must be relative to the exact rendered page image provided to you, not the original PDF file.',
+    'Use top-left as 0,0 and keep x, y, width, and height in the same coordinate space as the displayed image.',
+    'The first uploaded image is sourceImageIndex 0, the second is 1, and so on.',
+    'The first line must be a classification event.',
+    'Then emit one question event per line, progressively.',
+    'The last line must be {"type":"complete"}.',
+    '',
+    'Allowed line formats:',
+    '{"type":"classification","subject":"Mathematics","topic":"Algebra","topics":["Algebra"],"estimatedMinutes":30,"confidence":0.87}',
+    '{"type":"question","questionId":"q_001","pageNumber":1,"sourceImageIndex":0,"questionNumber":"1.1","text":"Solve for x","marks":3,"visualRegions":[{"type":"diagram","x":0.12,"y":0.44,"width":0.38,"height":0.22,"description":"Coordinate grid and labelled triangle"}]}',
+    '{"type":"complete"}',
+    '',
+    'Rules:',
+    '- Always emit classification first.',
+    '- estimatedMinutes must be an integer between 10 and 90.',
+    '- confidence must be a number between 0 and 1.',
+    '- Emit each question exactly once.',
+    '- questionId must be stable and unique in this extraction (q_001, q_002, ...).',
+    '- text must contain only the question text, concise and readable.',
+    '- Include pageNumber and questionNumber when visible; otherwise null.',
+    '- Include sourceImageIndex for the exact uploaded image that contains the question when known.',
+    '- marks should be a number when visible, otherwise null.',
+    '- For any diagram, table, graph, figure, image, formula, or equation needed to answer a question, include visualRegions with precise bounding boxes relative to the page image.',
+    '- visualRegions entries must use type values such as diagram, table, graph, figure, image, formula, equation, or other.',
+    '- Each visualRegions entry must include x, y, width, height, and description.',
+    '- When in doubt, make the bounding box slightly larger rather than smaller so the crop keeps the full visual element.',
+    '- If no visual element is present, set visualRegions to an empty array.',
+    '- If no questions are visible, still emit classification then complete.',
+    '- Do not wrap output in markdown.',
+    '',
+    'Request hints:',
+    `topicHint: ${safeTopic || '(none)'}`,
+    `descriptionHint: ${safeDescription || '(none)'}`,
+  ].join('\n');
+}
+
+function normalizeStreamTopics(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+  const topic = normalizeText(value);
+  return topic ? [topic] : [];
+}
+
+function normalizeStreamClassification(event = {}) {
+  const topic = normalizeText(event.topic);
+  const topics = normalizeStreamTopics(event.topics);
+  const mergedTopics = topics.length ? topics : (topic ? [topic] : []);
+  const subject = normalizeText(event.subject);
+  const confidenceRaw = Number(event.confidence);
+  const confidence = Number.isFinite(confidenceRaw)
+    ? Math.max(0, Math.min(1, confidenceRaw))
+    : 0.5;
+  return {
+    type: 'classification',
+    subject,
+    topic: topic || mergedTopics[0] || '',
+    topics: mergedTopics,
+    estimatedMinutes: clampEstimatedMinutes(event.estimatedMinutes),
+    confidence,
+  };
+}
+
+function normalizeStreamQuestion(event = {}, fallbackIndex = 0) {
+  const questionId = normalizeText(event.questionId) || `q_${String(fallbackIndex).padStart(3, '0')}`;
+  const text = normalizeText(event.text);
+  if (!text) return null;
+
+  const pageNumberRaw = Number(event.pageNumber);
+  const sourceImageIndexRaw = Number(event.sourceImageIndex);
+  const marksRaw = Number(event.marks);
+  const pageNumber = Number.isFinite(pageNumberRaw) && pageNumberRaw > 0 ? Math.round(pageNumberRaw) : null;
+  const sourceImageIndex = Number.isFinite(sourceImageIndexRaw) && sourceImageIndexRaw >= 0
+    ? Math.floor(sourceImageIndexRaw)
+    : null;
+  const marks = Number.isFinite(marksRaw) && marksRaw >= 0 ? Number(marksRaw.toFixed(2)) : null;
+  const visualRegions = Array.isArray(event.visualRegions)
+    ? event.visualRegions.map((region = {}) => {
+      const x = Number(region.x);
+      const y = Number(region.y);
+      const width = Number(region.width);
+      const height = Number(region.height);
+      return {
+        type: normalizeText(region.type || 'other').toLowerCase() || 'other',
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : 0,
+        width: Number.isFinite(width) ? width : 0,
+        height: Number.isFinite(height) ? height : 0,
+        description: normalizeText(region.description || ''),
+      };
+    }).filter((region) => region.width > 0 && region.height > 0)
+    : [];
+
+  return {
+    type: 'question',
+    questionId,
+    pageNumber,
+    sourceImageIndex,
+    questionNumber: normalizeText(event.questionNumber) || null,
+    text,
+    marks,
+    diagramImageRef: normalizeText(event.diagramImageRef) || '',
+    visualRegions,
+  };
+}
+
+function truncateForLog(value = '', maxChars = 320) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...`;
+}
+
+function normalizeStreamJsonLine(line = '') {
+  let normalized = String(line || '').replace(/\r/g, '').trim();
+  if (!normalized) return '';
+
+  if (/^data:\s*/i.test(normalized)) {
+    normalized = normalized.replace(/^data:\s*/i, '').trim();
+  }
+
+  if (/^```(?:json)?$/i.test(normalized) || normalized === '```') {
+    return '';
+  }
+
+  if (normalized.startsWith('```')) {
+    normalized = normalized.replace(/^```(?:json)?/i, '').trim();
+  }
+
+  if (normalized.endsWith('```')) {
+    normalized = normalized.replace(/```+$/i, '').trim();
+  }
+
+  return normalized.trim();
+}
+
+function parseJsonLine(line = '') {
+  const normalizedLine = normalizeStreamJsonLine(line);
+  if (!normalizedLine) {
+    return { parsed: null, normalizedLine: '', skipped: true };
+  }
+
+  try {
+    return { parsed: JSON.parse(normalizedLine), normalizedLine, skipped: false };
+  } catch (error) {
+    return { parsed: null, normalizedLine, skipped: false, error };
+  }
+}
+
+function extractJsonLinesFromBuffer(buffer = '') {
+  const normalized = String(buffer || '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  const remainder = lines.pop() || '';
+  return { lines, remainder };
+}
+
+async function streamBoardExtractionWithAI({
+  images = [],
+  requestContext = {},
+  firebaseConfig = {},
+  logger = console,
+  onEvent,
+} = {}) {
+  const config = getGeminiConfig(firebaseConfig || {});
+  const prompt = buildBoardStreamPrompt({
+    topicHint: requestContext?.topic || '',
+    descriptionHint: requestContext?.description || '',
+  });
+  const parts = [
+    { text: prompt },
+    ...images.map((image) => {
+      const mimeType = normalizeText(image?.mimeType || '');
+      const base64 = normalizeText(image?.base64 || '');
+      if (!base64) {
+        throw new Error('Missing base64 image data for board extraction stream.');
+      }
+      const imageBuffer = Buffer.from(base64, 'base64');
+      assertImageSize(imageBuffer);
+      return {
+        inlineData: {
+          mimeType: mimeType || getImageMimeType(imageBuffer),
+          data: base64,
+        },
+      };
+    }),
+  ];
+
+  const model = getFirebaseAiModel({
+    firebaseConfig,
+    model: config.model,
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 8192,
+    },
+  });
+
+  const streamStats = {
+    rawChunkCount: 0,
+    parsedEventCount: 0,
+    classificationCount: 0,
+    questionCount: 0,
+    completeCount: 0,
+    parseFailureCount: 0,
+  };
+  let sawClassification = false;
+  let sawComplete = false;
+  let questionCounter = 0;
+
+  const emitParsedLine = async (line) => {
+    const parsed = parseJsonLine(line);
+    if (parsed?.skipped) return;
+    if (!parsed?.parsed || typeof parsed.parsed !== 'object') {
+      streamStats.parseFailureCount += 1;
+      logger.warn?.('board_stream_extraction_parse_failed', {
+        model: config.model,
+        rawLinePreview: truncateForLog(line),
+        normalizedLinePreview: truncateForLog(parsed?.normalizedLine || ''),
+        parseFailureCount: streamStats.parseFailureCount,
+      });
+      return;
+    }
+
+    const event = parsed.parsed;
+    const type = normalizeText(event.type).toLowerCase();
+    streamStats.parsedEventCount += 1;
+
+    if (type === 'classification') {
+      const classificationEvent = normalizeStreamClassification(event);
+      sawClassification = true;
+      streamStats.classificationCount += 1;
+      logger.info?.('board_stream_extraction_classification_emitted', {
+        model: config.model,
+        subject: classificationEvent.subject || '',
+        topic: classificationEvent.topic || '',
+        topics: classificationEvent.topics || [],
+        estimatedMinutes: classificationEvent.estimatedMinutes,
+        confidence: classificationEvent.confidence,
+      });
+      await onEvent?.(classificationEvent);
+      return;
+    }
+
+    if (type === 'question') {
+      questionCounter += 1;
+      const questionEvent = normalizeStreamQuestion(event, questionCounter);
+      if (!questionEvent) return;
+      streamStats.questionCount += 1;
+      logger.info?.('board_stream_extraction_question_emitted', {
+        model: config.model,
+        questionId: questionEvent.questionId,
+        pageNumber: questionEvent.pageNumber,
+        questionNumber: questionEvent.questionNumber,
+        marks: questionEvent.marks,
+        hasDiagram: Boolean(questionEvent.diagramImageRef),
+      });
+      await onEvent?.(questionEvent);
+      return;
+    }
+
+    if (type === 'complete') {
+      sawComplete = true;
+      streamStats.completeCount += 1;
+      logger.info?.('board_stream_extraction_complete_emitted', {
+        model: config.model,
+      });
+      await onEvent?.({ type: 'complete' });
+    }
+  };
+
+  logger.info?.('board_stream_extraction_started', {
+    model: config.model,
+    backend: config.backend,
+    promptLength: prompt.length,
+    imageCount: images.length,
+    requestTopic: normalizeText(requestContext?.topic || ''),
+    requestDescriptionLength: normalizeText(requestContext?.description || '').length,
+  });
+
+  if (typeof model.generateContentStream === 'function') {
+    const startedAt = Date.now();
+    logger.info?.('board_stream_extraction_gemini_stream_start', {
+      model: config.model,
+      backend: config.backend,
+      imageCount: images.length,
+    });
+    const streamResult = await withTimeout(
+      model.generateContentStream(parts),
+      getStreamExtractionTimeoutMs(firebaseConfig),
+      'Firebase AI Logic board extraction stream start',
+    );
+    const stream = streamResult?.stream;
+    if (!stream || !stream[Symbol.asyncIterator]) {
+      throw new Error('Gemini streaming response did not expose an async stream.');
+    }
+
+    let pending = '';
+    for await (const chunk of stream) {
+      const chunkText = String(chunk?.text?.() || '');
+      streamStats.rawChunkCount += 1;
+      logger.info?.('board_stream_extraction_raw_chunk_received', {
+        model: config.model,
+        chunkIndex: streamStats.rawChunkCount,
+        chunkLength: chunkText.length,
+        chunkPreview: truncateForLog(chunkText),
+      });
+      if (!chunkText) continue;
+      pending += chunkText;
+      const extracted = extractJsonLinesFromBuffer(pending);
+      pending = extracted.remainder;
+      // eslint-disable-next-line no-await-in-loop
+      for (const line of extracted.lines) {
+        // eslint-disable-next-line no-await-in-loop
+        await emitParsedLine(line);
+      }
+      if (Date.now() - startedAt > getStreamExtractionTimeoutMs(firebaseConfig)) {
+        throw new Error('Board extraction stream exceeded timeout.');
+      }
+    }
+
+    if (pending.trim()) {
+      await emitParsedLine(pending);
+    }
+
+    return {
+      prompt,
+      model: config.model,
+      provider: 'firebase-ai-logic',
+      backend: config.backend,
+      streamStats,
+      sawClassification,
+      sawComplete,
+    };
+  }
+
+  logger.info?.('board_stream_extraction_gemini_fallback_start', {
+    model: config.model,
+    backend: config.backend,
+    imageCount: images.length,
+  });
+  const fallbackResult = await withTimeout(
+    model.generateContent(parts),
+    getStreamExtractionTimeoutMs(firebaseConfig),
+    'Firebase AI Logic board extraction fallback',
+  );
+  const outputText = String(fallbackResult?.response?.text?.() || '');
+  const extracted = extractJsonLinesFromBuffer(outputText);
+  for (const line of extracted.lines) {
+    // eslint-disable-next-line no-await-in-loop
+    await emitParsedLine(line);
+  }
+  if (extracted.remainder.trim()) {
+    await emitParsedLine(extracted.remainder);
+  }
+
+  return {
+    prompt,
+    model: config.model,
+    provider: 'firebase-ai-logic',
+    backend: config.backend,
+    streamStats,
+    sawClassification,
+    sawComplete,
+  };
+}
+
 async function classifySubjectWithAI({ inputText = '', inputPayload = null, supportedSubjects = [], firebaseConfig = {} } = {}) {
   const normalizedInput = normalizeText(inputText || inputPayload?.combinedTextPreview || inputPayload?.typedTextPreview || '');
   if (!normalizedInput) return buildFallbackClassification(supportedSubjects);
@@ -720,8 +1108,9 @@ async function classifySubjectWithAI({ inputText = '', inputPayload = null, supp
 module.exports = {
   MAX_PDF_PAGES: DEFAULT_MAX_PDF_PAGES,
   convertPdfToImages,
-  extractTutorResultsWithGemini25Pro,
+  extractTutorResultsWithGemini25Flash,
   classifySubjectWithAI,
+  streamBoardExtractionWithAI,
   validateSubjectClassification,
   validateSubjectMarks,
 };

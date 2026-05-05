@@ -24,12 +24,17 @@ import {
   LOCAL_VISUAL_CROP_FILE,
   attachVisualCropsToExtraction,
   extractAttachmentsWithGPT,
+  streamAttachmentsWithGPT,
 } from '../../../services/gptExtractionService';
 import { createClassRequest } from '../../../services/classRequestService';
 import { fetchPricingQuote } from '../../../services/pricingService';
 import { uploadUserFile } from '../../../services/storageService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSubjectService';
+import {
+  buildSubjectClassificationInput,
+  classifySubjectFromText,
+} from '../../../services/subjectClassificationService';
 import { DEFAULT_LESSON_DURATION, LESSON_DURATION_OPTIONS, formatRand } from '../../../utils/pricing';
 import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { getStudentOnboardingStatus } from '../../../utils/onboarding';
@@ -58,6 +63,32 @@ function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
   });
 
   return matched?.value || '';
+}
+
+function resolveSupportedSubjectFromDetection(detectedSubject, supportedSubjects = SUBJECT_OPTIONS) {
+  const normalizedDetected = String(detectedSubject || '').trim().toLowerCase();
+  if (!normalizedDetected || normalizedDetected === 'unknown') {
+    return { subject: '', isSupported: false };
+  }
+
+  const directMatch = supportedSubjects.find((option) => {
+    const value = String(option?.value || '').toLowerCase();
+    const label = String(option?.label || '').toLowerCase();
+    return normalizedDetected === value || normalizedDetected === label;
+  });
+  if (directMatch) {
+    return { subject: directMatch.value, isSupported: true };
+  }
+
+  const aliasMatch = supportedSubjects.find((option) => {
+    const aliases = SUBJECT_ALIASES[option.value] || [];
+    return aliases.some((alias) => normalizedDetected.includes(String(alias || '').toLowerCase()));
+  });
+  if (aliasMatch) {
+    return { subject: aliasMatch.value, isSupported: true };
+  }
+
+  return { subject: '', isSupported: false };
 }
 
 function getAttachmentKey(file) {
@@ -169,6 +200,20 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
     attachmentExtractions,
     ocrImageReferences: [],
   };
+}
+
+function shouldFallbackFromStreamExtraction(extractionResult = null) {
+  const streamMeta = extractionResult?.streamMeta || {};
+  const classificationCount = Number(streamMeta.classificationCount || 0);
+  const questionCount = Number(streamMeta.questionCount || 0);
+  const parsedEventCount = Number(streamMeta.parsedEventCount || 0);
+  const completeCount = Number(streamMeta.completeCount || 0);
+  const hadError = Boolean(streamMeta.hadError || streamMeta.errorCount > 0);
+
+  if (hadError) return true;
+  if (classificationCount === 0 && questionCount === 0) return true;
+  if (completeCount > 0 && parsedEventCount === 0) return true;
+  return false;
 }
 
 function stripLocalExtractionPayload(extraction = null) {
@@ -284,6 +329,7 @@ export default function StudentDashboardPage() {
   const extractionOverlayRedirectTimeoutRef = useRef(null);
   const loggedAiLogIdsRef = useRef(new Set());
   const visualCropPromiseRef = useRef(null);
+  const classificationRunCounterRef = useRef(0);
 
   const [stage, setStage] = useState('input');
   const [advanceIntent, setAdvanceIntent] = useState('');
@@ -500,14 +546,105 @@ export default function StudentDashboardPage() {
     setAttachments(nextAttachments);
     setGptExtraction(null);
     visualCropPromiseRef.current = null;
+    setAttachmentExtractionStatusByKey((prev) => {
+      const next = { ...prev };
+      newFilesForExtraction.forEach((file) => {
+        next[getAttachmentKey(file)] = 'extracting';
+      });
+      return next;
+    });
 
     try {
       setClassificationState('running');
       setClassificationStatus('Analyzing your request...');
-      
-      const extractionResult = await extractAttachmentsWithGPT(nextAttachments);
-      
+      let classificationApplied = false;
+
+      const applyClassification = (classificationEvent = {}) => {
+        const detectedTopic = String(classificationEvent?.topic || classificationEvent?.topics?.[0] || '').trim();
+        const detectedMinutes = Number(classificationEvent?.estimatedMinutes || DEFAULT_LESSON_DURATION);
+        const detectedSubject = String(classificationEvent?.subject || '').trim();
+        const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
+        const { subject: supportedSubject, isSupported } = resolveSupportedSubjectFromDetection(detectedSubject, supportedCatalog);
+
+        setClassifiedTopic(detectedTopic);
+        setEstimatedMinutes(detectedMinutes || DEFAULT_LESSON_DURATION);
+        setClassificationState('done');
+        if (isSupported) {
+          if (!isManualSubjectRef.current) {
+            setSelectedSubject(supportedSubject);
+          }
+          setClassificationStatus('Subject and study focus detected from your request.');
+          setUnsupportedSubjectRequest(null);
+        } else {
+          setSelectedSubject('');
+          setClassificationStatus(
+            detectedSubject && detectedSubject.toLowerCase() !== 'unknown'
+              ? `Sorry, ${detectedSubject} is not offered yet.`
+              : 'Choose the subject manually before sending.',
+          );
+          if (detectedSubject && detectedSubject.toLowerCase() !== 'unknown') {
+            setUnsupportedSubjectRequest({
+              subject: detectedSubject,
+              inputText: topic,
+              recorded: false,
+            });
+          }
+        }
+        if (!hasManualDurationOverride) {
+          setDurationMinutes(detectedMinutes || DEFAULT_LESSON_DURATION);
+        }
+        setAttachmentExtractionStatusByKey((prev) => {
+          const next = { ...prev };
+          nextAttachments.forEach((file) => {
+            next[getAttachmentKey(file)] = 'text extracted';
+          });
+          return next;
+        });
+      };
+
+      let extractionResult = null;
+      try {
+        extractionResult = await streamAttachmentsWithGPT(nextAttachments, {
+          topicHint: topic,
+          onEvent: (event, partialExtraction) => {
+            const type = String(event?.type || '').toLowerCase();
+            if (partialExtraction) {
+              setGptExtraction(partialExtraction);
+            }
+            if (type === 'classification') {
+              classificationApplied = true;
+              applyClassification(event);
+            }
+          },
+        });
+
+        if (shouldFallbackFromStreamExtraction(extractionResult)) {
+          console.debug('[studentAttachmentExtraction] stream produced no usable extraction; falling back', {
+            streamMeta: extractionResult?.streamMeta || null,
+          });
+          extractionResult = await extractAttachmentsWithGPT(nextAttachments);
+        }
+      } catch (streamError) {
+        console.debug('[studentAttachmentExtraction] stream failed; falling back', {
+          error: streamError?.message,
+        });
+        extractionResult = await extractAttachmentsWithGPT(nextAttachments);
+      }
+
+      if (!extractionResult) {
+        throw new Error('Extraction failed. Please try again or upload a clearer image.');
+      }
+
       setGptExtraction(extractionResult);
+      if (!classificationApplied) {
+        applyClassification({
+          subject: extractionResult.subject,
+          topic: extractionResult.topics?.[0] || '',
+          topics: extractionResult.topics || [],
+          estimatedMinutes: extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION,
+        });
+      }
+
       const cropPromise = attachVisualCropsToExtraction(extractionResult)
         .then((croppedExtraction) => {
           setGptExtraction((current) => (current === extractionResult ? croppedExtraction : current));
@@ -520,70 +657,18 @@ export default function StudentDashboardPage() {
           return extractionResult;
         });
       visualCropPromiseRef.current = cropPromise;
-      setClassifiedTopic(extractionResult.topics?.[0] || '');
-      setEstimatedMinutes(extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION);
-      
-      // Check subject compatibility
-      let foundSubject = '';
-      let isSupported = false;
-      const normalizedDetected = (extractionResult.subject || '').toLowerCase();
-      
-      if (normalizedDetected && normalizedDetected !== 'unknown') {
-        const matched = subjectOptions.find((opt) => opt.value.toLowerCase() === normalizedDetected || opt.label.toLowerCase() === normalizedDetected);
-        if (matched) {
-          foundSubject = matched.value;
-          isSupported = true;
-        } else {
-          // Check aliases
-          const aliasMatch = subjectOptions.find((opt) => {
-             const aliases = SUBJECT_ALIASES[opt.value] || [];
-             return aliases.some(alias => normalizedDetected.includes(alias));
-          });
-          if (aliasMatch) {
-            foundSubject = aliasMatch.value;
-            isSupported = true;
-          }
-        }
-      }
-
-      setClassificationState('done');
-      if (isSupported) {
-        setSelectedSubject(foundSubject);
-        setClassificationStatus('Subject and study focus detected from your request.');
-        setUnsupportedSubjectRequest(null);
-      } else {
-        setSelectedSubject('');
-        setClassificationStatus(extractionResult.subject && extractionResult.subject !== 'Unknown' ? `Sorry, ${extractionResult.subject} is not offered yet.` : 'Choose the subject manually before sending.');
-        if (extractionResult.subject && extractionResult.subject !== 'Unknown') {
-          setUnsupportedSubjectRequest({
-            subject: extractionResult.subject,
-            inputText: '',
-            recorded: false,
-          });
-        }
-      }
-      if (!hasManualDurationOverride) {
-        setDurationMinutes(extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION);
-      }
-      
-      // Update dummy extraction status so the icons show "Done"
-      const statusUpdates = {};
-      nextAttachments.forEach(file => {
-         statusUpdates[getAttachmentKey(file)] = 'text extracted';
-      });
-      setAttachmentExtractionStatusByKey(statusUpdates);
     } catch (err) {
       console.error(err);
       setError(err.message || 'Extraction failed. Please try again or upload a clearer image.');
       setClassificationState('done');
       setClassificationStatus('Choose the subject manually before sending.');
-      
-      // Update dummy extraction status so the icons show "Error"
-      const statusUpdates = {};
-      nextAttachments.forEach(file => {
-         statusUpdates[getAttachmentKey(file)] = 'fallback needed';
+      setAttachmentExtractionStatusByKey((prev) => {
+        const next = { ...prev };
+        nextAttachments.forEach((file) => {
+          next[getAttachmentKey(file)] = 'fallback needed';
+        });
+        return next;
       });
-      setAttachmentExtractionStatusByKey(statusUpdates);
     } finally {
       setExtractionOverlayState('done');
     }
@@ -797,7 +882,14 @@ export default function StudentDashboardPage() {
     const hasAttachments = attachmentsRef.current.length > 0;
     if (hasAttachments) return;
 
-    if (!topic.trim()) {
+    const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
+    const classificationInput = buildSubjectClassificationInput({
+      typedText: topic,
+      attachmentExtractions: [],
+      supportedSubjects: supportedCatalog,
+    });
+
+    if (!classificationInput.hasUsableText) {
       setClassifiedTopic('');
       setEstimatedMinutes(DEFAULT_LESSON_DURATION);
       setClassificationStatus('');
@@ -809,22 +901,70 @@ export default function StudentDashboardPage() {
       return;
     }
 
-    const inferredSubject = isManualSubjectRef.current
-      ? selectedSubject
-      : resolveSubjectFromText(topic, subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS);
+    const runId = classificationRunCounterRef.current + 1;
+    classificationRunCounterRef.current = runId;
+    let isCancelled = false;
 
-    if (!isManualSubjectRef.current) {
-      setSelectedSubject(inferredSubject);
-    }
-    setClassifiedTopic('');
-    setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-    setClassificationState('done');
+    setClassificationState('running');
+    setClassificationStatus('Analyzing your request...');
     setUnsupportedSubjectRequest(null);
-    setClassificationStatus(inferredSubject ? 'Subject inferred from typed request.' : 'Choose the subject manually before sending.');
-    if (!hasManualDurationOverride) {
-      setDurationMinutes(DEFAULT_LESSON_DURATION);
-    }
-  }, [topic, hasManualDurationOverride, selectedSubject, subjectOptions]);
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const result = await classifySubjectFromText({
+          inputText: classificationInput.combinedText,
+          inputPayload: classificationInput.structuredPayload,
+          supportedSubjects: supportedCatalog,
+        });
+        if (isCancelled || classificationRunCounterRef.current !== runId) return;
+
+        const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
+        setClassifiedTopic(result.topic || '');
+        setEstimatedMinutes(nextEstimatedMinutes);
+        setClassificationState('done');
+
+        const detectedSubject = result.subject || '';
+        if (detectedSubject) {
+          if (!isManualSubjectRef.current) {
+            setSelectedSubject(detectedSubject);
+          }
+          setClassificationStatus(
+            result.needsManualSubjectSelection || result.subjectConfidence === 'low'
+              ? 'Subject detected. Please confirm before sending.'
+              : 'Subject and study focus detected from your request.',
+          );
+        } else {
+          if (!isManualSubjectRef.current) {
+            setSelectedSubject('');
+          }
+          setClassificationStatus('Choose the subject manually before sending.');
+        }
+
+        if (result.unsupportedSubjectRequested && result.unsupportedSubject) {
+          setUnsupportedSubjectRequest({
+            subject: result.unsupportedSubject,
+            inputText: topic,
+            recorded: Boolean(result.unsupportedSubjectRecorded),
+          });
+        } else {
+          setUnsupportedSubjectRequest(null);
+        }
+
+        if (!hasManualDurationOverride) {
+          setDurationMinutes(nextEstimatedMinutes);
+        }
+      } catch (classificationError) {
+        if (isCancelled || classificationRunCounterRef.current !== runId) return;
+        setClassificationState('error');
+        setClassificationStatus('We could not estimate the request yet. Keep editing or try again.');
+      }
+    }, 350);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [topic, hasManualDurationOverride, subjectOptions]);
 
   useEffect(() => {
     if (!onboardingStatus.complete) return;
@@ -1363,8 +1503,8 @@ export default function StudentDashboardPage() {
                 {extractionOverlayState === 'done'
                   ? 'Processing complete'
                   : isWaitingForClassification
-                    ? 'We are detecting the subject'
-                    : 'We are processing your file'}
+                    ? 'Scanning the file'
+                    : 'Scanning the file'}
               </h2>
               <p className="mt-2 text-sm text-zinc-600">
                 {extractionOverlayState === 'done'
