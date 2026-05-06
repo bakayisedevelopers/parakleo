@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Power, Star } from 'lucide-react';
+import { ChevronRight, Power, Star } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
 import TutorMetricTile from '../../../components/app/TutorMetricTile';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTutorAvailableRequests } from '../../../hooks/useClassRequests';
+import { useTutorSessions } from '../../../hooks/useSessions';
+import { SESSION_STATUS } from '../../../constants/lifecycle';
 import { getTutorOnboardingStatus } from '../../../utils/onboarding';
 import { getUserProfile, updateUserProfile } from '../../../services/userService';
 import { acceptClassRequest, declineClassRequest } from '../../../services/classRequestService';
@@ -17,6 +19,7 @@ export default function TutorDashboardPage() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
   const { requests } = useTutorAvailableRequests(user?.uid);
+  const { sessions } = useTutorSessions(user?.uid);
   const onboardingStatus = getTutorOnboardingStatus(user);
   const isOnline = user?.onlineStatus === 'online';
   const { useBottomNav } = useViewportMode();
@@ -39,6 +42,10 @@ export default function TutorDashboardPage() {
   }, [user]);
 
   const tutorProfile = profileSnapshot?.tutorProfile || user?.tutorProfile || {};
+  const activeTutorSession = useMemo(
+    () => sessions.find((session) => [SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)),
+    [sessions],
+  );
   const dispatchMetrics = {
     acceptanceRate: Number(tutorProfile.acceptanceRate ?? profileSnapshot?.acceptanceRate ?? 0),
     completionRate: Number(tutorProfile.completionRate ?? profileSnapshot?.completionRate ?? 0),
@@ -49,6 +56,50 @@ export default function TutorDashboardPage() {
   };
 
   const formatPercent = (value) => `${(Math.max(0, value <= 1 ? value * 100 : value)).toFixed(1)}%`;
+
+  if (activeTutorSession) {
+    const isInProgress = activeTutorSession.status === SESSION_STATUS.IN_PROGRESS;
+
+    return (
+      <div className="space-y-4">
+        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)]">
+          <div className="inline-flex items-center rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700">
+            Live session
+          </div>
+          <h1 className="mt-4 text-2xl font-black tracking-tight text-zinc-900">
+            {isInProgress ? 'Your class is in progress.' : 'Your class is ready to join.'}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-600">
+            {activeTutorSession.topic || 'Current class'}
+            {' '}
+            {activeTutorSession.subject ? `• ${activeTutorSession.subject}` : ''}
+          </p>
+
+          <div className="mt-5 rounded-[1.75rem] border border-zinc-200 bg-zinc-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
+              {activeTutorSession.studentName || 'Student'}
+            </p>
+            <p className="mt-2 text-lg font-bold text-zinc-900">
+              {activeTutorSession.duration || 'Live now'}
+            </p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {isInProgress ? 'Join back into the live class from any device.' : 'Open the session room to begin or continue the class.'}
+            </p>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <Link
+              to={`/app/session/${activeTutorSession.id}`}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Join session
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const toggleOnlineStatus = async () => {
     if (isTutorRestrictedMobile) return;
