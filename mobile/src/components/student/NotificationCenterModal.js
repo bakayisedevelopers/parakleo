@@ -4,6 +4,17 @@ import { EmptyState, LoadingState } from '../ui/States';
 import { colors } from '../../theme/colors';
 
 function getNotificationActionLabel(notification) {
+  const targetPath = String(notification?.targetPath || '');
+  const type = String(notification?.type || '').toLowerCase();
+
+  if (targetPath.includes('/payment') || type.includes('payment')) {
+    return 'Open payment';
+  }
+
+  if (targetPath.includes('/requests') || type === 'lesson_completed' || type === 'session_completed') {
+    return 'Open status';
+  }
+
   if (notification?.sessionId) {
     return 'Open session';
   }
@@ -20,10 +31,16 @@ export function NotificationCenterModal({
   notifications,
   isLoading,
   onClose,
+  onOpenNotification,
   onOpenRequest,
   onOpenSession,
 }) {
   const handleOpen = (notification) => {
+    if (onOpenNotification) {
+      onOpenNotification(notification);
+      return;
+    }
+
     if (notification?.sessionId) {
       onOpenSession?.(notification.sessionId);
       return;
@@ -57,7 +74,7 @@ export function NotificationCenterModal({
                 <Pressable
                   accessibilityRole="button"
                   key={notification.id}
-                  disabled={!notification?.requestId && !notification?.sessionId}
+                  disabled={!notification?.requestId && !notification?.sessionId && !notification?.targetPath}
                   onPress={() => handleOpen(notification)}
                 >
                   <Card style={styles.card}>

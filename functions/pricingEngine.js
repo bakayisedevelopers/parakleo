@@ -1,6 +1,6 @@
 const { logger } = require('firebase-functions');
 
-const PRICING_CONFIG_VERSION = 'pricing-v2.0.0';
+const PRICING_CONFIG_VERSION = 'pricing-v2.1.0';
 
 const DEFAULT_PRICING_CONFIG = {
   version: PRICING_CONFIG_VERSION,
@@ -11,6 +11,20 @@ const DEFAULT_PRICING_CONFIG = {
     shortSessionBoostMultiplier: 1.02,
     longSessionDiscountFromMinutes: 60,
     longSessionDiscountMultiplier: 0.97,
+  },
+  durationRateDiscounts: {
+    enabled: true,
+    minimumDiscountedRatePerMinute: 1.5,
+    tiers: [
+      { minMinutes: 1, maxMinutes: 10, discountPercent: 0 },
+      { minMinutes: 11, maxMinutes: 20, discountPercent: 5 },
+      { minMinutes: 21, maxMinutes: 30, discountPercent: 10 },
+      { minMinutes: 31, maxMinutes: 40, discountPercent: 15 },
+      { minMinutes: 41, maxMinutes: 50, discountPercent: 20 },
+      { minMinutes: 51, maxMinutes: 60, discountPercent: 25 },
+      { minMinutes: 61, maxMinutes: 75, discountPercent: 30 },
+      { minMinutes: 76, maxMinutes: null, discountPercent: 35 },
+    ],
   },
   bands: {
     low: { base: 5, ratePerMinute: 3.0 },
@@ -115,17 +129,139 @@ function getDurationAdjustment(minutes, config) {
   const shortUnder = Number(settings.shortSessionBoostUnderMinutes || 15);
   const shortMultiplier = Number(settings.shortSessionBoostMultiplier || 1.02);
   const longFrom = Number(settings.longSessionDiscountFromMinutes || 60);
-  const longMultiplier = Number(settings.longSessionDiscountMultiplier || 0.97);
 
   if (minutes < shortUnder) {
     return { multiplier: shortMultiplier, label: 'short_session_adjustment' };
   }
 
   if (minutes >= longFrom) {
-    return { multiplier: longMultiplier, label: 'long_session_discount' };
+    // Long-session pricing is now applied only to the minute-rate portion.
+    // Keep this legacy adjustment neutral so base pricing does not change.
+    return { multiplier: 1, label: 'long_session_discount_neutralized' };
   }
 
   return { multiplier: 1, label: 'standard_duration' };
+}
+
+function normalizeDurationRateDiscounts(durationRateDiscounts = {}, fallback = DEFAULT_PRICING_CONFIG.durationRateDiscounts) {
+  const source = durationRateDiscounts && typeof durationRateDiscounts === 'object'
+    ? durationRateDiscounts
+    : fallback;
+
+  const tiers = Array.isArray(source.tiers) ? source.tiers : fallback.tiers;
+  const normalizedTiers = tiers
+    .map((tier) => ({
+      minMinutes: Math.max(1, Math.floor(Number(tier.minMinutes || 0))),
+      maxMinutes: tier.maxMinutes == null ? null : Math.max(1, Math.floor(Number(tier.maxMinutes || 0))),
+      discountPercent: Math.max(0, Number(tier.discountPercent || 0)),
+    }))
+    .filter((tier) => tier.minMinutes >= 1 && (tier.maxMinutes == null || tier.maxMinutes >= tier.minMinutes))
+    .sort((left, right) => left.minMinutes - right.minMinutes);
+
+  if (!normalizedTiers.length) {
+    return null;
+  }
+
+  return {
+    enabled: source.enabled !== false,
+    minimumDiscountedRatePerMinute: Math.max(
+      0,
+      Number(source.minimumDiscountedRatePerMinute ?? fallback.minimumDiscountedRatePerMinute ?? 0),
+    ),
+    tiers: normalizedTiers,
+  };
+}
+
+function getDurationRateDiscountSnapshot(minutes, adjustedRatePerMinute, durationRateDiscounts) {
+  const durationMinutes = Math.max(1, Math.floor(Number(minutes || 0)));
+  const rate = Number(adjustedRatePerMinute || 0);
+  const policy = normalizeDurationRateDiscounts(durationRateDiscounts);
+
+  const undiscountedMinuteAmount = roundCurrency(durationMinutes * rate);
+  if (!policy || policy.enabled === false) {
+    return {
+      durationRateDiscounts: policy,
+      durationDiscountApplied: false,
+      durationDiscountPercent: 0,
+      durationDiscountAmount: 0,
+      durationDiscountedMinuteAmount: undiscountedMinuteAmount,
+      undiscountedMinuteAmount,
+      effectiveRatePerMinute: roundCurrency(rate),
+      durationDiscountBreakdown: {
+        applied: false,
+        discountPercent: 0,
+        minimumDiscountedRatePerMinute: policy?.minimumDiscountedRatePerMinute || null,
+        tieredAmounts: [],
+        discountedRatePerMinute: roundCurrency(rate),
+        undiscountedMinuteAmount,
+        durationDiscountedMinuteAmount: undiscountedMinuteAmount,
+        durationDiscountAmount: 0,
+      },
+    };
+  }
+
+  const minimumDiscountedRatePerMinute = Number(policy.minimumDiscountedRatePerMinute || 0);
+  let durationDiscountedMinuteAmount = 0;
+  let highestDiscountPercent = 0;
+  const tieredAmounts = [];
+
+  for (const tier of policy.tiers) {
+    const tierStart = Math.max(1, Number(tier.minMinutes || 1));
+    const tierEnd = tier.maxMinutes == null
+      ? durationMinutes
+      : Math.max(tierStart, Number(tier.maxMinutes || tierStart));
+    if (durationMinutes < tierStart) continue;
+
+    const segmentStart = tierStart;
+    const segmentEnd = Math.min(durationMinutes, tierEnd);
+    const segmentMinutes = Math.max(0, segmentEnd - segmentStart + 1);
+    if (!segmentMinutes) continue;
+
+    const discountPercent = Math.max(0, Number(tier.discountPercent || 0));
+    const discountMultiplier = Math.max(0, 1 - (discountPercent / 100));
+    const rawDiscountedRatePerMinute = rate * discountMultiplier;
+    const discountedRatePerMinute = Math.max(rawDiscountedRatePerMinute, minimumDiscountedRatePerMinute);
+    const segmentDiscountedAmount = roundCurrency(segmentMinutes * discountedRatePerMinute);
+    const segmentUndiscountedAmount = roundCurrency(segmentMinutes * rate);
+    const segmentDiscountAmount = roundCurrency(segmentUndiscountedAmount - segmentDiscountedAmount);
+
+    durationDiscountedMinuteAmount = roundCurrency(durationDiscountedMinuteAmount + segmentDiscountedAmount);
+    highestDiscountPercent = Math.max(highestDiscountPercent, discountPercent);
+    tieredAmounts.push({
+      minMinutes: tier.minMinutes,
+      maxMinutes: tier.maxMinutes,
+      minutes: segmentMinutes,
+      discountPercent,
+      discountMultiplier,
+      discountedRatePerMinute: roundCurrency(discountedRatePerMinute),
+      segmentDiscountedAmount,
+      segmentDiscountAmount,
+    });
+  }
+
+  const durationDiscountAmount = roundCurrency(undiscountedMinuteAmount - durationDiscountedMinuteAmount);
+  const effectiveRatePerMinute = roundCurrency(durationDiscountedMinuteAmount / durationMinutes);
+  const durationDiscountApplied = durationDiscountAmount > 0;
+
+  return {
+    durationRateDiscounts: policy,
+    durationDiscountApplied,
+    durationDiscountPercent: highestDiscountPercent,
+    durationDiscountAmount,
+    durationDiscountedMinuteAmount,
+    undiscountedMinuteAmount,
+    effectiveRatePerMinute,
+    durationDiscountBreakdown: {
+      applied: durationDiscountApplied,
+      discountPercent: highestDiscountPercent,
+      minimumDiscountedRatePerMinute,
+      tieredAmounts,
+      discountedRatePerMinute: effectiveRatePerMinute,
+      undiscountedMinuteAmount,
+      durationDiscountedMinuteAmount,
+      durationDiscountAmount,
+    },
+  };
 }
 
 function normalizeLevel(value, allowed, fallback) {
@@ -203,7 +339,8 @@ function computePricingQuote({ minutes, subject, signalContext = {}, config = DE
 
   const adjustedBase = roundCurrency(Number(bandConfig.base || 0) * combinedMultiplier);
   const adjustedRate = roundCurrency(Number(bandConfig.ratePerMinute || 0) * combinedMultiplier);
-  const totalAmount = roundCurrency(adjustedBase + (duration * adjustedRate));
+  const durationRateDiscount = getDurationRateDiscountSnapshot(duration, adjustedRate, config.durationRateDiscounts);
+  const totalAmount = roundCurrency(adjustedBase + durationRateDiscount.durationDiscountedMinuteAmount);
 
   return {
     pricingBand: band,
@@ -224,6 +361,14 @@ function computePricingQuote({ minutes, subject, signalContext = {}, config = DE
     seasonMultiplier,
     durationAdjustment,
     combinedMultiplier,
+    durationRateDiscounts: durationRateDiscount.durationRateDiscounts,
+    durationDiscountApplied: durationRateDiscount.durationDiscountApplied,
+    durationDiscountPercent: durationRateDiscount.durationDiscountPercent,
+    durationDiscountAmount: durationRateDiscount.durationDiscountAmount,
+    durationDiscountedMinuteAmount: durationRateDiscount.durationDiscountedMinuteAmount,
+    undiscountedMinuteAmount: durationRateDiscount.undiscountedMinuteAmount,
+    effectiveRatePerMinute: durationRateDiscount.effectiveRatePerMinute,
+    durationDiscountBreakdown: durationRateDiscount.durationDiscountBreakdown,
     totalAmount,
     currency: config.currency || 'ZAR',
     configVersion: config.version || PRICING_CONFIG_VERSION,
@@ -256,6 +401,9 @@ function sanitizePricingSnapshot(snapshot = {}) {
     || snapshot.baseAmount
     || LEGACY_SAFE_PRICING_SNAPSHOT.adjustedBaseAmount,
   );
+  const sanitizedDurationRateDiscounts = snapshot.durationRateDiscounts
+    ? normalizeDurationRateDiscounts(snapshot.durationRateDiscounts)
+    : null;
   const totalAmount = roundCurrency(
     snapshot.totalAmount ?? (adjustedBaseAmount + (adjustedRatePerMinute * durationMinutes)),
   );
@@ -276,6 +424,23 @@ function sanitizePricingSnapshot(snapshot = {}) {
     seasonMultiplier: Number(snapshot.seasonMultiplier || 1),
     durationAdjustment: snapshot.durationAdjustment || { multiplier: 1, label: 'legacy' },
     combinedMultiplier: Number(snapshot.combinedMultiplier || 1),
+    durationRateDiscounts: sanitizedDurationRateDiscounts,
+    durationDiscountApplied: Boolean(snapshot.durationDiscountApplied),
+    durationDiscountPercent: Number(snapshot.durationDiscountPercent || 0),
+    durationDiscountAmount: roundCurrency(snapshot.durationDiscountAmount || 0),
+    durationDiscountedMinuteAmount: roundCurrency(
+      snapshot.durationDiscountedMinuteAmount
+      ?? (snapshot.effectiveRatePerMinute
+        ? durationMinutes * Number(snapshot.effectiveRatePerMinute)
+        : adjustedRatePerMinute * durationMinutes),
+    ),
+    undiscountedMinuteAmount: roundCurrency(
+      snapshot.undiscountedMinuteAmount || (adjustedRatePerMinute * durationMinutes),
+    ),
+    effectiveRatePerMinute: roundCurrency(
+      snapshot.effectiveRatePerMinute || snapshot.adjustedRatePerMinute || adjustedRatePerMinute,
+    ),
+    durationDiscountBreakdown: snapshot.durationDiscountBreakdown || null,
     totalAmount,
     configVersion: snapshot.configVersion || LEGACY_SAFE_PRICING_SNAPSHOT.configVersion,
     explanationLabel: snapshot.explanationLabel || LEGACY_SAFE_PRICING_SNAPSHOT.explanationLabel,
@@ -303,10 +468,57 @@ function computeFinalAmountFromSnapshot({
   const isEarlyCancellation = isCancel && safeBilledMinutes <= earlyCancelThresholdMinutes;
   const baseAmount = roundCurrency(safeSnapshot?.adjustedBaseAmount || safeSnapshot?.baseAmount || 0);
   const perMinuteRate = roundCurrency(safeSnapshot?.adjustedRatePerMinute || safeSnapshot?.ratePerMinute || 0);
+  const discountPolicy = safeSnapshot.durationRateDiscounts;
+  const hasLockedDurationDiscountPolicy = Boolean(
+    discountPolicy
+    && Array.isArray(discountPolicy.tiers)
+    && discountPolicy.tiers.length
+    && discountPolicy.enabled !== false,
+  );
 
-  const totalAmount = isEarlyCancellation
-    ? baseAmount
-    : roundCurrency(baseAmount + (safeBilledMinutes * perMinuteRate));
+  if (isEarlyCancellation) {
+    return {
+      totalAmount: baseAmount,
+      perMinuteRate,
+      baseAmount,
+      earlyCancelThresholdMinutes,
+      isEarlyCancellation,
+      selectedDurationMinutes: selectedDuration,
+      durationDiscountApplied: false,
+      durationDiscountPercent: 0,
+      durationDiscountAmount: 0,
+      durationDiscountedMinuteAmount: 0,
+      undiscountedMinuteAmount: 0,
+      effectiveRatePerMinute: 0,
+      durationDiscountBreakdown: null,
+    };
+  }
+
+  if (!hasLockedDurationDiscountPolicy) {
+    const totalAmount = roundCurrency(baseAmount + (safeBilledMinutes * perMinuteRate));
+    return {
+      totalAmount,
+      perMinuteRate,
+      baseAmount,
+      earlyCancelThresholdMinutes,
+      isEarlyCancellation,
+      selectedDurationMinutes: selectedDuration,
+      durationDiscountApplied: false,
+      durationDiscountPercent: 0,
+      durationDiscountAmount: 0,
+      durationDiscountedMinuteAmount: roundCurrency(safeBilledMinutes * perMinuteRate),
+      undiscountedMinuteAmount: roundCurrency(safeBilledMinutes * perMinuteRate),
+      effectiveRatePerMinute: perMinuteRate,
+      durationDiscountBreakdown: null,
+    };
+  }
+
+  const billingDurationRateDiscount = getDurationRateDiscountSnapshot(
+    safeBilledMinutes,
+    perMinuteRate,
+    discountPolicy,
+  );
+  const totalAmount = roundCurrency(baseAmount + billingDurationRateDiscount.durationDiscountedMinuteAmount);
 
   return {
     totalAmount,
@@ -315,6 +527,13 @@ function computeFinalAmountFromSnapshot({
     earlyCancelThresholdMinutes,
     isEarlyCancellation,
     selectedDurationMinutes: selectedDuration,
+    durationDiscountApplied: billingDurationRateDiscount.durationDiscountApplied,
+    durationDiscountPercent: billingDurationRateDiscount.durationDiscountPercent,
+    durationDiscountAmount: billingDurationRateDiscount.durationDiscountAmount,
+    durationDiscountedMinuteAmount: billingDurationRateDiscount.durationDiscountedMinuteAmount,
+    undiscountedMinuteAmount: billingDurationRateDiscount.undiscountedMinuteAmount,
+    effectiveRatePerMinute: billingDurationRateDiscount.effectiveRatePerMinute,
+    durationDiscountBreakdown: billingDurationRateDiscount.durationDiscountBreakdown,
   };
 }
 
@@ -334,6 +553,13 @@ async function loadPricingConfig(db, fallback = DEFAULT_PRICING_CONFIG) {
       seasonMultipliers: { ...fallback.seasonMultipliers, ...(data.seasonMultipliers || {}) },
       subjectMultipliers: { ...fallback.subjectMultipliers, ...(data.subjectMultipliers || {}) },
       durationAdjustment: { ...fallback.durationAdjustment, ...(data.durationAdjustment || {}) },
+      durationRateDiscounts: {
+        ...fallback.durationRateDiscounts,
+        ...(data.durationRateDiscounts || {}),
+        tiers: Array.isArray(data.durationRateDiscounts?.tiers)
+          ? data.durationRateDiscounts.tiers
+          : fallback.durationRateDiscounts.tiers,
+      },
     };
   } catch (error) {
     logger.error('Failed to load pricing config; using defaults.', { message: error.message });

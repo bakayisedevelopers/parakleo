@@ -78,6 +78,7 @@ export async function createClassRequest(payload) {
       message: `Your ${payload.topic || payload.subject || 'class'} request is now matching tutors.`,
       type: 'class_request',
       requestId: docRef.id,
+      targetPath: `/app/student/requests/${docRef.id}`,
       read: false,
       createdAt: serverTimestamp(),
     }),

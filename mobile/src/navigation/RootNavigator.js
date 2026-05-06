@@ -83,6 +83,33 @@ function getParentTab(routeKey, params) {
   return routeKey;
 }
 
+function resolveNotificationRoute(notification = {}) {
+  const targetPath = String(notification?.targetPath || '').trim();
+  const type = String(notification?.type || '').toLowerCase();
+  const requestId = notification?.requestId || '';
+  const sessionId = notification?.sessionId || '';
+
+  if (targetPath.includes('/student/payment') || type.includes('payment')) {
+    return { key: 'Wallet', params: {} };
+  }
+
+  if (targetPath.includes('/student/requests') || type === 'lesson_completed' || type === 'session_completed') {
+    return requestId
+      ? { key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } }
+      : { key: 'Requests', params: {} };
+  }
+
+  if (sessionId) {
+    return { key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } };
+  }
+
+  if (requestId) {
+    return { key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } };
+  }
+
+  return { key: 'Dashboard', params: {} };
+}
+
 export function RootNavigator() {
   const { initializing, logout, user } = useAuth();
   const [authRoute, setAuthRoute] = useState('Home');
@@ -302,6 +329,10 @@ export function RootNavigator() {
           notifications={notifications}
           isLoading={notificationsLoading}
           onClose={() => setIsNotificationsOpen(false)}
+          onOpenNotification={(notification) => {
+            setIsNotificationsOpen(false);
+            openRoute(resolveNotificationRoute(notification));
+          }}
           onOpenRequest={(requestId) => {
             setIsNotificationsOpen(false);
             openRoute({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });

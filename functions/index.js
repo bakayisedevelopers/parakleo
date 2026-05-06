@@ -32,6 +32,37 @@ admin.initializeApp();
 
 const db = admin.firestore();
 
+async function createUserNotification({
+  userId,
+  title,
+  message,
+  type = 'update',
+  requestId = null,
+  sessionId = null,
+  targetPath = '',
+  metadata = {},
+}) {
+  if (!userId) return null;
+
+  const notification = {
+    userId,
+    title: String(title || 'Claxi update'),
+    message: String(message || 'You have a new update.'),
+    type: String(type || 'update'),
+    requestId: requestId || null,
+    sessionId: sessionId || null,
+    targetPath: targetPath || '',
+    metadata: metadata || {},
+    read: false,
+    readAt: null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  const ref = await db.collection('notifications').add(notification);
+  return { id: ref.id, ...notification };
+}
+
 async function writeAiLog({
   userId,
   source,
@@ -197,13 +228,6 @@ const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
 const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
 const CLAXI_REALTIME_SECRETS = defineSecret('CLAXI_REALTIME_SECRETS');
 const CLAXI_AI_KEYS = defineSecret('CLAXI_AI_KEYS');
-
-const PAYSTACK_SECRET_KEY = defineSecret('PAYSTACK_SECRET_KEY');
-const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
-const EMAIL_FROM = defineSecret('EMAIL_FROM');
-const CLOUDFLARE_TURN_KEY_ID = defineSecret('CLOUDFLARE_TURN_KEY_ID');
-const CLOUDFLARE_TURN_API_TOKEN = defineSecret('CLOUDFLARE_TURN_API_TOKEN');
-const CLOUDFLARE_TURN_TTL_SECONDS = defineSecret('CLOUDFLARE_TURN_TTL_SECONDS');
 
 const DEFAULT_STUN_URLS = ['stun:stun.l.google.com:19302'];
 const DEFAULT_TURN_TTL_SECONDS = 600;
@@ -1058,6 +1082,19 @@ exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', 
       || Number(before?.offerRevision || 0) !== offerRevision;
 
     if (didChangeOffer) {
+      await createUserNotification({
+        userId: afterTutorId,
+        title: 'New tutor request',
+        message: `A ${subject || 'class'} request is waiting for your response.`,
+        type: 'tutor_offer',
+        requestId,
+        targetPath: '/app/tutor',
+        metadata: {
+          offerRevision,
+          offerExpiresAt: after.offerExpiresAt || null,
+        },
+      });
+
       await recordTutorOfferLifecycleEvent({
         tutorId: afterTutorId,
         requestId,
@@ -1072,6 +1109,24 @@ exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', 
 
   if (afterStatus === REQUEST_STATUS.ACCEPTED && tutorId) {
     const responseSeconds = Math.max(0, Math.round((now - offeredAtMs) / 1000));
+    if (beforeStatus !== REQUEST_STATUS.ACCEPTED) {
+      await createUserNotification({
+        userId: after.studentId || before?.studentId || null,
+        title: 'Tutor selected',
+        message: `${after.tutorName || 'A tutor'} accepted your ${subject || 'class'} request.`,
+        type: 'request_accepted',
+        requestId,
+        sessionId: after.sessionId || before?.sessionId || requestId,
+        targetPath: after.sessionId || before?.sessionId || requestId
+          ? `/app/session/${after.sessionId || before?.sessionId || requestId}`
+          : `/app/student/requests/${requestId}`,
+        metadata: {
+          tutorId,
+          tutorName: after.tutorName || '',
+        },
+      });
+    }
+
     await recordTutorOfferLifecycleEvent({
       tutorId,
       requestId,
@@ -1109,6 +1164,17 @@ exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', 
         sourceStatus: afterStatus,
       });
     }
+  }
+
+  if (afterStatus === REQUEST_STATUS.NO_TUTOR_AVAILABLE && beforeStatus !== REQUEST_STATUS.NO_TUTOR_AVAILABLE) {
+    await createUserNotification({
+      userId: after.studentId || before?.studentId || null,
+      title: 'No tutor available',
+      message: 'No tutor accepted in time. You can retry from your class status page.',
+      type: 'matching_update',
+      requestId,
+      targetPath: `/app/student/requests/${requestId}`,
+    });
   }
 });
 
@@ -1704,10 +1770,10 @@ function buildEmailPayload(eventType, payload) {
         html: renderEmailTemplate({
           eyebrow: 'Tutor found',
           title: 'A tutor accepted your request',
-          intro: `${payload.tutorName || 'A tutor'} accepted your ${payload.subject || 'class'} request.`,
+          intro: `${payload.tutorName || 'A tutor'} accepted your ${payload.topic || payload.subject || 'class'} request.`,
           details: [
             { label: 'Tutor', value: payload.tutorName || 'Tutor' },
-            { label: 'Subject', value: payload.subject || 'Class request' },
+            { label: 'Subject', value: payload.topic || payload.subject || 'Class request' },
           ],
         }),
       };
@@ -1887,20 +1953,6 @@ function parseGroupedSecretJson(name, rawValue) {
   }
 }
 
-function pickSecretValue(groupedSecrets, key, fallbackSecret) {
-  const groupedValue = groupedSecrets?.[key];
-  if (typeof groupedValue === 'string' && groupedValue.trim()) {
-    return groupedValue.trim();
-  }
-
-  const fallbackValue = fallbackSecret.value();
-  if (typeof fallbackValue === 'string' && fallbackValue.trim()) {
-    return fallbackValue.trim();
-  }
-
-  return '';
-}
-
 function assertRequiredSecrets(groupName, secrets, requiredKeys) {
   const missingKeys = requiredKeys.filter((key) => !secrets[key]);
   if (missingKeys.length) {
@@ -1914,7 +1966,7 @@ function getPaymentsSecrets() {
     CLAXI_PAYMENTS_SECRETS.value(),
   );
   const secrets = {
-    PAYSTACK_SECRET_KEY: pickSecretValue(groupedSecrets, 'PAYSTACK_SECRET_KEY', PAYSTACK_SECRET_KEY),
+    PAYSTACK_SECRET_KEY: String(groupedSecrets.PAYSTACK_SECRET_KEY || '').trim(),
   };
 
   assertRequiredSecrets('CLAXI_PAYMENTS_SECRETS', secrets, ['PAYSTACK_SECRET_KEY']);
@@ -1924,8 +1976,8 @@ function getPaymentsSecrets() {
 function getEmailSecrets() {
   const groupedSecrets = parseGroupedSecretJson('CLAXI_EMAIL_SECRETS', CLAXI_EMAIL_SECRETS.value());
   const secrets = {
-    RESEND_API_KEY: pickSecretValue(groupedSecrets, 'RESEND_API_KEY', RESEND_API_KEY),
-    EMAIL_FROM: pickSecretValue(groupedSecrets, 'EMAIL_FROM', EMAIL_FROM),
+    RESEND_API_KEY: String(groupedSecrets.RESEND_API_KEY || '').trim(),
+    EMAIL_FROM: String(groupedSecrets.EMAIL_FROM || '').trim(),
   };
 
   assertRequiredSecrets('CLAXI_EMAIL_SECRETS', secrets, ['RESEND_API_KEY', 'EMAIL_FROM']);
@@ -1938,21 +1990,9 @@ function getRealtimeSecrets() {
     CLAXI_REALTIME_SECRETS.value(),
   );
   const secrets = {
-    CLOUDFLARE_TURN_KEY_ID: pickSecretValue(
-      groupedSecrets,
-      'CLOUDFLARE_TURN_KEY_ID',
-      CLOUDFLARE_TURN_KEY_ID,
-    ),
-    CLOUDFLARE_TURN_API_TOKEN: pickSecretValue(
-      groupedSecrets,
-      'CLOUDFLARE_TURN_API_TOKEN',
-      CLOUDFLARE_TURN_API_TOKEN,
-    ),
-    CLOUDFLARE_TURN_TTL_SECONDS: pickSecretValue(
-      groupedSecrets,
-      'CLOUDFLARE_TURN_TTL_SECONDS',
-      CLOUDFLARE_TURN_TTL_SECONDS,
-    ),
+    CLOUDFLARE_TURN_KEY_ID: String(groupedSecrets.CLOUDFLARE_TURN_KEY_ID || '').trim(),
+    CLOUDFLARE_TURN_API_TOKEN: String(groupedSecrets.CLOUDFLARE_TURN_API_TOKEN || '').trim(),
+    CLOUDFLARE_TURN_TTL_SECONDS: String(groupedSecrets.CLOUDFLARE_TURN_TTL_SECONDS || '').trim(),
   };
 
   assertRequiredSecrets('CLAXI_REALTIME_SECRETS', secrets, [
@@ -2912,12 +2952,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
 exports.getIceConfig = onRequest(
   {
     cors: true,
-    secrets: [
-      CLAXI_REALTIME_SECRETS,
-      CLOUDFLARE_TURN_KEY_ID,
-      CLOUDFLARE_TURN_API_TOKEN,
-      CLOUDFLARE_TURN_TTL_SECONDS,
-    ],
+    secrets: [CLAXI_REALTIME_SECRETS],
   },
   async (req, res) => {
     if (req.method !== 'POST') {
@@ -3038,7 +3073,7 @@ exports.getIceConfig = onRequest(
   },
 );
 
-exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3287,7 +3322,7 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRET
   }
 });
 
-exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3367,7 +3402,7 @@ exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYME
   }
 });
 
-exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'GET') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3592,7 +3627,7 @@ async function initiatePaystackTransfer({ paystackSecretKey, amount, recipientCo
   return payload?.data || {};
 }
 
-exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3816,6 +3851,57 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
 
   const updatedSnap = await sessionRef.get();
   const updatedSession = { id: updatedSnap.id, ...updatedSnap.data() };
+  const paymentTitle = charge.ok ? 'Payment completed' : 'Payment needs attention';
+  const paymentMessage = charge.ok
+    ? `Your ${updatedSession.topic || updatedSession.subject || 'class'} payment was completed.`
+    : `Your ${updatedSession.topic || updatedSession.subject || 'class'} payment was not completed. The balance was recorded in your wallet.`;
+
+  await Promise.all([
+    createUserNotification({
+      userId: updatedSession.studentId,
+      title: closureType === 'canceled_during' ? 'Session canceled' : 'Lesson completed',
+      message: `${updatedSession.topic || updatedSession.subject || 'Your lesson'} is ${closureType === 'canceled_during' ? 'canceled' : 'completed'}.`,
+      type: closureType === 'canceled_during' ? 'session_canceled' : 'lesson_completed',
+      requestId: updatedSession.requestId || null,
+      sessionId,
+      targetPath: '/app/student/requests',
+      metadata: {
+        paymentStatus,
+        totalAmount,
+      },
+    }),
+    createUserNotification({
+      userId: updatedSession.studentId,
+      title: paymentTitle,
+      message: paymentMessage,
+      type: charge.ok ? 'payment_completed' : 'payment_failed',
+      requestId: updatedSession.requestId || null,
+      sessionId,
+      targetPath: '/app/student/payment',
+      metadata: {
+        paymentStatus,
+        amount: totalAmount,
+        transactionId: charge.transactionId || null,
+        reason: charge.reason || null,
+      },
+    }),
+    createUserNotification({
+      userId: updatedSession.tutorId,
+      title: closureType === 'canceled_during' ? 'Session canceled' : 'Lesson completed',
+      message: `${updatedSession.topic || updatedSession.subject || 'Your lesson'} is ${closureType === 'canceled_during' ? 'canceled' : 'completed'}. Tutor earnings: R${tutorAmount.toFixed(2)}.`,
+      type: closureType === 'canceled_during' ? 'session_canceled' : 'lesson_completed',
+      requestId: updatedSession.requestId || null,
+      sessionId,
+      targetPath: '/app/tutor/payments',
+      metadata: {
+        paymentStatus,
+        tutorAmount,
+        platformAmount,
+        grossAmount: originalPrice,
+      },
+    }),
+  ]);
+
   logger.info('pricing_billing_finalized', {
     sessionId,
     requestId: session.requestId || null,
@@ -3840,7 +3926,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
   });
 });
 
-exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY] }, async (req, res) => {
+exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3917,6 +4003,17 @@ exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS
       amount: outstandingAmount,
       reason: charge.reason || 'gateway_declined',
     });
+    await createUserNotification({
+      userId: decoded.uid,
+      title: 'Payment unsuccessful',
+      message: 'Your outstanding balance payment was not successful. Please try another card.',
+      type: 'payment_failed',
+      targetPath: '/app/student/payment',
+      metadata: {
+        amount: outstandingAmount,
+        reason: charge.reason || 'gateway_declined',
+      },
+    });
     res.status(402).json({
       success: false,
       message: 'Card payment was not successful. Please try another card or contact your bank.',
@@ -3942,6 +4039,17 @@ exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS
   }, { merge: true });
 
   const updatedSnap = await studentRef.get();
+  await createUserNotification({
+    userId: decoded.uid,
+    title: 'Payment completed',
+    message: `Your outstanding balance payment of R${outstandingAmount.toFixed(2)} was completed.`,
+    type: 'payment_completed',
+    targetPath: '/app/student/payment',
+    metadata: {
+      amount: outstandingAmount,
+      transactionId: charge.transactionId || null,
+    },
+  });
   res.status(200).json({
     success: true,
     message: 'Outstanding balance paid successfully.',
@@ -4158,7 +4266,7 @@ async function syncBackendWeeklyPayoutRecords() {
 exports.processWeeklyTutorPayouts = onSchedule({
   schedule: '0 0 * * 1',
   timeZone: 'Africa/Johannesburg',
-  secrets: [CLAXI_PAYMENTS_SECRETS, PAYSTACK_SECRET_KEY],
+  secrets: [CLAXI_PAYMENTS_SECRETS],
 }, async () => {
   let paymentsSecrets;
   try {
@@ -4188,6 +4296,18 @@ exports.processWeeklyTutorPayouts = onSchedule({
         paidBy: { system: 'automatic', reason: 'zero_amount' },
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await createUserNotification({
+        userId: payout.tutorId,
+        title: 'Tutor payout completed',
+        message: `Your ${payout.weekKey || 'weekly'} payout was marked paid. Amount: R0.00.`,
+        type: 'tutor_payout_paid',
+        targetPath: '/app/tutor/payments',
+        metadata: {
+          payoutId: payout.id,
+          payoutStatus: 'paid',
+          amount: 0,
+        },
+      });
       paidCount += 1;
       continue;
     }
@@ -4204,6 +4324,19 @@ exports.processWeeklyTutorPayouts = onSchedule({
         lastTransferAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await createUserNotification({
+        userId: payout.tutorId,
+        title: 'Tutor payout unsuccessful',
+        message: 'Your tutor payout could not be processed because your payout account is not verified.',
+        type: 'tutor_payout_failed',
+        targetPath: '/app/tutor/payments',
+        metadata: {
+          payoutId: payout.id,
+          payoutStatus: 'unsuccessful',
+          amount,
+          failureReason: 'Tutor payout account is not verified.',
+        },
+      });
       failedCount += 1;
       continue;
     }
@@ -4217,6 +4350,19 @@ exports.processWeeklyTutorPayouts = onSchedule({
       lastTransferAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+    await createUserNotification({
+      userId: payout.tutorId,
+      title: 'Tutor payout processing',
+      message: `Your ${payout.weekKey || 'weekly'} payout is being processed. Amount: R${amount.toFixed(2)}.`,
+      type: 'tutor_payout_processing',
+      targetPath: '/app/tutor/payments',
+      metadata: {
+        payoutId: payout.id,
+        payoutStatus: 'processing',
+        amount,
+        transferReference: reference,
+      },
+    });
 
     try {
       const transfer = await initiatePaystackTransfer({
@@ -4238,6 +4384,20 @@ exports.processWeeklyTutorPayouts = onSchedule({
         failureReason: null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await createUserNotification({
+        userId: payout.tutorId,
+        title: 'Tutor payout paid',
+        message: `Your ${payout.weekKey || 'weekly'} payout was paid successfully. Amount: R${amount.toFixed(2)}.`,
+        type: 'tutor_payout_paid',
+        targetPath: '/app/tutor/payments',
+        metadata: {
+          payoutId: payout.id,
+          payoutStatus: 'paid',
+          amount,
+          transferReference: reference,
+          transferStatus: transfer.status || null,
+        },
+      });
       paidCount += 1;
     } catch (error) {
       await payoutRef.set({
@@ -4246,6 +4406,20 @@ exports.processWeeklyTutorPayouts = onSchedule({
         transferReference: reference,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await createUserNotification({
+        userId: payout.tutorId,
+        title: 'Tutor payout unsuccessful',
+        message: `Your ${payout.weekKey || 'weekly'} payout could not be completed. ${error.message || 'Paystack transfer failed.'}`,
+        type: 'tutor_payout_failed',
+        targetPath: '/app/tutor/payments',
+        metadata: {
+          payoutId: payout.id,
+          payoutStatus: 'unsuccessful',
+          amount,
+          transferReference: reference,
+          failureReason: error.message || 'Paystack transfer failed.',
+        },
+      });
       failedCount += 1;
     }
   }
@@ -4261,7 +4435,7 @@ exports.processWeeklyTutorPayouts = onSchedule({
 exports.sendEmailFromQueue = onDocumentCreated(
   {
     document: 'emailEvents/{eventId}',
-    secrets: [CLAXI_EMAIL_SECRETS, RESEND_API_KEY, EMAIL_FROM],
+    secrets: [CLAXI_EMAIL_SECRETS],
   },
   async (event) => {
     const data = event.data?.data();
@@ -4316,30 +4490,60 @@ exports.sendEmailFromQueue = onDocumentCreated(
       return;
     }
 
+    const recipient = Array.isArray(emailPayload.to)
+      ? emailPayload.to.map((value) => String(value || '').trim()).filter(Boolean)
+      : String(emailPayload.to || '').trim();
+    const subject = String(emailPayload.subject || '').trim();
+
+    if (!recipient || (Array.isArray(recipient) && recipient.length === 0) || !subject) {
+      logger.warn('Email payload is missing required send fields.', {
+        eventId: event.params.eventId,
+        eventType: data.eventType || null,
+        hasRecipient: Boolean(recipient),
+        hasSubject: Boolean(subject),
+      });
+
+      await eventRef.set(
+        {
+          status: 'skipped',
+          reason: 'invalid_email_payload',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return;
+    }
+
     logger.info('Prepared email payload summary.', {
       eventId: event.params.eventId,
       eventType: data.eventType,
-      to: emailPayload.to,
-      subject: emailPayload.subject,
+      to: recipient,
+      subject,
     });
 
     try {
       const response = await resend.emails.send({
         from: emailFrom,
         ...emailPayload,
+        to: recipient,
+        subject,
       });
+
+      if (response?.error) {
+        throw new Error(response.error.message || 'Resend returned an error response.');
+      }
 
       logger.info('Email sent successfully.', {
         eventId: event.params.eventId,
         provider: 'resend',
-        providerMessageId: response.data?.id || null,
+        providerMessageId: response.data?.id || response.id || null,
       });
 
       await eventRef.set(
         {
           status: 'sent',
           provider: 'resend',
-          providerMessageId: response.data?.id || null,
+          providerMessageId: response.data?.id || response.id || null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
