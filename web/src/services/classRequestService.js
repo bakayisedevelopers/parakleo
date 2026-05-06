@@ -269,6 +269,7 @@ async function assignNextTutorOffer(requestId) {
       message: 'No tutor accepted in time. Please retry your request.',
       type: 'matching_update',
       requestId,
+      targetPath: `/app/student/requests/${requestId}`,
     });
 
     return null;
@@ -301,6 +302,7 @@ async function assignNextTutorOffer(requestId) {
     message: `New math request: ${requestData.topic}. Accept within ${OFFER_TIMEOUT_SECONDS} seconds.`,
     type: 'tutor_offer',
     requestId,
+    targetPath: '/app/tutor',
   });
 
   return nextTutorId;
@@ -333,6 +335,7 @@ async function initializeTutorMatching(requestId, payload) {
     message: 'Your request is queued. Matching is managed by the backend.',
     type: 'matching_update',
     requestId,
+    targetPath: `/app/student/requests/${requestId}`,
   });
 }
 
@@ -397,6 +400,7 @@ export async function createClassRequest(payload) {
       message: `Your ${payload.topic || payload.subject} request is now matching tutors.`,
       type: 'class_request',
       requestId: request.id,
+      targetPath: `/app/student/requests/${request.id}`,
     });
 
     await initializeTutorMatching(request.id, payload);
@@ -434,6 +438,7 @@ export async function createClassRequest(payload) {
     message: `Your ${payload.topic || payload.subject} request is now matching tutors.`,
     type: 'class_request',
     requestId: docRef.id,
+    targetPath: `/app/student/requests/${docRef.id}`,
   });
 
   await queueEmailEvent(EMAIL_EVENT_TYPES.REQUEST_CREATED, {
@@ -697,6 +702,16 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
         ]);
       }
 
+      await createNotification({
+        userId: existing.studentId,
+        title: 'Tutor selected',
+        message: `${tutorName || existing.tutorName || 'A tutor'} accepted your request.`,
+        type: 'request_accepted',
+        requestId,
+        sessionId,
+        targetPath: `/app/session/${sessionId}`,
+      });
+
       return { sessionId, reused: Boolean(existingSession) };
     }
 
@@ -947,10 +962,20 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
           message: 'You accepted the request. Start the call now.',
           type: 'request_accepted',
           requestId,
+          sessionId: transactionResult?.sessionId || requestId,
+          targetPath: `/app/session/${transactionResult?.sessionId || requestId}`,
         }),
         queueEmailEvent(EMAIL_EVENT_TYPES.REQUEST_ACCEPTED, {
           requestId,
           tutorId,
+          studentId: requestData.studentId,
+          studentName: requestData.studentName,
+          studentEmail: requestData.studentEmail,
+          tutorName: resolvedTutorName,
+          tutorEmail: resolvedTutorEmail,
+          subject: requestData.subject || requestData.topic || 'Class request',
+          topic: requestData.topic || requestData.subject || 'Class request',
+          sessionId: transactionResult?.sessionId || requestId,
         }),
       ]);
 

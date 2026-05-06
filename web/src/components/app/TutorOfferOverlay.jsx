@@ -274,7 +274,7 @@ export default function TutorOfferOverlay() {
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border-2 border-black bg-white p-3 shadow-2xl">
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl bg-white p-3 shadow-2xl">
         <div className="pointer-events-none absolute inset-0 bg-emerald-50" />
         <div
           key={displayRequest.id}
@@ -305,18 +305,18 @@ export default function TutorOfferOverlay() {
           ) : null}
 
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+            <span className="rounded-full border border-black bg-transparent px-2.5 py-1 font-semibold text-black">
               {demand.text}
             </span>
-            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+            <span className="rounded-full border border-black bg-transparent px-2.5 py-1 font-semibold text-black">
               Rate / min: {formatRand(dynamicRate)}
             </span>
-            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+            <span className="rounded-full border border-black bg-transparent px-2.5 py-1 font-semibold text-black">
               Duration: {requestedDurationMinutes || 'N/A'} min
             </span>
           </div>
 
-          <div className="mb-3 rounded-xl border border-black bg-white p-3">
+          <div className="mb-3 rounded-xl border border-black bg-transparent p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-black">Requesting student</p>
             <p className="mt-1 text-sm font-bold text-black">{studentName}</p>
             <p className="text-xs text-black">
@@ -328,7 +328,7 @@ export default function TutorOfferOverlay() {
             {displayRequest.description || 'Student sent a request with attachment(s).'}
           </p>
 
-          <div className="mb-4 rounded-2xl border border-black bg-white p-3">
+          <div className="mb-4 rounded-2xl border border-black bg-transparent p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-black">
               What you&apos;re agreeing to
             </p>
@@ -341,7 +341,7 @@ export default function TutorOfferOverlay() {
           </div>
 
           {attachments.length ? (
-            <div className="mb-3 rounded-xl border border-black bg-white p-3 text-xs">
+            <div className="mb-3 rounded-xl border border-black bg-transparent p-3 text-xs">
               <p className="mb-2 font-semibold text-black">Attachment preview</p>
               <div className="space-y-2">
                 {attachments.slice(0, 3).map((file, index) => {
@@ -352,7 +352,7 @@ export default function TutorOfferOverlay() {
                       href={file.downloadUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="block rounded-lg border border-black bg-white p-2 transition hover:bg-zinc-50"
+                      className="block rounded-lg border bg-transparent p-2 transition hover:bg-transparent"
                     >
                       {itemIsImage ? (
                         <img
@@ -382,7 +382,7 @@ export default function TutorOfferOverlay() {
               type="button"
               onClick={() => handleResponse('accept')}
               disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
-              className="rounded-xl border border-black bg-white px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
+              className="rounded-xl border border-green bg-green px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
             >
               {activeRequest === displayRequest.id ? 'Submitting...' : 'Accept'}
             </button>
@@ -390,7 +390,7 @@ export default function TutorOfferOverlay() {
               type="button"
               onClick={() => handleResponse('decline')}
               disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
-              className="rounded-xl border border-black bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-60"
+              className="rounded-xl border border-red bg-red px-4 py-2 text-sm font-semibold text-black disabled:opacity-60"
             >
               Decline
             </button>

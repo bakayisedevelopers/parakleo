@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
 import useViewportMode from '../hooks/useViewportMode';
 import { updateUserProfile } from '../services/userService';
-import { getNotificationDestination } from '../services/notificationService';
+import { getNotificationDestination, markNotificationRead } from '../services/notificationService';
 import { debugError } from '../utils/devLogger';
 
 export default function AppShell() {
@@ -22,8 +22,11 @@ export default function AppShell() {
   const { useBottomNav } = useViewportMode();
   const isTutorRestrictedMobile = isTutor && useBottomNav;
 
-  const handleNotificationSelect = (notification, notificationRole = activeRole) => {
+  const handleNotificationSelect = async (notification, notificationRole = activeRole) => {
     const destination = getNotificationDestination(notification, notificationRole);
+    if (notification?.id) {
+      await markNotificationRead(notification.id).catch(() => null);
+    }
     setIsNotificationsOpen(false);
     if (destination) {
       navigate(destination);
@@ -134,7 +137,7 @@ export default function AppShell() {
         onSelectNotification={async (notification) => {
           const destination = getNotificationDestination(notification, activeRole);
           if (notification?.id) {
-            await markRead(notification.id);
+            await markRead(notification.id).catch(() => null);
           }
           setIsNotificationsOpen(false);
           if (destination) {

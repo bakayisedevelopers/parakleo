@@ -63,6 +63,7 @@ export function showBrowserNotification(notification = {}) {
         id: notification.id || notification.notificationId || null,
         requestId: notification.requestId || null,
         sessionId: notification.sessionId || null,
+        targetPath: notification.targetPath || null,
         type: notification.type || null,
       },
     };
@@ -71,7 +72,9 @@ export function showBrowserNotification(notification = {}) {
     if (typeof notification.onClick === 'function') {
       browserNotification.onclick = (event) => {
         event?.preventDefault?.();
+        window.focus?.();
         notification.onClick(browserNotification);
+        browserNotification.close?.();
       };
     }
 
@@ -205,9 +208,31 @@ export async function markAllNotificationsRead(userId) {
 }
 
 export function getNotificationDestination(notification = {}, role = 'student') {
+  const explicitTarget = String(notification?.targetPath || '').trim();
+  if (explicitTarget.startsWith('/app')) {
+    return explicitTarget;
+  }
+
   const requestId = String(notification?.requestId || '').trim();
   const sessionId = String(notification?.sessionId || '').trim();
+  const type = String(notification?.type || '').toLowerCase();
   const normalizedRole = String(role || 'student').toLowerCase();
+
+  if (type.includes('payment')) {
+    return normalizedRole === 'tutor' ? '/app/tutor/payments' : '/app/student/payment';
+  }
+
+  if (type.includes('payout')) {
+    return '/app/tutor/payments';
+  }
+
+  if (type === 'lesson_completed' || type === 'session_completed') {
+    return normalizedRole === 'tutor' ? '/app/tutor/my-classes' : '/app/student/requests';
+  }
+
+  if (type === 'tutor_offer') {
+    return '/app/tutor';
+  }
 
   if (sessionId) {
     return `/app/session/${sessionId}`;
@@ -216,8 +241,8 @@ export function getNotificationDestination(notification = {}, role = 'student') 
   if (!requestId) return '';
 
   if (normalizedRole === 'tutor') {
-    return '/app/tutor/available-requests';
+    return '/app/tutor';
   }
 
-  return `/app/student/request/${requestId}`;
+  return `/app/student/requests/${requestId}`;
 }
