@@ -46,16 +46,9 @@ export default function TutorDashboardPage() {
     avgResponseSeconds: Number(tutorProfile.avgResponseSeconds ?? profileSnapshot?.avgResponseSeconds ?? 0),
     cancellationRate: Number(tutorProfile.cancellationRate ?? profileSnapshot?.cancellationRate ?? 0),
     recentAssignmentsCount: Number(tutorProfile.recentAssignmentsCount ?? profileSnapshot?.recentAssignmentsCount ?? tutorProfile.completedSessionsLast24Hours ?? 0),
-    lastOfferAt: tutorProfile.lastOfferAt || profileSnapshot?.lastOfferAt || null,
   };
 
   const formatPercent = (value) => `${(Math.max(0, value <= 1 ? value * 100 : value)).toFixed(1)}%`;
-  const formatDateTime = (value) => {
-    if (!value) return 'Not available yet';
-    const millis = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
-    if (!Number.isFinite(millis) || millis <= 0) return 'Not available yet';
-    return new Date(millis).toLocaleString();
-  };
 
   const toggleOnlineStatus = async () => {
     if (isTutorRestrictedMobile) return;
@@ -132,7 +125,7 @@ export default function TutorDashboardPage() {
 
       {isOnline ? (
         <SectionCard title="Dispatch metrics" subtitle="These values are used in backend tutor dispatch ranking.">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid justify-start gap-3 [grid-template-columns:repeat(2,max-content)] xl:[grid-template-columns:repeat(3,max-content)]">
             <TutorMetricTile
               label="Acceptance rate"
               value={formatPercent(dispatchMetrics.acceptanceRate)}
@@ -162,7 +155,6 @@ export default function TutorDashboardPage() {
               label="Recent assignments"
               value={Math.max(0, dispatchMetrics.recentAssignmentsCount).toFixed(0)}
             />
-            <TutorMetricTile label="Last offer received" value={formatDateTime(dispatchMetrics.lastOfferAt)} />
           </div>
         </SectionCard>
       ) : null}

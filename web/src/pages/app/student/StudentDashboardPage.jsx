@@ -989,7 +989,7 @@ export default function StudentDashboardPage() {
 
     const timeoutId = setTimeout(() => {
       setShowSlowExtractionMessage(true);
-    }, 10000);
+    }, 25000);
 
     return () => clearTimeout(timeoutId);
   }, [shouldShowExtractionOverlay, extractionOverlayState]);
@@ -1315,25 +1315,25 @@ export default function StudentDashboardPage() {
                   <div className="mt-4 space-y-3 text-sm text-zinc-700">
                     <label className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Time</span>
-                      <select
-                        value={durationMinutes}
-                        onChange={handleDurationChange}
-                        className="bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
-                      >
-                        {durationOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option} min
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={durationMinutes}
+                          onChange={handleDurationChange}
+                          className="bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
+                        >
+                          {durationOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option} min
+                            </option>
+                          ))}
+                        </select>
+                        {freeMinutesRemaining > 0 ? (
+                          <span className="whitespace-nowrap text-xs font-semibold text-emerald-700">
+                            {freeMinutesRemaining.toFixed(2)} free
+                          </span>
+                        ) : null}
+                      </div>
                     </label>
-
-                    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
-                      <span className="font-semibold text-brand">Minutes</span>
-                      <span className="text-right font-semibold text-zinc-900">
-                        {durationMinutes} selected • {freeMinutesRemaining.toFixed(2)} free
-                      </span>
-                    </div>
 
                     <label className="flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3">
                       <span className="font-semibold text-brand">Subject</span>

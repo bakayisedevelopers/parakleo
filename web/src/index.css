@@ -39,3 +39,19 @@
     transform: rotate(1turn);
   }
 }
+
+@keyframes offer-countdown-shrink {
+  0% {
+    transform: scaleX(1);
+    background-color: #10b981;
+  }
+
+  55% {
+    background-color: #f97316;
+  }
+
+  100% {
+    transform: scaleX(0);
+    background-color: #dc2626;
+  }
+}

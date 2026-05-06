@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, ImageIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -28,22 +28,18 @@ export default function TutorOfferOverlay() {
   const [activeRequest, setActiveRequest] = useState(null);
   const [displayRequest, setDisplayRequest] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
-  const [now, setNow] = useState(Date.now());
   const [studentProfile, setStudentProfile] = useState(null);
 
   const audioCtxRef = useRef(null);
+  const audioNodesRef = useRef({
+    oscillator: null,
+    gainNode: null,
+    sweepTimer: null,
+  });
   const latestRequestIdRef = useRef(null);
   const processingRef = useRef(false);
 
   const topRequest = requests[0] || null;
-
-  useEffect(() => {
-    if (!displayRequest?.id) return undefined;
-
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [displayRequest?.id]);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -69,6 +65,99 @@ export default function TutorOfferOverlay() {
     };
   }, [displayRequest?.studentId]);
 
+  const stopAlertSound = () => {
+    const { oscillator, gainNode, sweepTimer } = audioNodesRef.current;
+
+    if (sweepTimer) {
+      clearInterval(sweepTimer);
+    }
+
+    if (gainNode) {
+      try {
+        gainNode.gain.cancelScheduledValues(audioCtxRef.current?.currentTime || 0);
+        gainNode.gain.setTargetAtTime(0.0001, audioCtxRef.current?.currentTime || 0, 0.02);
+      } catch {
+        // Ignore audio shutdown errors.
+      }
+    }
+
+    if (oscillator) {
+      try {
+        oscillator.stop();
+      } catch {
+        // Ignore repeated stop calls.
+      }
+
+      try {
+        oscillator.disconnect();
+      } catch {
+        // Ignore disconnect errors.
+      }
+    }
+
+    if (gainNode) {
+      try {
+        gainNode.disconnect();
+      } catch {
+        // Ignore disconnect errors.
+      }
+    }
+
+    audioNodesRef.current = {
+      oscillator: null,
+      gainNode: null,
+      sweepTimer: null,
+    };
+  };
+
+  const startAlertSound = async () => {
+    stopAlertSound();
+
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new window.AudioContext();
+      }
+
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(520, ctx.currentTime);
+
+      gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.035, ctx.currentTime + 0.12);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      oscillator.start();
+
+      const sweepTimer = setInterval(() => {
+        if (!audioCtxRef.current) return;
+        const activeCtx = audioCtxRef.current;
+        try {
+          const nextGain = gainNode.gain.value > 0.025 ? 0.018 : 0.035;
+          gainNode.gain.cancelScheduledValues(activeCtx.currentTime);
+          gainNode.gain.linearRampToValueAtTime(nextGain, activeCtx.currentTime + 0.18);
+        } catch {
+          // Ignore modulation errors and keep the alert running.
+        }
+      }, 360);
+
+      audioNodesRef.current = {
+        oscillator,
+        gainNode,
+        sweepTimer,
+      };
+    } catch {
+      // Ignore audio initialization failures so the popup still works.
+    }
+  };
+
   useEffect(() => {
     if (processingRef.current) return;
 
@@ -81,51 +170,26 @@ export default function TutorOfferOverlay() {
   }, [topRequest]);
 
   useEffect(() => {
-    if (!displayRequest?.id) return;
-    if (latestRequestIdRef.current === displayRequest.id) return;
+    if (!displayRequest?.id) {
+      stopAlertSound();
+      return undefined;
+    }
+
+    if (latestRequestIdRef.current === displayRequest.id) return undefined;
 
     latestRequestIdRef.current = displayRequest.id;
+    startAlertSound();
 
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new window.AudioContext();
-      }
-
-      const ctx = audioCtxRef.current;
-
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-
-      const oscillator = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
-      oscillator.type = 'sine';
-      oscillator.frequency.value = 880;
-      gainNode.gain.value = 0.05;
-
-      oscillator.start();
-      oscillator.stop(ctx.currentTime + 0.2);
-    } catch {
-      // Ignore audio notification errors.
-    }
+    return () => {
+      stopAlertSound();
+    };
   }, [displayRequest?.id]);
-
-  const secondsLeft = Math.max(0, Math.ceil(((displayRequest?.offerExpiresAt || 0) - now) / 1000));
-  const progress = useMemo(() => {
-    const total = OFFER_TIMEOUT_SECONDS;
-    return Math.max(0, Math.min(100, (secondsLeft / total) * 100));
-  }, [secondsLeft]);
-
-  const progressColor =
-    progress > 60 ? 'bg-emerald-500' : progress > 30 ? 'bg-amber-500' : 'bg-rose-500';
 
   const handleResponse = async (response) => {
     if (!displayRequest || !canAccept) return;
     if (processingRef.current) return;
 
+    stopAlertSound();
     processingRef.current = true;
     setActiveRequest(displayRequest.id);
     setErrorMessage('');
@@ -209,132 +273,128 @@ export default function TutorOfferOverlay() {
       : [];
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-white/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-3xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-2xl">
-        <div className="mb-3 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">
-              Incoming request
-            </p>
-            <h3 className="text-lg font-bold text-zinc-900">
-              {displayRequest.topic || 'Mathematics request'}
-            </h3>
-            <p className="text-sm text-zinc-600">
-              {displayRequest.duration || 'N/A'} • {displayRequest.subject || 'Mathematics'}
-            </p>
-          </div>
-          <div className="min-w-[100px] text-right">
-            <p className="text-xs font-semibold text-zinc-500">Time left</p>
-            <p className="text-2xl font-black text-zinc-900">{secondsLeft}s</p>
-          </div>
-        </div>
-
-        <div className="mb-3 h-2 overflow-hidden rounded-full bg-zinc-200">
-          <div
-            className={`h-full ${progressColor} transition-all`}
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        {errorMessage ? (
-          <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-            {errorMessage}
-          </p>
-        ) : null}
-
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className={`rounded-full border px-2.5 py-1 font-semibold ${demand.tone}`}>
-            {demand.text}
-          </span>
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-semibold text-zinc-700">
-            Rate / min: {formatRand(dynamicRate)}
-          </span>
-          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-semibold text-zinc-700">
-            Duration: {requestedDurationMinutes || 'N/A'} min
-          </span>
-        </div>
-
-        <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Requesting student</p>
-          <p className="mt-1 text-sm font-bold text-zinc-900">{studentName}</p>
-          <p className="text-xs text-zinc-600">
-            Rating: {studentRating > 0 ? `${studentRating.toFixed(2)} / 5` : 'Not rated yet'}
-          </p>
-        </div>
-
-        <p className="mb-3 text-sm text-zinc-700">
-          {displayRequest.description || 'Student sent a request with attachment(s).'}
-        </p>
-        <p className="mb-3 text-xs font-semibold text-zinc-500">
-          Offers expire after {OFFER_TIMEOUT_SECONDS} seconds.
-        </p>
-
-        <div className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-            What you&apos;re agreeing to
-          </p>
-          <div className="mt-2 grid gap-2 text-xs text-zinc-700 sm:grid-cols-2">
-            <p>Base amount: <span className="font-semibold">{formatRand(baseAmount)}</span></p>
-            <p>Dynamic demand value: <span className="font-semibold">{formatRand(dynamicPortion)}</span></p>
-            <p>Dynamic rate per minute: <span className="font-semibold">{formatRand(dynamicRate)}</span></p>
-            <p>Total expected session price: <span className="font-semibold">{formatRand(estimatedTotal)}</span></p>
-          </div>
-        </div>
-
-        {attachments.length ? (
-          <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs">
-            <p className="mb-2 font-semibold text-zinc-700">Attachment preview</p>
-            <div className="space-y-2">
-              {attachments.slice(0, 3).map((file, index) => {
-                const itemIsImage = file?.contentType?.startsWith('image/') || (index === 0 && isImage);
-                return (
-                  <a
-                    key={`${file.fileName || 'attachment'}-${index}`}
-                    href={file.downloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block rounded-lg border border-zinc-200 bg-white p-2 transition hover:border-emerald-300"
-                  >
-                    {itemIsImage ? (
-                      <img
-                        src={file.downloadUrl}
-                        alt={file.fileName || 'Attachment preview'}
-                        className="max-h-44 w-full rounded-lg object-contain"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 text-zinc-700">
-                        {file?.contentType?.includes('pdf') ? (
-                          <FileText className="h-4 w-4" />
-                        ) : (
-                          <ImageIcon className="h-4 w-4" />
-                        )}
-                        <span>{file.fileName || 'Document attachment'}</span>
-                      </div>
-                    )}
-                  </a>
-                );
-              })}
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/25 p-4 backdrop-blur-sm">
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border-2 border-black bg-white p-3 shadow-2xl">
+        <div className="pointer-events-none absolute inset-0 bg-emerald-50" />
+        <div
+          key={displayRequest.id}
+          className="pointer-events-none absolute inset-0 origin-left"
+          style={{
+            animation: `offer-countdown-shrink ${OFFER_TIMEOUT_SECONDS}s linear forwards`,
+          }}
+        />
+        <div className="relative z-10 rounded-[1.25rem] p-4 text-black">
+          <div className="mb-3 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-black">
+                Incoming request
+              </p>
+              <h3 className="text-lg font-bold text-black">
+                {displayRequest.topic || 'Mathematics request'}
+              </h3>
+              <p className="text-sm text-black">
+                {displayRequest.duration || 'N/A'} • {displayRequest.subject || 'Mathematics'}
+              </p>
             </div>
           </div>
-        ) : null}
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => handleResponse('accept')}
-            disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-          >
-            {activeRequest === displayRequest.id ? 'Submitting...' : 'Accept'}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleResponse('decline')}
-            disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
-            className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 disabled:opacity-60"
-          >
-            Decline
-          </button>
+          {errorMessage ? (
+            <p className="mb-3 rounded-xl border border-black bg-white px-3 py-2 text-xs font-semibold text-black">
+              {errorMessage}
+            </p>
+          ) : null}
+
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+              {demand.text}
+            </span>
+            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+              Rate / min: {formatRand(dynamicRate)}
+            </span>
+            <span className="rounded-full border border-black bg-white px-2.5 py-1 font-semibold text-black">
+              Duration: {requestedDurationMinutes || 'N/A'} min
+            </span>
+          </div>
+
+          <div className="mb-3 rounded-xl border border-black bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-black">Requesting student</p>
+            <p className="mt-1 text-sm font-bold text-black">{studentName}</p>
+            <p className="text-xs text-black">
+              Rating: {studentRating > 0 ? `${studentRating.toFixed(2)} / 5` : 'Not rated yet'}
+            </p>
+          </div>
+
+          <p className="mb-3 text-sm text-black">
+            {displayRequest.description || 'Student sent a request with attachment(s).'}
+          </p>
+
+          <div className="mb-4 rounded-2xl border border-black bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-black">
+              What you&apos;re agreeing to
+            </p>
+            <div className="mt-2 grid gap-2 text-xs text-black sm:grid-cols-2">
+              <p>Base amount: <span className="font-semibold">{formatRand(baseAmount)}</span></p>
+              <p>Dynamic demand value: <span className="font-semibold">{formatRand(dynamicPortion)}</span></p>
+              <p>Dynamic rate per minute: <span className="font-semibold">{formatRand(dynamicRate)}</span></p>
+              <p>Total expected session price: <span className="font-semibold">{formatRand(estimatedTotal)}</span></p>
+            </div>
+          </div>
+
+          {attachments.length ? (
+            <div className="mb-3 rounded-xl border border-black bg-white p-3 text-xs">
+              <p className="mb-2 font-semibold text-black">Attachment preview</p>
+              <div className="space-y-2">
+                {attachments.slice(0, 3).map((file, index) => {
+                  const itemIsImage = file?.contentType?.startsWith('image/') || (index === 0 && isImage);
+                  return (
+                    <a
+                      key={`${file.fileName || 'attachment'}-${index}`}
+                      href={file.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-black bg-white p-2 transition hover:bg-zinc-50"
+                    >
+                      {itemIsImage ? (
+                        <img
+                          src={file.downloadUrl}
+                          alt={file.fileName || 'Attachment preview'}
+                          className="max-h-44 w-full rounded-lg object-contain"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 text-black">
+                          {file?.contentType?.includes('pdf') ? (
+                            <FileText className="h-4 w-4" />
+                          ) : (
+                            <ImageIcon className="h-4 w-4" />
+                          )}
+                          <span>{file.fileName || 'Document attachment'}</span>
+                        </div>
+                      )}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleResponse('accept')}
+              disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
+              className="rounded-xl border border-black bg-white px-4 py-2 text-sm font-bold text-black disabled:opacity-60"
+            >
+              {activeRequest === displayRequest.id ? 'Submitting...' : 'Accept'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleResponse('decline')}
+              disabled={!canAccept || activeRequest === displayRequest.id || processingRef.current}
+              className="rounded-xl border border-black bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-60"
+            >
+              Decline
+            </button>
+          </div>
         </div>
       </div>
     </div>

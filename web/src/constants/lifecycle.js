@@ -19,7 +19,7 @@ export const SESSION_STATUS = {
   CANCELED_DURING: 'canceled_during',
 };
 
-export const OFFER_TIMEOUT_SECONDS = 30;
+export const OFFER_TIMEOUT_SECONDS = 20;
 export const OFFER_TIMEOUT_MS = OFFER_TIMEOUT_SECONDS * 1000;
 
 export const PAYMENT_STATUS = {
