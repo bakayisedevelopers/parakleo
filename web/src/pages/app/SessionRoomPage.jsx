@@ -175,6 +175,7 @@ export default function SessionRoomPage() {
 
   const rtcRef = useRef(null);
   const autoJoinAttemptedRef = useRef(false);
+  const autoScreenShareAttemptedRef = useRef(false);
   const connectionStartRecordedRef = useRef(false);
   const activeInitKeyRef = useRef('');
   const rtcInitStartedRef = useRef(false);
@@ -241,6 +242,7 @@ export default function SessionRoomPage() {
 
   useEffect(() => {
     autoJoinAttemptedRef.current = false;
+    autoScreenShareAttemptedRef.current = false;
     connectionStartRecordedRef.current = false;
     activeInitKeyRef.current = '';
     rtcInitStartedRef.current = false;
@@ -741,6 +743,20 @@ export default function SessionRoomPage() {
         onSessionState: async (state) => {
           setIsPeerConnected(state === 'connected');
           if (state !== 'connected') return;
+
+          if (role === 'tutor' && !autoScreenShareAttemptedRef.current) {
+            autoScreenShareAttemptedRef.current = true;
+            try {
+              await rtcRef.current?.startScreenShare?.();
+              setIsLocalScreenSharing(true);
+            } catch (error) {
+              debugLog('sessionRoom', 'Automatic screen share attempt failed.', {
+                sessionId: session.id,
+                message: error?.message || 'Unknown screen share error',
+              });
+            }
+          }
+
           if (connectionStartRecordedRef.current) return;
           connectionStartRecordedRef.current = true;
 
