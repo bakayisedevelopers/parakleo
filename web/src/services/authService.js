@@ -1,5 +1,4 @@
 import { getFirebaseClients } from '../firebase/config';
-import { EMAIL_EVENT_TYPES, queueEmailEvent } from './emailEventService';
 import { syncStudentGrowth } from './studentGrowthService';
 import { deleteUserProfile, getUserProfile, upsertUserProfile } from './userService';
 
@@ -209,13 +208,6 @@ export async function signupWithEmail({ name, email, password, role, referralSlu
       role,
     };
   }
-
-  await queueEmailEvent(EMAIL_EVENT_TYPES.WELCOME, {
-    userId: credential.user.uid,
-    email,
-    fullName: name,
-    role,
-  });
 
   await syncStudentGrowth().catch(() => null);
 

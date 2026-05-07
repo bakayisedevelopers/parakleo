@@ -6,7 +6,7 @@ const { logger } = require('firebase-functions');
 const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const {
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
@@ -61,6 +61,45 @@ async function createUserNotification({
 
   const ref = await db.collection('notifications').add(notification);
   return { id: ref.id, ...notification };
+}
+
+function buildEmailEventId(namespace, ...parts) {
+  const seed = [namespace, ...parts].map((part) => String(part ?? '')).join('|');
+  return `${namespace}_${createHash('sha256').update(seed).digest('hex').slice(0, 24)}`;
+}
+
+async function queueEmailEventOnce({
+  eventId,
+  eventType,
+  payload,
+  source = '',
+}) {
+  if (!eventId || !eventType) return { created: false };
+
+  const eventRef = db.collection('emailEvents').doc(eventId);
+  const result = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (snapshot.exists) {
+      return { created: false };
+    }
+
+    transaction.set(eventRef, {
+      eventType,
+      payload: payload || {},
+      source: source || '',
+      status: 'queued',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return { created: true };
+  });
+
+  return result;
+}
+
+function formatMoney(value) {
+  return `R${Number(value || 0).toFixed(2)}`;
 }
 
 async function writeAiLog({
@@ -600,6 +639,27 @@ function hasCompletedStudentProfile(user = {}) {
       && String(studentProfile.curriculum || '').trim()
       && String(studentProfile.discoverySource || '').trim()
       && paymentMethods.length > 0,
+  );
+}
+
+function hasCompletedTutorProfile(user = {}) {
+  const tutorProfile = user?.tutorProfile || {};
+  const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
+  const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+
+  return Boolean(
+    qualifiedSubjects.length > 0
+      && user?.selfieVerified
+      && String(user?.selfieUrl || '').trim()
+      && Array.isArray(tutorProfile.gradesToTutor)
+      && tutorProfile.gradesToTutor.length > 0
+      && activeSubjects.length > 0
+      && tutorProfile.payout?.bankName
+      && tutorProfile.payout?.accountNumber
+      && tutorProfile.payout?.accountHolder
+      && tutorProfile.payout?.bankCode
+      && tutorProfile.payout?.paystackRecipientCode
+      && tutorProfile.payout?.verified,
   );
 }
 
@@ -1622,6 +1682,66 @@ exports.syncStudentReferralRewardsOnUserWrite = onDocumentWritten('users/{uid}',
   });
 });
 
+exports.notifyTutorProfileCompletion = onDocumentWritten('users/{uid}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : {};
+  const after = event.data.after.exists ? event.data.after.data() : {};
+  const isTutor = (after.activeRole || after.role || '').toLowerCase() === 'tutor';
+  if (!isTutor) return;
+
+  const beforeComplete = hasCompletedTutorProfile(before);
+  const afterComplete = hasCompletedTutorProfile(after);
+  if (!afterComplete || beforeComplete) return;
+
+  try {
+    await queueEmailEventOnce({
+      eventId: buildEmailEventId('tutor-profile-complete', event.params.uid),
+      eventType: 'tutor_profile_completed',
+      payload: {
+        email: String(after.email || '').trim(),
+        subjects: Array.isArray(after.activeSubjects) && after.activeSubjects.length
+          ? after.activeSubjects.join(', ')
+          : 'Ready to teach',
+        payoutReady: Boolean(after.tutorProfile?.payout?.verified),
+      },
+      source: 'users/{uid}:write',
+    });
+  } catch (error) {
+    logger.warn('Failed to queue tutor profile completion email.', {
+      uid: event.params.uid,
+      error: error.message,
+    });
+  }
+});
+
+exports.sendWelcomeEmailOnUserCreate = onDocumentCreated('users/{uid}', async (event) => {
+  const after = event.data?.data() || null;
+  if (!after) return;
+
+  const email = String(after.email || '').trim();
+  if (!email) return;
+
+  const role = String(after.activeRole || after.role || 'student').trim().toLowerCase() || 'student';
+  const fullName = String(after.fullName || after.displayName || after.name || '').trim() || email.split('@')[0];
+
+  try {
+    await queueEmailEventOnce({
+      eventId: buildEmailEventId('welcome', event.params.uid),
+      eventType: 'welcome',
+      payload: {
+        email,
+        fullName,
+        role,
+      },
+      source: 'users/{uid}:create',
+    });
+  } catch (error) {
+    logger.warn('Failed to queue welcome email event.', {
+      uid: event.params.uid,
+      error: error.message,
+    });
+  }
+});
+
 function sanitizeCloudflareIceServers(iceServers) {
   if (!Array.isArray(iceServers)) return [];
 
@@ -1725,7 +1845,7 @@ function renderEmailTemplate({
             </tr>
             <tr>
               <td style="padding-top: 14px; text-align: center; color: #a1a1aa; font-size: 12px; line-height: 1.6;">
-                Claxi session notifications
+                Claxi account notifications
               </td>
             </tr>
           </table>
@@ -1750,91 +1870,122 @@ function buildEmailPayload(eventType, payload) {
           ],
         }),
       };
-    case 'request_created':
+    case 'card_added':
       return {
-        to: payload.studentEmail,
-        subject: 'Your class request is live',
+        to: payload.email,
+        subject: 'Card added to your Claxi profile',
         html: renderEmailTemplate({
-          eyebrow: 'Request live',
-          title: 'Your class request is now live',
-          intro: `Your ${payload.subject || 'class'} request has been posted and is now visible to tutors.`,
+          eyebrow: 'Card added',
+          title: 'Card added to your profile',
+          intro: `Your ${payload.cardBrand || 'card'} ending in ${payload.cardLast4 || '----'} was added to your profile.`,
           details: [
-            { label: 'Subject', value: payload.subject || 'Class request' },
+            { label: 'Card', value: `${payload.cardBrand || 'Card'} •••• ${payload.cardLast4 || '----'}` },
+            { label: 'Authorization refund', value: payload.refundStatus || 'processing' },
+            { label: 'Refund amount', value: formatMoney(payload.refundAmount || 1) },
           ],
         }),
       };
-    case 'request_accepted':
+    case 'refund_processed':
       return {
-        to: payload.studentEmail,
-        subject: 'A tutor accepted your request',
+        to: payload.email,
+        subject: 'Paystack refund processed',
         html: renderEmailTemplate({
-          eyebrow: 'Tutor found',
-          title: 'A tutor accepted your request',
-          intro: `${payload.tutorName || 'A tutor'} accepted your ${payload.topic || payload.subject || 'class'} request.`,
+          eyebrow: 'Refund processed',
+          title: 'Your refund has been processed',
+          intro: payload.refundType === 'card_authorization'
+            ? 'The authorization refund for your saved card has been processed.'
+            : 'A Paystack refund associated with your account has been processed.',
           details: [
-            { label: 'Tutor', value: payload.tutorName || 'Tutor' },
-            { label: 'Subject', value: payload.topic || payload.subject || 'Class request' },
+            { label: 'Amount', value: formatMoney(payload.refundAmount || 0) },
+            { label: 'Status', value: payload.refundStatus || 'processed' },
+            { label: 'Reference', value: payload.reference || payload.transactionId || 'N/A' },
           ],
         }),
       };
-    case 'session_scheduled':
+    case 'session_invoice':
       return {
         to: [payload.studentEmail, payload.tutorEmail],
-        subject: `Session scheduled: ${payload.subject}`,
+        subject: `Session invoice: ${payload.subject || 'Class'}`,
         html: renderEmailTemplate({
-          eyebrow: 'Session scheduled',
-          title: `Session scheduled: ${payload.subject || 'Class'}`,
-          intro: 'Your session has been scheduled and is ready for both participants.',
+          eyebrow: 'Session invoice',
+          title: `${payload.subject || 'Class'} session invoice`,
+          intro: payload.closureType === 'canceled_during'
+            ? 'This session was canceled during the session and the final billing details are below.'
+            : 'This session has been completed and the final billing details are below.',
           details: [
-            { label: 'Date', value: payload.scheduledDate || 'To be confirmed' },
-            { label: 'Time', value: payload.scheduledTime || 'To be confirmed' },
-            { label: 'Link', value: payload.meetingLink || 'To be added' },
+            { label: 'Closure type', value: payload.closureType === 'canceled_during' ? 'Canceled during session' : 'Completed' },
+            { label: 'Student', value: payload.studentName || 'Student' },
+            { label: 'Tutor', value: payload.tutorName || 'Tutor' },
+            { label: 'Session ID', value: payload.sessionId || 'N/A' },
+            { label: 'Billed minutes', value: String(Number(payload.billedMinutes || 0).toFixed(2)) },
+            { label: 'Rate per minute', value: formatMoney(payload.ratePerMinute || payload.rate || 0) },
+            { label: 'Gross amount', value: formatMoney(payload.originalPrice || payload.grossAmount || 0) },
+            { label: 'Discount applied', value: formatMoney(payload.discountApplied || 0) },
+            { label: 'Final amount', value: formatMoney(payload.finalAmount || payload.totalAmount || 0) },
+            { label: 'Tutor share', value: formatMoney(payload.tutorAmount || 0) },
+            { label: 'Platform fee', value: formatMoney(payload.platformAmount || 0) },
+            { label: 'Payment status', value: payload.paymentStatus || 'processed' },
+            ...(payload.canceledReason ? [{ label: 'Cancellation reason', value: payload.canceledReason }] : []),
           ],
           tone: 'sky',
         }),
       };
-    case 'session_updated':
+    case 'tutor_profile_completed':
       return {
-        to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
-        subject: `Session update: ${payload.subject}`,
+        to: payload.email,
+        subject: 'Your tutor profile is complete',
         html: renderEmailTemplate({
-          eyebrow: 'Session update',
-          title: `Session update: ${payload.subject || 'Class'}`,
-          intro: `This session has been updated and is now marked as ${payload.status || 'updated'}.`,
+          eyebrow: 'Profile complete',
+          title: 'Your tutor profile is complete',
+          intro: 'Your tutor profile has been completed and you can now receive tutor requests.',
           details: [
-            { label: 'Status', value: payload.status || 'Updated' },
+            { label: 'Subjects', value: payload.subjects || 'Ready to teach' },
+            { label: 'Payout', value: payload.payoutReady ? 'Verified' : 'Pending' },
           ],
           tone: 'sky',
         }),
       };
-    case 'session_completed':
+    case 'tutor_payout_details_submitted':
       return {
-        to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
-        subject: `Session completed: ${payload.subject}`,
+        to: payload.email,
+        subject: 'Tutor banking details received',
         html: renderEmailTemplate({
-          eyebrow: 'Session completed',
-          title: `Session completed: ${payload.subject || 'Class'}`,
-          intro: 'This session has been marked as completed and the billing flow has been finalized.',
+          eyebrow: 'Banking details',
+          title: 'Tutor banking details received',
+          intro: 'Your tutor payout banking details were submitted and verified.',
           details: [
-            { label: 'Topic', value: payload.topic || payload.subject || 'Session' },
-            { label: 'Amount', value: `R${Number(payload.amount || 0).toFixed(2)}` },
-            { label: 'Payment status', value: payload.paymentStatus || 'Processed' },
+            { label: 'Bank', value: payload.bankName || 'N/A' },
+            { label: 'Account holder', value: payload.accountHolder || 'N/A' },
+            { label: 'Account number', value: payload.accountNumberMasked || 'N/A' },
+            { label: 'Verification', value: payload.verificationStatus || 'verified' },
           ],
         }),
       };
-    case 'cancellation':
+    case 'tutor_payout_status':
       return {
-        to: [payload.studentEmail, payload.tutorEmail].filter(Boolean),
-        subject: `Session canceled: ${payload.subject}`,
+        to: payload.email,
+        subject: `Tutor payout ${payload.status || 'update'}: ${payload.weekKey || 'weekly payout'}`,
         html: renderEmailTemplate({
-          eyebrow: 'Session canceled',
-          title: `Session canceled: ${payload.subject || 'Class'}`,
-          intro: 'This session has been canceled. Check the app for the latest session status and billing outcome.',
+          eyebrow: 'Tutor payout',
+          title: `Tutor payout ${payload.status || 'update'}`,
+          intro: 'Your automatic tutor payout has been updated with the latest status and breakdown.',
           details: [
-            { label: 'Subject', value: payload.subject || 'Class' },
+            { label: 'Week', value: payload.weekKey || 'Weekly payout' },
+            { label: 'Status', value: payload.status || 'updated' },
+            { label: 'Total sessions', value: String(Number(payload.totalSessions || 0)) },
+            ...(payload.weekStart ? [{ label: 'Week start', value: payload.weekStart }] : []),
+            ...(payload.weekEnd ? [{ label: 'Week end', value: payload.weekEnd }] : []),
+            { label: 'Gross amount', value: formatMoney(payload.grossAmount || 0) },
+            { label: 'Tutor rate', value: `${Math.round(Number(payload.tutorRate || 0) * 100)}%` },
+            { label: 'Tutor amount', value: formatMoney(payload.tutorAmount || 0) },
+            { label: 'Platform rate', value: `${Math.round(Number(payload.platformFeeRate || 0) * 100)}%` },
+            { label: 'Platform amount', value: formatMoney(payload.platformAmount || 0) },
+            ...(payload.transferReference ? [{ label: 'Transfer reference', value: payload.transferReference }] : []),
+            ...(payload.transferStatus ? [{ label: 'Transfer status', value: payload.transferStatus }] : []),
+            ...(payload.failureReason ? [{ label: 'Failure reason', value: payload.failureReason }] : []),
           ],
-          tone: 'rose',
-          closing: 'If this was unexpected, review the session details in Claxi.',
+          tone: payload.status === 'paid' ? 'emerald' : payload.status === 'unsuccessful' ? 'rose' : 'sky',
+          closing: 'Review the payout record in Claxi if you need the full session breakdown.',
         }),
       };
     default:
@@ -3293,6 +3444,47 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRET
       });
     }
 
+    const studentEmail = String(studentData.email || decodedToken.email || '').trim();
+    const cardAddedEventId = buildEmailEventId('card-added', reference);
+    const refundEventId = buildEmailEventId('refund-processed', reference);
+
+    try {
+      await queueEmailEventOnce({
+        eventId: cardAddedEventId,
+        eventType: 'card_added',
+        payload: {
+          email: studentEmail,
+          cardBrand: safeCardRecord.brand,
+          cardLast4: safeCardRecord.last4,
+          refundStatus: refundSucceeded ? 'refunded' : 'processing',
+          refundAmount: 1,
+        },
+        source: 'verifyPaystack',
+      });
+
+      if (refundSucceeded) {
+        await queueEmailEventOnce({
+          eventId: refundEventId,
+          eventType: 'refund_processed',
+          payload: {
+            email: studentEmail,
+            refundType: 'card_authorization',
+            refundStatus: 'succeeded',
+            refundAmount: 1,
+            reference,
+            transactionId: transactionData?.id || null,
+          },
+          source: 'verifyPaystack',
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to queue card/refund email event.', {
+        uid,
+        reference,
+        error: error.message,
+      });
+    }
+
     res.status(200).json({
       success: true,
       card: {
@@ -3384,6 +3576,34 @@ exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYME
       },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+
+    try {
+      await queueEmailEventOnce({
+        eventId: buildEmailEventId(
+          'tutor-payout-details',
+          decoded.uid,
+          verifiedPayout.bankCode,
+          verifiedPayout.accountNumber,
+          verifiedPayout.documentNumber,
+        ),
+        eventType: 'tutor_payout_details_submitted',
+        payload: {
+          email: decoded.email || '',
+          bankName: verifiedPayout.bankName || '',
+          accountHolder: verifiedPayout.accountHolder || '',
+          accountNumberMasked: verifiedPayout.accountNumber
+            ? `•••• ${String(verifiedPayout.accountNumber).slice(-4)}`
+            : 'N/A',
+          verificationStatus: verifiedPayout.verified ? 'verified' : 'pending',
+        },
+        source: 'verifyTutorPayoutAccount',
+      });
+    } catch (error) {
+      logger.warn('Failed to queue tutor payout details email event.', {
+        uid: decoded.uid,
+        error: error.message,
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -3902,6 +4122,38 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
     }),
   ]);
 
+  try {
+    await queueEmailEventOnce({
+      eventId: buildEmailEventId('session-invoice', session.id, closureType, endedAt, charge.transactionId || ''),
+      eventType: 'session_invoice',
+      payload: {
+        studentEmail: updatedSession.studentEmail || session.studentEmail || '',
+        tutorEmail: updatedSession.tutorEmail || session.tutorEmail || '',
+        studentName: updatedSession.studentName || session.studentName || 'Student',
+        tutorName: updatedSession.tutorName || session.tutorName || 'Tutor',
+        sessionId: session.id,
+        subject: updatedSession.topic || updatedSession.subject || session.topic || session.subject || 'Class',
+        closureType,
+        canceledBy,
+        canceledReason: canceledReason || updatedSession.canceledReason || session.canceledReason || '',
+        billedMinutes,
+        ratePerMinute: Number(session.pricingSnapshot?.adjustedRatePerMinute || session.pricingSnapshot?.ratePerMinute || 0),
+        originalPrice,
+        discountApplied: Number(freeMinuteDiscount.discountApplied || 0),
+        finalAmount: totalAmount,
+        tutorAmount,
+        platformAmount,
+        paymentStatus,
+      },
+      source: 'finalizeSessionBilling',
+    });
+  } catch (error) {
+    logger.warn('Failed to queue session invoice email.', {
+      sessionId,
+      error: error.message,
+    });
+  }
+
   logger.info('pricing_billing_finalized', {
     sessionId,
     requestId: session.requestId || null,
@@ -4308,6 +4560,31 @@ exports.processWeeklyTutorPayouts = onSchedule({
           amount: 0,
         },
       });
+      try {
+        await queueEmailEventOnce({
+          eventId: buildEmailEventId('tutor-payout', payout.id, 'paid', 'zero_amount'),
+          eventType: 'tutor_payout_status',
+          payload: {
+            email: payout.tutorEmail || '',
+            weekKey: payout.weekKey || '',
+            weekStart: payout.weekStart || '',
+            weekEnd: payout.weekEnd || '',
+            status: 'paid',
+            totalSessions: Number(payout.totalSessions || 0),
+            grossAmount: Number(payout.grossAmount || 0),
+            tutorRate: Number(BILLING_RULES.TUTOR_PAYOUT_RATE),
+            tutorAmount: 0,
+            platformFeeRate: Number(BILLING_RULES.PLATFORM_FEE_RATE),
+            platformAmount: 0,
+          },
+          source: 'processWeeklyTutorPayouts',
+        });
+      } catch (error) {
+        logger.warn('Failed to queue zero-amount payout email.', {
+          payoutId: payout.id,
+          error: error.message,
+        });
+      }
       paidCount += 1;
       continue;
     }
@@ -4337,6 +4614,32 @@ exports.processWeeklyTutorPayouts = onSchedule({
           failureReason: 'Tutor payout account is not verified.',
         },
       });
+      try {
+        await queueEmailEventOnce({
+          eventId: buildEmailEventId('tutor-payout', payout.id, 'unsuccessful', 'unverified_account'),
+          eventType: 'tutor_payout_status',
+          payload: {
+            email: payout.tutorEmail || tutorData.email || '',
+            weekKey: payout.weekKey || '',
+            weekStart: payout.weekStart || '',
+            weekEnd: payout.weekEnd || '',
+            status: 'unsuccessful',
+            totalSessions: Number(payout.totalSessions || 0),
+            grossAmount: Number(payout.grossAmount || 0),
+            tutorRate: Number(BILLING_RULES.TUTOR_PAYOUT_RATE),
+            tutorAmount: Number(payout.tutorAmount || 0),
+            platformFeeRate: Number(BILLING_RULES.PLATFORM_FEE_RATE),
+            platformAmount: Number(payout.platformAmount || 0),
+            failureReason: 'Tutor payout account is not verified.',
+          },
+          source: 'processWeeklyTutorPayouts',
+        });
+      } catch (error) {
+        logger.warn('Failed to queue unverified payout email.', {
+          payoutId: payout.id,
+          error: error.message,
+        });
+      }
       failedCount += 1;
       continue;
     }
@@ -4398,6 +4701,33 @@ exports.processWeeklyTutorPayouts = onSchedule({
           transferStatus: transfer.status || null,
         },
       });
+      try {
+        await queueEmailEventOnce({
+          eventId: buildEmailEventId('tutor-payout', payout.id, 'paid', reference),
+          eventType: 'tutor_payout_status',
+          payload: {
+            email: payout.tutorEmail || tutorData.email || '',
+            weekKey: payout.weekKey || '',
+            weekStart: payout.weekStart || '',
+            weekEnd: payout.weekEnd || '',
+            status: 'paid',
+            totalSessions: Number(payout.totalSessions || 0),
+            grossAmount: Number(payout.grossAmount || 0),
+            tutorRate: Number(BILLING_RULES.TUTOR_PAYOUT_RATE),
+            tutorAmount: amount,
+            platformFeeRate: Number(BILLING_RULES.PLATFORM_FEE_RATE),
+            platformAmount: Number(payout.platformAmount || 0),
+            transferReference: reference,
+            transferStatus: transfer.status || null,
+          },
+          source: 'processWeeklyTutorPayouts',
+        });
+      } catch (error) {
+        logger.warn('Failed to queue paid payout email.', {
+          payoutId: payout.id,
+          error: error.message,
+        });
+      }
       paidCount += 1;
     } catch (error) {
       await payoutRef.set({
@@ -4420,6 +4750,33 @@ exports.processWeeklyTutorPayouts = onSchedule({
           failureReason: error.message || 'Paystack transfer failed.',
         },
       });
+      try {
+        await queueEmailEventOnce({
+          eventId: buildEmailEventId('tutor-payout', payout.id, 'unsuccessful', reference),
+          eventType: 'tutor_payout_status',
+          payload: {
+            email: payout.tutorEmail || tutorData.email || '',
+            weekKey: payout.weekKey || '',
+            weekStart: payout.weekStart || '',
+            weekEnd: payout.weekEnd || '',
+            status: 'unsuccessful',
+            totalSessions: Number(payout.totalSessions || 0),
+            grossAmount: Number(payout.grossAmount || 0),
+            tutorRate: Number(BILLING_RULES.TUTOR_PAYOUT_RATE),
+            tutorAmount: amount,
+            platformFeeRate: Number(BILLING_RULES.PLATFORM_FEE_RATE),
+            platformAmount: Number(payout.platformAmount || 0),
+            transferReference: reference,
+            failureReason: error.message || 'Paystack transfer failed.',
+          },
+          source: 'processWeeklyTutorPayouts',
+        });
+      } catch (queueError) {
+        logger.warn('Failed to queue failed payout email.', {
+          payoutId: payout.id,
+          error: queueError.message,
+        });
+      }
       failedCount += 1;
     }
   }

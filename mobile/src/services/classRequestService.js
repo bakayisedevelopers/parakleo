@@ -82,20 +82,6 @@ export async function createClassRequest(payload) {
       read: false,
       createdAt: serverTimestamp(),
     }),
-    addDoc(collection(db, 'emailEvents'), {
-      eventType: 'request_created',
-      payload: {
-        requestId: docRef.id,
-        studentId: payload.studentId,
-        studentName: payload.studentName,
-        studentEmail: payload.studentEmail,
-        subject: requestBody.subject,
-        topic: payload.topic,
-      },
-      status: 'queued',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }),
   ]);
 
   return docRef.id;

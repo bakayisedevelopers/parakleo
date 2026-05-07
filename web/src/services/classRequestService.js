@@ -11,7 +11,6 @@ import { PLATFORM_FEE_RATE, TUTOR_PAYOUT_RATE } from '../utils/onboarding';
 import { normalizePricingSnapshot } from '../utils/pricing';
 import { getWeekKey } from '../utils/payouts';
 import { createNotification } from './notificationService';
-import { EMAIL_EVENT_TYPES, queueEmailEvent } from './emailEventService';
 import { getTutorCandidatesForRequest } from './userService';
 import { debugError, debugLog } from '../utils/devLogger';
 
@@ -439,15 +438,6 @@ export async function createClassRequest(payload) {
     type: 'class_request',
     requestId: docRef.id,
     targetPath: `/app/student/requests/${docRef.id}`,
-  });
-
-  await queueEmailEvent(EMAIL_EVENT_TYPES.REQUEST_CREATED, {
-    requestId: docRef.id,
-    studentId: payload.studentId,
-    studentName: payload.studentName,
-    studentEmail: payload.studentEmail,
-    subject: requestBody.subject,
-    topic: payload.topic,
   });
 
   debugLog('classRequestService', 'Class request created. Backend lifecycle trigger will process matching.', { requestId: docRef.id });
@@ -964,18 +954,6 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
           requestId,
           sessionId: transactionResult?.sessionId || requestId,
           targetPath: `/app/session/${transactionResult?.sessionId || requestId}`,
-        }),
-        queueEmailEvent(EMAIL_EVENT_TYPES.REQUEST_ACCEPTED, {
-          requestId,
-          tutorId,
-          studentId: requestData.studentId,
-          studentName: requestData.studentName,
-          studentEmail: requestData.studentEmail,
-          tutorName: resolvedTutorName,
-          tutorEmail: resolvedTutorEmail,
-          subject: requestData.subject || requestData.topic || 'Class request',
-          topic: requestData.topic || requestData.subject || 'Class request',
-          sessionId: transactionResult?.sessionId || requestId,
         }),
       ]);
 

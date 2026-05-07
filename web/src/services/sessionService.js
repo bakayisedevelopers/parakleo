@@ -4,7 +4,6 @@ import { TUTOR_PAYOUT_RATE, PLATFORM_FEE_RATE } from '../utils/onboarding';
 import { normalizePricingSnapshot } from '../utils/pricing';
 import { getWeekKey } from '../utils/payouts';
 import { createNotification } from './notificationService';
-import { EMAIL_EVENT_TYPES, queueEmailEvent } from './emailEventService';
 import { getUserProfile, updateUserRatingSummary } from './userService';
 import { debugError, debugLog } from '../utils/devLogger';
 
@@ -336,17 +335,6 @@ export async function finalizeSessionClosure(session, options = {}) {
       type: 'session_billing',
       requestId: session.requestId,
       sessionId: session.id,
-    }),
-    queueEmailEvent(EMAIL_EVENT_TYPES.SESSION_COMPLETED, {
-      sessionId: session.id,
-      requestId: session.requestId,
-      studentEmail: session.studentEmail,
-      tutorEmail: session.tutorEmail,
-      subject: session.subject,
-      topic: session.topic,
-      amount: Number(updated.totalAmount || 0),
-      rate: Number(updated.pricingSnapshot?.adjustedRatePerMinute || updated.pricingSnapshot?.ratePerMinute || 0),
-      paymentStatus: updated.paymentStatus,
     }),
   ]);
 
