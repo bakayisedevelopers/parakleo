@@ -14,8 +14,13 @@ export async function uploadUserFile({ userId, attachment, pathPrefix = 'uploads
   const safeName = sanitizeFileName(attachment.name);
   const objectPath = requestedObjectPath || `${pathPrefix}/${userId}/${Date.now()}-${safeName}`;
   const fileRef = ref(storage, objectPath);
+  const base64 = String(attachment.dataUrl || '').split(',')[1] || '';
 
-  await uploadString(fileRef, attachment.dataUrl, 'data_url');
+  if (!base64) {
+    throw new Error('Unable to read selected file.');
+  }
+
+  await uploadString(fileRef, base64, 'base64');
   const downloadUrl = await getDownloadURL(fileRef);
 
   return {

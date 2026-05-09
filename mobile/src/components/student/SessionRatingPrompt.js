@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../theme/colors';
-import { dismissSessionRating, submitSessionRating } from '../../services/sessionService';
+import { submitSessionRating } from '../../services/sessionService';
 
 const STAR_VALUES = [1, 2, 3, 4, 5];
 
@@ -31,7 +31,7 @@ export function SessionRatingPrompt({ session, role = 'student', onHandled }) {
     setIsSaving(true);
     try {
       await submitSessionRating(session, role, { overall: rating });
-      onHandled?.();
+      onHandled?.(session.id);
     } finally {
       setIsSaving(false);
     }
@@ -42,13 +42,7 @@ export function SessionRatingPrompt({ session, role = 'student', onHandled }) {
       return;
     }
 
-    setIsSaving(true);
-    try {
-      await dismissSessionRating(session, role);
-      onHandled?.();
-    } finally {
-      setIsSaving(false);
-    }
+    onHandled?.(session.id);
   };
 
   return (

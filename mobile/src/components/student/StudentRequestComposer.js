@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { AttachmentPickerModal } from './AttachmentPickerModal';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -37,6 +39,61 @@ const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with an assignment', value: 'I need help with an assignment.' },
   { label: 'I need a normal lesson', value: 'I need a normal lesson.' },
 ];
+
+function DropdownField({
+  label,
+  valueLabel,
+  placeholder = 'Select',
+  options = [],
+  selectedValue = '',
+  onSelect,
+}) {
+  const [open, setOpen] = useState(false);
+  const displayValue = valueLabel || placeholder;
+
+  return (
+    <View style={styles.dropdownWrap}>
+      <Text style={styles.dropdownLabel}>{label}</Text>
+      <Pressable accessibilityRole="button" onPress={() => setOpen(true)} style={styles.dropdownTrigger}>
+        <Text style={[styles.dropdownValue, !valueLabel && styles.dropdownPlaceholder]} numberOfLines={1}>
+          {displayValue}
+        </Text>
+        <Ionicons name="chevron-down" size={16} color={colors.muted} />
+      </Pressable>
+
+      <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.dropdownModalCard}>
+            <Text style={styles.dropdownModalTitle}>{label}</Text>
+            <ScrollView style={styles.dropdownList}>
+              {options.map((option) => {
+                const isActive = String(option.value) === String(selectedValue);
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={String(option.value)}
+                    onPress={() => {
+                      onSelect?.(option.value);
+                      setOpen(false);
+                    }}
+                    style={[styles.dropdownOption, isActive && styles.dropdownOptionActive]}
+                  >
+                    <Text style={[styles.dropdownOptionText, isActive && styles.dropdownOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable accessibilityRole="button" onPress={() => setOpen(false)} style={styles.dropdownCloseButton}>
+              <Text style={styles.dropdownCloseText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
 
 function buildAttachmentKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
@@ -132,6 +189,7 @@ export function StudentRequestComposer({
   requests = [],
   sessions = [],
   user,
+  onStageChange,
 }) {
   const paymentMethods = user?.paymentMethods || [];
   const freeMinutesRemaining = Number(user?.freeMinutesRemaining || 0);
@@ -165,8 +223,10 @@ export function StudentRequestComposer({
   const [isExtracting, setIsExtracting] = useState(false);
   const [isPreparingReview, setIsPreparingReview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSubjectFallback, setShowSubjectFallback] = useState(false);
-  const [unsupportedSubject, setUnsupportedSubject] = useState('');
+  const [typedSubjectStatus, setTypedSubjectStatus] = useState('');
+  const [typedTopicStatus, setTypedTopicStatus] = useState('');
+  const lastAutoReviewSignatureRef = useRef('');
+  const typingClassificationRunRef = useRef(0);
 
   useEffect(() => {
     setCardId(paymentMethods.find((card) => card.isDefault)?.id || paymentMethods[0]?.id || '');
@@ -182,6 +242,17 @@ export function StudentRequestComposer({
       })
     : null;
   const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
+
+  function buildReviewSignature() {
+    const attachmentSignature = attachments.map((file) => buildAttachmentKey(file)).join('|');
+    return [
+      topic.trim(),
+      attachmentSignature,
+      selectedSubject,
+      durationMinutes,
+      hasManualDurationOverride ? 'manual' : 'auto',
+    ].join('::');
+  }
 
   async function refreshQuote(minutes, subject) {
     const nextQuote = await fetchPricingQuote({
@@ -206,8 +277,8 @@ export function StudentRequestComposer({
     setError('');
     setQuote(null);
     setIsTextEntryOpen(false);
-    setShowSubjectFallback(false);
-    setUnsupportedSubject('');
+    setTypedSubjectStatus('');
+    setTypedTopicStatus('');
   }
 
   async function handlePickedFiles(files) {
@@ -278,6 +349,7 @@ export function StudentRequestComposer({
     setError('');
     setSuccessMessage('');
     setIsPreparingReview(true);
+    const reviewSignature = buildReviewSignature();
 
     try {
       const attachmentExtractions = attachments
@@ -308,39 +380,119 @@ export function StudentRequestComposer({
       }
 
       if (classification.unsupportedSubjectRequested && classification.unsupportedSubject) {
-        setUnsupportedSubject(classification.unsupportedSubject);
-        setShowSubjectFallback(true);
-        return;
-      }
-
-      if (!nextSubject) {
-        setShowSubjectFallback(true);
-        return;
+        setTypedSubjectStatus(`Detected subject: ${classification.unsupportedSubject} (not offered yet).`);
       }
 
       setSelectedSubject(nextSubject);
       await refreshQuote(hasManualDurationOverride ? durationMinutes : nextEstimatedMinutes, nextSubject);
       setStage('review');
+      lastAutoReviewSignatureRef.current = '';
     } catch (nextError) {
       setError(nextError.message || 'Unable to prepare the review right now.');
+      lastAutoReviewSignatureRef.current = reviewSignature;
     } finally {
       setIsPreparingReview(false);
     }
   }
 
-  async function confirmSubjectSelection() {
-    if (!selectedSubject) return;
-
-    setShowSubjectFallback(false);
-    setUnsupportedSubject('');
-
-    try {
-      await refreshQuote(durationMinutes, selectedSubject);
-      setStage('review');
-    } catch (nextError) {
-      setError(nextError.message || 'Unable to fetch pricing quote right now.');
+  useEffect(() => {
+    if (flowState !== 'request_flow') {
+      lastAutoReviewSignatureRef.current = '';
+      return undefined;
     }
-  }
+
+    if (attachments.length === 0 || !hasRequestContent || isExtracting || isPreparingReview || stage === 'review') {
+      return undefined;
+    }
+
+    const nextSignature = buildReviewSignature();
+
+    if (!nextSignature.trim() || nextSignature === lastAutoReviewSignatureRef.current) {
+      return undefined;
+    }
+
+    lastAutoReviewSignatureRef.current = nextSignature;
+    const timeoutId = setTimeout(() => {
+      prepareReview();
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    attachments,
+    durationMinutes,
+    flowState,
+    hasManualDurationOverride,
+    hasRequestContent,
+    isExtracting,
+    isPreparingReview,
+    selectedSubject,
+    stage,
+    topic,
+  ]);
+
+  useEffect(() => {
+    if (attachments.length > 0) {
+      setTypedSubjectStatus('');
+      setTypedTopicStatus('');
+      return undefined;
+    }
+
+    const trimmedTopic = topic.trim();
+    if (!trimmedTopic) {
+      setTypedSubjectStatus('');
+      setTypedTopicStatus('');
+      return undefined;
+    }
+
+    const runId = typingClassificationRunRef.current + 1;
+    typingClassificationRunRef.current = runId;
+    setTypedSubjectStatus('Detecting subject from your text...');
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const subjectOptions = SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }));
+        const classificationInput = buildSubjectClassificationInput({
+          typedText: trimmedTopic,
+          attachmentExtractions: [],
+          supportedSubjects: subjectOptions,
+        });
+
+        const classification = await classifySubjectFromText({
+          inputText: classificationInput.combinedText,
+          inputPayload: classificationInput.structuredPayload,
+          supportedSubjects: subjectOptions,
+        });
+
+        if (typingClassificationRunRef.current !== runId) {
+          return;
+        }
+
+        if (classification.unsupportedSubjectRequested && classification.unsupportedSubject) {
+          setTypedSubjectStatus(`Detected subject: ${classification.unsupportedSubject} (not offered yet).`);
+          setTypedTopicStatus(classification.topic ? `Detected topic: ${classification.topic}` : '');
+          return;
+        }
+
+        if (classification.subject) {
+          setSelectedSubject(classification.subject);
+          setTypedSubjectStatus(`Detected subject: ${classification.subject}.`);
+          setTypedTopicStatus(classification.topic ? `Detected topic: ${classification.topic}` : 'Topic not detected yet.');
+          return;
+        }
+
+        setTypedSubjectStatus('Subject not detected yet. Keep typing or upload a file.');
+        setTypedTopicStatus(classification.topic ? `Detected topic: ${classification.topic}` : 'Topic not detected yet.');
+      } catch (_error) {
+        if (typingClassificationRunRef.current === runId) {
+          setTypedSubjectStatus('Unable to detect subject right now.');
+          setTypedTopicStatus('');
+        }
+      }
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [attachments.length, topic]);
 
   async function confirmRequest() {
     if (!selectedSubject) {
@@ -360,13 +512,33 @@ export function StudentRequestComposer({
     try {
       const activeQuote = quote || (await refreshQuote(durationMinutes, selectedSubject));
       const quoteWithDiscount = buildQuoteWithDiscount(activeQuote, durationMinutes, freeMinutesRemaining);
-      const uploadedAttachments = await Promise.all(
-        attachments.map((attachment) => uploadUserFile({
-          userId: user.uid,
-          attachment,
-          pathPrefix: 'request-attachments',
-        })),
-      );
+      const uploadedAttachments = [];
+      for (const attachment of attachments) {
+        try {
+          const uploadResult = await uploadUserFile({
+            userId: user.uid,
+            attachment,
+            pathPrefix: 'request-attachments',
+          });
+          uploadedAttachments.push(uploadResult);
+        } catch (uploadError) {
+          const uploadMessage = String(uploadError?.message || '').toLowerCase();
+          const isBlobError = uploadMessage.includes('arraybuffer') || uploadMessage.includes('arraybufferview') || uploadMessage.includes('blob');
+          if (isBlobError) {
+            uploadedAttachments.push({
+              downloadUrl: '',
+              objectPath: '',
+              fileName: attachment.name,
+              fileType: attachment.type || 'application/octet-stream',
+              size: Number(attachment.size || 0),
+              uploadedAt: new Date().toISOString(),
+              uploadError: 'blob_not_supported',
+            });
+            continue;
+          }
+          throw uploadError;
+        }
+      }
       const boardPreparationSource = buildBoardPreparationSource({
         attachments,
         uploadedAttachments,
@@ -401,6 +573,10 @@ export function StudentRequestComposer({
   }
 
   const activeRequestMeta = activeOrOngoingRequest ? getRequestStatusMeta(activeOrOngoingRequest.status) : null;
+
+  useEffect(() => {
+    onStageChange?.(stage);
+  }, [onStageChange, stage]);
 
   return (
     <View style={styles.wrap}>
@@ -447,160 +623,150 @@ export function StudentRequestComposer({
 
       {flowState === 'request_flow' ? (
         <>
-          <Card style={styles.heroCard}>
-            <StatusBadge label="Student request" tone="success" />
-            <Text style={styles.heroTitle}>Snap homework, upload a worksheet, or describe what you need help with.</Text>
-            <Text style={styles.heroCopy}>
-              We'll estimate the session length, detect the subject, and let you review before confirming.
-            </Text>
+          {stage !== 'review' ? (
+            <Card style={styles.heroCard}>
+              <StatusBadge label="Student request" tone="success" />
+              <Text style={styles.heroTitle}>Snap homework, upload a worksheet, or describe what you need help with.</Text>
+              <Text style={styles.heroCopy}>
+                We'll estimate the session length, detect the subject, and let you review before confirming.
+              </Text>
 
-            <View style={styles.actionRow}>
-              <Button style={styles.actionButton} onPress={() => setPickerMode('camera')}>
-                Take Picture
-              </Button>
-              <Button style={styles.actionButton} onPress={() => setPickerMode('upload')} variant="secondary">
-                Upload
-              </Button>
-            </View>
-
-            {attachments.length ? (
-              <View style={styles.attachmentList}>
-                {attachments.map((file, index) => {
-                  const fileKey = buildAttachmentKey(file);
-                  const status = attachmentExtractionStatusByKey[fileKey] || 'queued';
-                  return (
-                    <View key={fileKey} style={styles.attachmentRow}>
-                      <View style={styles.attachmentMeta}>
-                        <Text style={styles.attachmentName} numberOfLines={1}>{file.name}</Text>
-                        <Text style={styles.attachmentStatus}>{status === 'text extracted' ? 'Done' : 'Processing...'}</Text>
-                      </View>
-                      <Pressable accessibilityRole="button" onPress={() => removeAttachment(index)} style={styles.removePill}>
-                        <Text style={styles.removeText}>Remove</Text>
-                      </Pressable>
-                    </View>
-                  );
-                })}
+              <View style={styles.actionRow}>
+                <Button style={styles.actionButton} onPress={() => setPickerMode('camera')}>
+                  Take Picture
+                </Button>
+                <Button style={styles.actionButton} onPress={() => setPickerMode('upload')} variant="secondary">
+                  Upload
+                </Button>
               </View>
-            ) : null}
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setIsTextEntryOpen((current) => !current)}
-              style={styles.toggleRow}
-            >
-              <Text style={styles.toggleTitle}>Or describe what you need help with</Text>
-              <Text style={styles.toggleArrow}>{isTextEntryOpen ? 'v' : '>'}</Text>
-            </Pressable>
+              {attachments.length ? (
+                <View style={styles.attachmentList}>
+                  {attachments.map((file, index) => {
+                    const fileKey = buildAttachmentKey(file);
+                    const status = attachmentExtractionStatusByKey[fileKey] || 'queued';
+                    return (
+                      <View key={fileKey} style={styles.attachmentRow}>
+                        <View style={styles.attachmentMeta}>
+                          <Text style={styles.attachmentName} numberOfLines={1}>{file.name}</Text>
+                          <Text style={styles.attachmentStatus}>{status === 'text extracted' ? 'Done' : 'Processing...'}</Text>
+                        </View>
+                        <Pressable accessibilityRole="button" onPress={() => removeAttachment(index)} style={styles.removePill}>
+                          <Text style={styles.removeText}>Remove</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
 
-            {isTextEntryOpen ? (
-              <View style={styles.textEntry}>
-                <TextInput
-                  multiline
-                  onChangeText={(value) => {
-                    setTopic(value);
-                    setStage('input');
-                    setQuote(null);
-                    setError('');
-                  }}
-                  placeholder="Type here..."
-                  placeholderTextColor={colors.muted}
-                  style={styles.textarea}
-                  value={topic}
-                />
-                <View style={styles.suggestionWrap}>
-                  {QUICK_REQUEST_SUGGESTIONS.map((option) => (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setIsTextEntryOpen((current) => !current)}
+                style={styles.toggleRow}
+              >
+                <Text style={styles.toggleTitle}>Or describe what you need help with</Text>
+                <Ionicons name={isTextEntryOpen ? 'chevron-down' : 'chevron-forward'} size={18} color={colors.muted} />
+              </Pressable>
+
+              {isTextEntryOpen ? (
+                <View style={styles.textEntry}>
+                  <TextInput
+                    multiline
+                    onChangeText={(value) => {
+                      setTopic(value);
+                      setStage('input');
+                      setQuote(null);
+                      setError('');
+                    }}
+                    placeholder="Type here..."
+                    placeholderTextColor={colors.muted}
+                    style={styles.textarea}
+                    value={topic}
+                  />
+                  <View style={styles.suggestionWrap}>
+                    {QUICK_REQUEST_SUGGESTIONS.map((option) => (
+                      <Pressable
+                        accessibilityRole="button"
+                        key={option.label}
+                        onPress={() => {
+                          setIsTextEntryOpen(true);
+                          setTopic(option.value);
+                          setStage('input');
+                          setQuote(null);
+                          setError('');
+                        }}
+                        style={styles.suggestionChip}
+                      >
+                        <Text style={styles.suggestionText}>{option.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {typedSubjectStatus ? <Text style={styles.subjectStatusText}>{typedSubjectStatus}</Text> : null}
+                  {typedTopicStatus ? <Text style={styles.subjectStatusText}>{typedTopicStatus}</Text> : null}
+                  <View style={styles.textContinueRow}>
                     <Pressable
                       accessibilityRole="button"
-                      key={option.label}
-                      onPress={() => {
-                        setIsTextEntryOpen(true);
-                        setTopic(option.value);
-                        setStage('input');
-                        setQuote(null);
-                        setError('');
-                      }}
-                      style={styles.suggestionChip}
+                      disabled={!topic.trim() || isPreparingReview}
+                      onPress={prepareReview}
+                      style={[styles.textContinueButton, (!topic.trim() || isPreparingReview) && styles.textContinueButtonDisabled]}
                     >
-                      <Text style={styles.suggestionText}>{option.label}</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#0f172a" />
+                      <Text style={styles.textContinueLabel}>{isPreparingReview ? 'Preparing...' : 'Continue'}</Text>
                     </Pressable>
-                  ))}
+                  </View>
                 </View>
-              </View>
-            ) : null}
+              ) : null}
 
-            <Button
-              disabled={!hasRequestContent || isExtracting || isPreparingReview}
-              onPress={prepareReview}
-            >
-              Continue to review
-            </Button>
-          </Card>
+              <Text style={styles.autoAdvanceText}>
+                {isPreparingReview ? 'Preparing review...' : 'Review will open automatically once your request is ready.'}
+              </Text>
+            </Card>
+          ) : null}
 
           {stage === 'review' ? (
             <Card style={styles.reviewCard}>
               <Text style={styles.reviewTitle}>Review and confirm</Text>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Time</Text>
-                <View style={styles.chipWrap}>
-                  {durationOptions.map((option) => {
-                    const active = durationMinutes === option;
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        key={option}
-                        onPress={async () => {
-                          setHasManualDurationOverride(true);
-                          setDurationMinutes(option);
-                          try {
-                            await refreshQuote(option, selectedSubject);
-                          } catch (nextError) {
-                            setError(nextError.message || 'Unable to refresh pricing quote right now.');
-                          }
-                        }}
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
-                      >
-                        <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{option} min</Text>
-                      </Pressable>
-                    );
-                  })}
+              <View style={styles.reviewRows}>
+                <DropdownField
+                  label="Time"
+                  selectedValue={durationMinutes}
+                  valueLabel={`${durationMinutes} min`}
+                  options={durationOptions.map((option) => ({ value: option, label: `${option} min` }))}
+                  onSelect={async (value) => {
+                    const nextDuration = Number(value || DEFAULT_LESSON_DURATION);
+                    setHasManualDurationOverride(true);
+                    setDurationMinutes(nextDuration);
+                    try {
+                      await refreshQuote(nextDuration, selectedSubject);
+                    } catch (nextError) {
+                      setError(nextError.message || 'Unable to refresh pricing quote right now.');
+                    }
+                  }}
+                />
+                <Text style={styles.freeMinutesNote}>
+                  {freeMinutesRemaining > 0 ? `${freeMinutesRemaining.toFixed(2)} free` : 'No free minutes'}
+                </Text>
+                <DropdownField
+                  label="Subject"
+                  selectedValue={selectedSubject}
+                  valueLabel={selectedSubject}
+                  placeholder="Select subject"
+                  options={SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }))}
+                  onSelect={async (value) => {
+                    const nextSubject = String(value || '');
+                    setSelectedSubject(nextSubject);
+                    try {
+                      await refreshQuote(durationMinutes, nextSubject);
+                    } catch (nextError) {
+                      setError(nextError.message || 'Unable to refresh pricing quote right now.');
+                    }
+                  }}
+                />
+                <View style={styles.topicRow}>
+                  <Text style={styles.sectionLabel}>Topic</Text>
+                  <Text style={styles.reviewValue}>{reviewTopic || 'Not set'}</Text>
                 </View>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Minutes</Text>
-                <Text style={styles.reviewValue}>{durationMinutes} selected | {freeMinutesRemaining.toFixed(2)} free</Text>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Subject</Text>
-                <View style={styles.chipWrap}>
-                  {SOUTH_AFRICAN_SUBJECTS.map((subject) => {
-                    const active = selectedSubject === subject;
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        key={subject}
-                        onPress={async () => {
-                          setSelectedSubject(subject);
-                          try {
-                            await refreshQuote(durationMinutes, subject);
-                          } catch (nextError) {
-                            setError(nextError.message || 'Unable to refresh pricing quote right now.');
-                          }
-                        }}
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
-                      >
-                        <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{subject}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Topic</Text>
-                <Text style={styles.reviewValue}>{reviewTopic || 'Not set'}</Text>
               </View>
 
               <View style={styles.pricingCard}>
@@ -618,24 +784,14 @@ export function StudentRequestComposer({
                     <Text style={styles.reviewValue}>{formatRand(pricingPreview.finalPrice)}</Text>
                   </View>
                 ) : null}
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>Payment</Text>
-                  <View style={styles.chipWrap}>
-                    {paymentMethods.map((card) => {
-                      const active = cardId === card.id;
-                      return (
-                        <Pressable
-                          accessibilityRole="button"
-                          key={card.id}
-                          onPress={() => setCardId(card.id)}
-                          style={[styles.choiceChip, active && styles.choiceChipActive]}
-                        >
-                          <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{formatCardLabel(card)}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
+                <DropdownField
+                  label="Payment"
+                  selectedValue={cardId}
+                  valueLabel={paymentMethods.find((card) => card.id === cardId) ? formatCardLabel(paymentMethods.find((card) => card.id === cardId)) : ''}
+                  placeholder="Select card"
+                  options={paymentMethods.map((card) => ({ value: card.id, label: formatCardLabel(card) }))}
+                  onSelect={(value) => setCardId(String(value || ''))}
+                />
               </View>
 
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -663,53 +819,6 @@ export function StudentRequestComposer({
         }}
         onFilesSelected={handlePickedFiles}
       />
-
-      <Modal animationType="fade" transparent visible={showSubjectFallback} onRequestClose={() => setShowSubjectFallback(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            {unsupportedSubject ? (
-              <>
-                <Text style={styles.modalTitle}>Subject not offered yet</Text>
-                <Text style={styles.modalCopy}>Sorry, {unsupportedSubject} is not offered yet.</Text>
-                <Button onPress={() => {
-                  setShowSubjectFallback(false);
-                  setUnsupportedSubject('');
-                }}>
-                  Close
-                </Button>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>Choose subject before review</Text>
-                <Text style={styles.modalCopy}>We couldn&apos;t confidently resolve a supported subject from the request details.</Text>
-                <View style={styles.chipWrap}>
-                  {SOUTH_AFRICAN_SUBJECTS.map((subject) => {
-                    const active = selectedSubject === subject;
-                    return (
-                      <Pressable
-                        accessibilityRole="button"
-                        key={subject}
-                        onPress={() => setSelectedSubject(subject)}
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
-                      >
-                        <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{subject}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <View style={styles.actionRow}>
-                  <Button style={styles.actionButton} onPress={() => setShowSubjectFallback(false)} variant="secondary">
-                    Cancel
-                  </Button>
-                  <Button style={styles.actionButton} disabled={!selectedSubject} onPress={confirmSubjectSelection}>
-                    Confirm subject
-                  </Button>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
 
       <Modal animationType="fade" transparent visible={isExtracting || isPreparingReview || isSubmitting}>
         <View style={styles.modalOverlay}>
@@ -830,11 +939,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
-  toggleArrow: {
-    color: colors.muted,
-    fontSize: 18,
-    fontWeight: '800',
-  },
   textEntry: {
     backgroundColor: '#fafafa',
     borderColor: colors.border,
@@ -872,8 +976,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  subjectStatusText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  textContinueRow: {
+    alignItems: 'flex-end',
+    marginTop: 6,
+  },
+  textContinueButton: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 40,
+    paddingHorizontal: 12,
+  },
+  textContinueButtonDisabled: {
+    opacity: 0.5,
+  },
+  textContinueLabel: {
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   reviewCard: {
     gap: 14,
+  },
+  reviewRows: {
+    gap: 10,
+  },
+  freeMinutesNote: {
+    color: colors.brandDark,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  topicRow: {
+    backgroundColor: '#ecfdf5',
+    borderColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   reviewTitle: {
     color: colors.text,
@@ -898,6 +1048,88 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  dropdownWrap: {
+    gap: 6,
+  },
+  dropdownLabel: {
+    color: colors.brandDark,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  dropdownTrigger: {
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    borderColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 50,
+    paddingHorizontal: 12,
+  },
+  dropdownValue: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    marginRight: 8,
+  },
+  dropdownPlaceholder: {
+    color: colors.muted,
+  },
+  dropdownChevron: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  dropdownModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    maxHeight: '75%',
+    padding: 16,
+    width: '100%',
+  },
+  dropdownModalTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  dropdownList: {
+    maxHeight: 320,
+  },
+  dropdownOption: {
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    paddingVertical: 12,
+  },
+  dropdownOptionActive: {
+    backgroundColor: '#ecfdf5',
+  },
+  dropdownOptionText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dropdownOptionTextActive: {
+    color: colors.brandDark,
+  },
+  dropdownCloseButton: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 12,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  dropdownCloseText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
   choiceChip: {
     borderColor: colors.border,
@@ -936,6 +1168,12 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 14,
     fontWeight: '700',
+  },
+  autoAdvanceText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   modalOverlay: {
     alignItems: 'center',

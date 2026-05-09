@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth } from 'firebase/auth';
+import { connectAuthEmulator, getAuth, inMemoryPersistence, initializeAuth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { connectStorageEmulator, getStorage } from 'firebase/storage';
 
@@ -16,10 +16,27 @@ const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 
 const emulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '10.0.2.2';
 const projectId = firebaseConfig.projectId || 'claxi-bakayise';
 let emulatorsConnected = false;
+let authInstance = null;
+
+function getFirebaseAuth(app) {
+  if (authInstance) {
+    return authInstance;
+  }
+
+  try {
+    authInstance = initializeAuth(app, {
+      persistence: inMemoryPersistence,
+    });
+  } catch (error) {
+    authInstance = getAuth(app);
+  }
+
+  return authInstance;
+}
 
 export function getFirebaseClients() {
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  const auth = getAuth(app);
+  const auth = getFirebaseAuth(app);
   const db = getFirestore(app);
   const storage = getStorage(app);
 

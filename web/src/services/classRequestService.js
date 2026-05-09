@@ -808,6 +808,9 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
           updatedAt: serverTimestamp(),
         });
 
+        const scheduledDate = requestData.preferredDate || requestData.scheduledDate || '';
+        const scheduledTime = requestData.preferredTime || requestData.scheduledTime || '';
+
         if (!sessionSnap.exists()) {
           debugLog('classRequestService', 'Tutor offer transaction creating session.', {
             requestId,
@@ -826,8 +829,8 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
               tutorEmail: resolvedTutorEmail,
               subject: 'Mathematics',
               topic: requestData.topic,
-              scheduledDate: requestData.preferredDate,
-              scheduledTime: requestData.preferredTime,
+              scheduledDate,
+              scheduledTime,
               duration: requestData.duration,
               durationMinutes: Number(requestData.durationMinutes || 10),
               pricingSnapshot: requestData.pricingSnapshot || null,
@@ -891,8 +894,8 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
               tutorName: resolvedTutorName,
               tutorEmail: resolvedTutorEmail,
               topic: requestData.topic,
-              scheduledDate: requestData.preferredDate,
-              scheduledTime: requestData.preferredTime,
+              scheduledDate,
+              scheduledTime,
               duration: requestData.duration,
               durationMinutes: Number(requestData.durationMinutes || 10),
               pricingSnapshot: requestData.pricingSnapshot || null,

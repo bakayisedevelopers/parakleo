@@ -1,5 +1,5 @@
 import React from 'react';
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ErrorState } from './States';
 import { colors } from '../../theme/colors';
 import { logError } from '../../services/logger';
@@ -18,9 +18,9 @@ export class ErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <SafeAreaView style={styles.safe}>
+        <View style={styles.safe}>
           <ErrorState message="Restart the app and try again." />
-        </SafeAreaView>
+        </View>
       );
     }
 

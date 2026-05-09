@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { LoadingState } from '../components/ui/States';
 import { NotificationCenterModal } from '../components/student/NotificationCenterModal';
 import { SessionRatingPrompt } from '../components/student/SessionRatingPrompt';
@@ -19,7 +20,7 @@ import { WalletScreen } from '../screens/student/WalletScreen';
 import { markNotificationsRead, subscribeToNotifications } from '../services/notificationService';
 import { subscribeToStudentSessions } from '../services/sessionService';
 import { colors } from '../theme/colors';
-import { RATABLE_SESSION_STATUSES, isLiveSessionStatus } from '../utils/sessionStatus';
+import { RATABLE_SESSION_STATUSES } from '../utils/sessionStatus';
 
 const authScreens = {
   Home: HomeScreen,
@@ -29,11 +30,11 @@ const authScreens = {
 
 const studentTabs = [
   { key: 'Dashboard', label: 'Home', component: DashboardScreen },
-  { key: 'Onboarding', label: 'Complete Profile', component: OnboardingScreen },
   { key: 'Requests', label: 'My Classes', component: RequestsScreen },
   { key: 'Sessions', label: 'Sessions', component: SessionsScreen },
   { key: 'Wallet', label: 'Payment', component: WalletScreen },
   { key: 'Profile', label: 'Profile', component: ProfileScreen },
+  { key: 'Onboarding', label: 'Complete Profile', component: OnboardingScreen },
 ];
 
 const detailScreens = {
@@ -119,6 +120,16 @@ export function RootNavigator() {
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
+  const [handledRatingSessionIds, setHandledRatingSessionIds] = useState([]);
+  const ratingTarget = useMemo(
+    () =>
+      sessions.find(
+        (session) =>
+          RATABLE_SESSION_STATUSES.includes(String(session.status || '').toLowerCase()) &&
+          !handledRatingSessionIds.includes(session.id),
+      ) || null,
+    [handledRatingSessionIds, sessions],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -150,6 +161,7 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user?.uid) {
       setNotifications([]);
+      setHandledRatingSessionIds([]);
       setNotificationsLoading(false);
       return () => {};
     }
@@ -170,6 +182,7 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user?.uid) {
       setSessions([]);
+      setHandledRatingSessionIds([]);
       return () => {};
     }
 
@@ -191,18 +204,18 @@ export function RootNavigator() {
 
   if (initializing) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.safe}>
         <LoadingState label="Restoring session" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!user) {
     const AuthScreen = authScreens[authRoute];
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.safe}>
         <AuthScreen navigate={setAuthRoute} />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -225,56 +238,61 @@ export function RootNavigator() {
   const ActiveScreen = detailScreens[activeRoute.key] || active.component;
   const isFullscreenRoute = activeRoute.key === 'SessionRoom';
   const unreadCount = notifications.filter((item) => !item?.read).length;
-  const liveSession = sessions.find((session) => isLiveSessionStatus(session.status)) || null;
-  const ratingTarget = useMemo(
-    () => sessions.find((session) => RATABLE_SESSION_STATUSES.includes(String(session.status || '').toLowerCase()) && (session?.ratingStatus?.student || 'pending') === 'pending') || null,
-    [sessions],
-  );
+  const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
+  const referralLink = referralSlug ? `https://claxi.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
 
   const handleLogout = async () => {
     setAuthRoute('Home');
     setIsNavOpen(false);
     setActiveRoute({ key: 'Dashboard', params: {} });
+    setHandledRatingSessionIds([]);
     await logout();
   };
 
+  const handleShareReferral = async () => {
+    if (!referralLink) return;
+    try {
+      await Share.share({
+        title: 'Join Claxi',
+        message: `Use my Claxi referral link to sign up and start learning.\n${referralLink}`,
+        url: referralLink,
+      });
+    } catch (_error) {
+      // noop
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
       <View style={styles.shell}>
-        {!isFullscreenRoute ? (
-          <View style={styles.topbar}>
-            <Pressable accessibilityRole="button" onPress={() => setIsNavOpen(true)} style={styles.menuButton}>
-              <Text style={styles.menuIcon}>Menu</Text>
-            </Pressable>
-            <View style={styles.topbarSpacer} />
-            <View style={styles.topbarActions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => openRoute(liveSession?.id ? { key: 'SessionRoom', params: { sessionId: liveSession.id, parentTab: 'Sessions' } } : 'Requests')}
-                style={styles.iconButton}
-              >
-                <Text style={styles.iconText}>Go</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={() => setIsNotificationsOpen(true)} style={styles.iconButton}>
-                <Text style={styles.iconText}>Bell</Text>
-                {unreadCount ? <View style={styles.notificationDot} /> : null}
-              </Pressable>
-              <View style={styles.identityPill}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{String(user?.fullName || user?.displayName || 'U').slice(0, 1).toUpperCase()}</Text>
-                </View>
-                <Text style={styles.identityName} numberOfLines={1}>{user?.fullName || user?.displayName || 'Claxi User'}</Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
         {isFullscreenRoute ? (
           <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
         ) : (
-          <ScrollView contentContainerStyle={styles.content}>
-            <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
-          </ScrollView>
+          <SafeAreaView style={styles.contentSafe}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
+            </ScrollView>
+          </SafeAreaView>
         )}
+        {!isFullscreenRoute ? (
+          <View style={styles.bottomNav}>
+            <Pressable accessibilityRole="button" onPress={() => openRoute('Requests')} style={[styles.bottomNavItem, activeTabKey === 'Requests' && styles.bottomNavItemActive]}>
+              <Ionicons name={activeTabKey === 'Requests' ? 'book' : 'book-outline'} size={22} color={activeTabKey === 'Requests' ? colors.brand : '#3f3f46'} />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => openRoute('Wallet')} style={[styles.bottomNavItem, activeTabKey === 'Wallet' && styles.bottomNavItemActive]}>
+              <Ionicons name={activeTabKey === 'Wallet' ? 'card' : 'card-outline'} size={22} color={activeTabKey === 'Wallet' ? colors.brand : '#3f3f46'} />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => openRoute('Dashboard')} style={[styles.bottomNavItem, activeTabKey === 'Dashboard' && styles.bottomNavItemActive]}>
+              <Ionicons name={activeTabKey === 'Dashboard' ? 'home' : 'home-outline'} size={22} color={activeTabKey === 'Dashboard' ? colors.brand : '#3f3f46'} />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.bottomNavItem}>
+              <Ionicons name="share-social-outline" size={22} color="#047857" />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => openRoute('Profile')} style={[styles.bottomNavItem, activeTabKey === 'Profile' && styles.bottomNavItemActive]}>
+              <Ionicons name={activeTabKey === 'Profile' ? 'person' : 'person-outline'} size={22} color={activeTabKey === 'Profile' ? colors.brand : '#3f3f46'} />
+            </Pressable>
+          </View>
+        ) : null}
         <Modal animationType="fade" transparent visible={isNavOpen} onRequestClose={() => setIsNavOpen(false)}>
           <View style={styles.overlay}>
             <Pressable accessibilityRole="button" onPress={() => setIsNavOpen(false)} style={styles.scrim} />
@@ -290,7 +308,7 @@ export function RootNavigator() {
               </View>
               <View style={styles.navList}>
                 {studentTabs
-                  .filter((tab) => ['Dashboard', 'Requests', 'Sessions', 'Wallet'].includes(tab.key))
+                  .filter((tab) => ['Dashboard', 'Requests', 'Wallet', 'Profile'].includes(tab.key))
                   .map((tab) => (
                     <Pressable
                       accessibilityRole="button"
@@ -303,20 +321,6 @@ export function RootNavigator() {
                   ))}
               </View>
               <View style={styles.sidebarFooter}>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => openRoute('Onboarding')}
-                  style={[styles.navItem, activeTabKey === 'Onboarding' && styles.navItemDark]}
-                >
-                  <Text style={[styles.navText, activeTabKey === 'Onboarding' && styles.navTextDark]}>Complete Profile</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => openRoute('Profile')}
-                  style={[styles.navItem, activeTabKey === 'Profile' && styles.navItemDark]}
-                >
-                  <Text style={[styles.navText, activeTabKey === 'Profile' && styles.navTextDark]}>Profile</Text>
-                </Pressable>
                 <Pressable accessibilityRole="button" onPress={handleLogout} style={styles.navItem}>
                   <Text style={styles.navText}>Log out</Text>
                 </Pressable>
@@ -342,9 +346,19 @@ export function RootNavigator() {
             openRoute({ key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } });
           }}
         />
-        <SessionRatingPrompt session={ratingTarget} role="student" onHandled={() => null} />
+        <SessionRatingPrompt
+          session={ratingTarget}
+          role="student"
+          onHandled={(sessionId) => {
+            if (!sessionId) {
+              return;
+            }
+
+            setHandledRatingSessionIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]));
+          }}
+        />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -352,6 +366,7 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0,
   },
   shell: {
     flex: 1,
@@ -364,8 +379,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    margin: 12,
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 12,
     padding: 12,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   menuButton: {
     alignItems: 'center',
@@ -377,12 +399,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 66,
     paddingHorizontal: 12,
-  },
-  menuIcon: {
-    color: '#3f3f46',
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
   },
   topbarSpacer: {
     flex: 1,
@@ -405,20 +421,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     position: 'relative',
   },
-  iconText: {
-    color: '#3f3f46',
-    fontSize: 11,
-    fontWeight: '900',
-    textTransform: 'uppercase',
+  referralButton: {
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
   },
-  notificationDot: {
+  notificationCount: {
     backgroundColor: '#f43f5e',
-    borderRadius: 5,
-    height: 8,
+    borderRadius: 9,
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '900',
+    minWidth: 18,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
     position: 'absolute',
-    right: 10,
-    top: 10,
-    width: 8,
+    right: -4,
+    textAlign: 'center',
+    top: -4,
   },
   identityPill: {
     alignItems: 'center',
@@ -440,20 +465,51 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 32,
   },
-  avatarText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '900',
-  },
   identityName: {
     color: '#3f3f46',
     flex: 1,
     fontSize: 12,
     fontWeight: '700',
   },
+  contentSafe: {
+    flex: 1,
+  },
   content: {
+    paddingBottom: 96,
     padding: 16,
-    paddingTop: 4,
+    paddingTop: 36,
+  },
+  bottomNav: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderColor: colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    position: 'absolute',
+    zIndex: 20,
+  },
+  bottomNavItem: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 44,
+    justifyContent: 'center',
+    width: 52,
+  },
+  bottomNavItemActive: {
+    backgroundColor: '#ecfdf5',
   },
   overlay: {
     flex: 1,

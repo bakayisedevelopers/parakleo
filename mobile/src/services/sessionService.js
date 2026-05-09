@@ -234,23 +234,3 @@ export async function submitSessionRating(session, role, payload) {
     await updateUserRatingSummary(session.studentId, 'asStudent', ratingEntry.overall).catch(() => null);
   }
 }
-
-export async function dismissSessionRating(session, role) {
-  const { db } = getFirebaseClients();
-  const ratingStatus = mergeRatingStatus(session?.ratingStatus, role, 'dismissed');
-  const batch = writeBatch(db);
-
-  batch.update(doc(db, 'sessions', session.id), {
-    ratingStatus,
-    updatedAt: serverTimestamp(),
-  });
-
-  if (session?.requestId) {
-    batch.update(doc(db, 'classRequests', session.requestId), {
-      [`ratingStatus.${role}`]: 'dismissed',
-      updatedAt: serverTimestamp(),
-    });
-  }
-
-  await batch.commit();
-}

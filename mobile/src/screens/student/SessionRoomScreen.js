@@ -1,24 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Linking,
-  Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { StudentRtcSessionView } from '../../components/student/StudentRtcSessionView';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { FormField } from '../../components/ui/FormField';
 import { ErrorState, LoadingState } from '../../components/ui/States';
-import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { getFirebaseClients, getFunctionEndpoint } from '../../firebase/config';
-import { subscribeToRequestById } from '../../services/classRequestService';
 import {
   endSession,
   finalizeSessionClosure,
@@ -26,9 +22,6 @@ import {
   subscribeToSessionById,
   updateSession,
 } from '../../services/sessionService';
-import { colors } from '../../theme/colors';
-import { formatRand } from '../../utils/pricing';
-import { getSessionStatusMeta } from '../../utils/sessionStatus';
 
 function useLiveSeconds(startAt) {
   const [now, setNow] = useState(Date.now());
@@ -38,10 +31,7 @@ function useLiveSeconds(startAt) {
     return () => clearInterval(timer);
   }, []);
 
-  if (!startAt) {
-    return 0;
-  }
-
+  if (!startAt) return 0;
   return Math.max(0, Math.floor((now - Number(startAt)) / 1000));
 }
 
@@ -55,10 +45,7 @@ function useBillableSeconds(session, isBillableActive) {
 
   const accumulatedSeconds = Math.max(0, Number(session?.billedSeconds || 0));
   const activeStartedAt = Number(session?.billingStartedAt || 0);
-
-  if (!isBillableActive || !activeStartedAt) {
-    return accumulatedSeconds;
-  }
+  if (!isBillableActive || !activeStartedAt) return accumulatedSeconds;
 
   return accumulatedSeconds + Math.max(0, Math.floor((now - activeStartedAt) / 1000));
 }
@@ -68,81 +55,99 @@ function formatDuration(seconds) {
   const hours = Math.floor(safeSeconds / 3600);
   const minutes = Math.floor((safeSeconds % 3600) / 60).toString().padStart(2, '0');
   const remainingSeconds = Math.floor(safeSeconds % 60).toString().padStart(2, '0');
-
-  if (hours > 0) {
-    return `${String(hours).padStart(2, '0')}:${minutes}:${remainingSeconds}`;
-  }
-
+  if (hours > 0) return `${String(hours).padStart(2, '0')}:${minutes}:${remainingSeconds}`;
   return `${minutes}:${remainingSeconds}`;
 }
 
-function FloatingBadge({ children, tone = 'default' }) {
+function StageBadge({ children, tone = 'default', icon = null }) {
   return (
     <View style={[
-      styles.floatingBadge,
-      tone === 'success' && styles.floatingBadgeSuccess,
-      tone === 'warning' && styles.floatingBadgeWarning,
-      tone === 'danger' && styles.floatingBadgeDanger,
+      styles.badge,
+      tone === 'success' && styles.badgeSuccess,
+      tone === 'warning' && styles.badgeWarning,
+      tone === 'danger' && styles.badgeDanger,
+      tone === 'info' && styles.badgeInfo,
     ]}
     >
-      <Text style={[
-        styles.floatingBadgeText,
-        tone === 'success' && styles.floatingBadgeTextSuccess,
-        tone === 'warning' && styles.floatingBadgeTextWarning,
-        tone === 'danger' && styles.floatingBadgeTextDanger,
-      ]}
-      >
-        {children}
-      </Text>
+      <View style={styles.badgeInner}>
+        {icon ? (
+          <Ionicons
+            color={
+              tone === 'success'
+                ? '#047857'
+                : tone === 'warning'
+                  ? '#b45309'
+                  : tone === 'danger'
+                    ? '#be123c'
+                    : tone === 'info'
+                      ? '#0369a1'
+                      : '#27272a'
+            }
+            name={icon}
+            size={13}
+          />
+        ) : null}
+        <Text style={[
+          styles.badgeText,
+          tone === 'success' && styles.badgeTextSuccess,
+          tone === 'warning' && styles.badgeTextWarning,
+          tone === 'danger' && styles.badgeTextDanger,
+          tone === 'info' && styles.badgeTextInfo,
+        ]}
+        >
+          {children}
+        </Text>
+      </View>
     </View>
   );
 }
 
-function AttachmentButtons({ attachments }) {
-  if (!attachments.length) {
-    return (
-      <Text style={styles.metaCopy}>No uploaded attachments were linked to this request.</Text>
-    );
-  }
-
+function RailIconButton({ icon, label, onPress, active = false, danger = false }) {
   return (
-    <View style={styles.attachmentList}>
-      {attachments.map((attachment, index) => (
-        <Button
-          key={`${attachment?.fileName || 'attachment'}-${index}`}
-          onPress={() => attachment?.downloadUrl && Linking.openURL(attachment.downloadUrl).catch(() => null)}
-          style={styles.attachmentButton}
-          variant="secondary"
-        >
-          {attachment?.fileName || `Attachment ${index + 1}`}
-        </Button>
-      ))}
-    </View>
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[
+        styles.railIconButton,
+        active && styles.railIconButtonActive,
+        danger && styles.railIconButtonDanger,
+      ]}
+    >
+      <Ionicons
+        color={danger ? '#ffffff' : (active ? '#047857' : '#27272a')}
+        name={icon}
+        size={19}
+      />
+    </Pressable>
   );
 }
 
 export function SessionRoomScreen({ route, navigate, goBack }) {
   const { user } = useAuth();
   const { height, width } = useWindowDimensions();
+  const isPortraitMobile = height > width;
+
   const bridgeRef = useRef(null);
   const joinAttemptedRef = useRef(false);
   const extensionPromptShownRef = useRef(false);
   const autoEndingRef = useRef(false);
+  const controlsTimeoutRef = useRef(null);
 
   const sessionId = route?.params?.sessionId || '';
   const [session, setSession] = useState(null);
-  const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [idToken, setIdToken] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
+  const [showStudentControls, setShowStudentControls] = useState(true);
   const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelError, setCancelError] = useState('');
   const [hasAcceptedExtension, setHasAcceptedExtension] = useState(false);
   const [graceEndsAtMs, setGraceEndsAtMs] = useState(null);
   const [rtcState, setRtcState] = useState({
-    connectionMessage: 'Preparing live class...',
+    connectionMessage: 'Connecting...',
     networkError: '',
     isMuted: false,
     isPeerConnected: false,
@@ -150,40 +155,31 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     hasLiveRemoteScreenTrack: false,
   });
 
-  const isPortrait = height > width;
-  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'claxi-bakayise';
   const iceEndpoint = getFunctionEndpoint('getIceConfig');
-  const statusMeta = getSessionStatusMeta(session?.status);
-  const snapshot = session?.pricingSnapshot || request?.pricingSnapshot || null;
+  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'claxi-bakayise';
+  const selectedDurationMinutes = Number(session?.durationMinutes || session?.pricingSnapshot?.durationMinutes || 0);
+  const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
+  const graceRemaining = Math.max(0, Math.ceil(((session?.joinGraceEndsAt || 0) - Date.now()) / 1000));
   const callSeconds = useLiveSeconds(session?.callStartedAt);
-  const isBillableActive = session?.status === 'in_progress'
+  const isStudentBillableActive = session?.status === 'in_progress'
     && rtcState.isPeerConnected
     && rtcState.isRemoteScreenSharing
     && rtcState.hasLiveRemoteScreenTrack;
-  const billedSeconds = useBillableSeconds(session, isBillableActive);
-  const selectedDurationMinutes = Number(
-    session?.durationMinutes
-    || session?.pricingSnapshot?.durationMinutes
-    || request?.durationMinutes
-    || request?.pricingSnapshot?.durationMinutes
-    || 0,
-  );
-  const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
+  const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
   const extensionGraceRemainingSeconds = hasAcceptedExtension && graceEndsAtMs
     ? Math.max(0, Math.ceil((graceEndsAtMs - Date.now()) / 1000))
     : 0;
 
-  const attachments = useMemo(() => {
-    if (!request) {
-      return [];
+  const connectionTone = useMemo(() => {
+    const networkError = String(rtcState.networkError || '');
+    const connectionMessage = String(rtcState.connectionMessage || '');
+    if (networkError) return 'danger';
+    if (!connectionMessage) return 'default';
+    if (connectionMessage.toLowerCase().includes('connected') || connectionMessage.toLowerCase().includes('live')) {
+      return 'success';
     }
-
-    if (Array.isArray(request.attachments) && request.attachments.length) {
-      return request.attachments;
-    }
-
-    return request.attachment?.downloadUrl ? [request.attachment] : [];
-  }, [request]);
+    return 'info';
+  }, [rtcState.connectionMessage, rtcState.networkError]);
 
   useEffect(() => subscribeToSessionById(
     sessionId,
@@ -198,92 +194,61 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   ), [sessionId]);
 
   useEffect(() => {
-    if (!session?.requestId) {
-      setRequest(null);
-      return undefined;
-    }
-
-    return subscribeToRequestById(
-      session.requestId,
-      setRequest,
-      () => setRequest(null),
-    );
-  }, [session?.requestId]);
-
-  useEffect(() => {
     let active = true;
-
     getFirebaseClients().auth.currentUser?.getIdToken?.()
       .then((token) => {
-        if (active) {
-          setIdToken(token || '');
-        }
+        if (active) setIdToken(token || '');
       })
       .catch(() => {
-        if (active) {
-          setIdToken('');
-        }
+        if (active) setIdToken('');
       });
-
     return () => {
       active = false;
     };
   }, [session?.id, user?.uid]);
 
   useEffect(() => {
-    if (!session?.id) {
-      joinAttemptedRef.current = false;
-      return;
-    }
+    joinAttemptedRef.current = false;
+    setShowStudentControls(true);
+    setHasAcceptedExtension(false);
+    setGraceEndsAtMs(null);
+    extensionPromptShownRef.current = false;
+    autoEndingRef.current = false;
+  }, [session?.id]);
 
-    if (session.status !== 'waiting_student') {
-      return;
-    }
-
-    if (joinAttemptedRef.current) {
-      return;
-    }
+  useEffect(() => {
+    if (!session?.id) return;
+    if (session.status !== 'waiting_student') return;
+    if (joinAttemptedRef.current) return;
 
     joinAttemptedRef.current = true;
-
     const defaultMethod = (user?.paymentMethods || []).find((method) => method?.isDefault)
       || user?.paymentMethods?.[0]
       || null;
 
-    joinSessionAsStudent(
-      session,
-      defaultMethod?.id || '',
-      defaultMethod?.last4 || '',
-    ).catch((joinError) => {
-      setError(joinError.message || 'Unable to join this session.');
-      joinAttemptedRef.current = false;
-    });
+    joinSessionAsStudent(session, defaultMethod?.id || '', defaultMethod?.last4 || '')
+      .catch((joinError) => {
+        setError(joinError.message || 'Unable to join this session.');
+        joinAttemptedRef.current = false;
+      });
   }, [session, user?.paymentMethods]);
 
   useEffect(() => {
-    if (!session?.id || session.status !== 'in_progress') {
-      return;
-    }
+    if (!session?.id) return;
+    if (!['waiting_student', 'in_progress'].includes(session.status)) return;
 
-    const syncBillingClock = async () => {
+    const syncBillableClock = async () => {
       const accumulatedSeconds = Math.max(0, Number(session.billedSeconds || 0));
       const activeStartedAt = Number(session.billingStartedAt || 0);
-
-      if (isBillableActive) {
-        if (activeStartedAt) {
-          return;
-        }
-
+      if (isStudentBillableActive) {
+        if (activeStartedAt) return;
         await updateSession(session.id, {
           billingStartedAt: Date.now(),
           billedSeconds: accumulatedSeconds,
         });
         return;
       }
-
-      if (!activeStartedAt) {
-        return;
-      }
+      if (!activeStartedAt) return;
 
       const nextBilledSeconds = accumulatedSeconds + Math.max(0, Math.floor((Date.now() - activeStartedAt) / 1000));
       await updateSession(session.id, {
@@ -292,11 +257,11 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
       });
     };
 
-    syncBillingClock().catch((billingError) => {
+    syncBillableClock().catch((billingError) => {
       setError(billingError.message || 'Unable to update billable time.');
     });
   }, [
-    isBillableActive,
+    isStudentBillableActive,
     session?.billingStartedAt,
     session?.billedSeconds,
     session?.id,
@@ -304,16 +269,11 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   ]);
 
   useEffect(() => {
-    if (session?.status !== 'in_progress') {
-      return;
-    }
-
-    if (!selectedDurationSeconds || !session?.billingStartedAt) {
-      return;
-    }
+    if (!session) return;
+    if (session.status !== 'in_progress') return;
+    if (!selectedDurationSeconds || !session.billingStartedAt) return;
 
     const warningThreshold = Math.max(0, selectedDurationSeconds - 60);
-
     if (!extensionPromptShownRef.current && billedSeconds >= warningThreshold) {
       extensionPromptShownRef.current = true;
       Alert.alert(
@@ -334,20 +294,28 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
     if (!hasAcceptedExtension && billedSeconds >= selectedDurationSeconds && !autoEndingRef.current) {
       autoEndingRef.current = true;
-      endSession(session)
-        .catch((nextError) => {
-          autoEndingRef.current = false;
-          setError(nextError.message || 'Unable to end session at the selected time.');
-        });
+      endSession(session).catch((nextError) => {
+        autoEndingRef.current = false;
+        setError(nextError.message || 'Unable to end session at selected time.');
+      });
     }
   }, [billedSeconds, hasAcceptedExtension, selectedDurationSeconds, session]);
 
-  useEffect(() => {
-    return () => {
-      if (bridgeRef.current) {
-        bridgeRef.current.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.close && window.ClaxiSessionBridge.close(); true;');
-      }
-    };
+  useEffect(() => () => {
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    if (bridgeRef.current) {
+      bridgeRef.current.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.close && window.ClaxiSessionBridge.close(); true;');
+    }
+  }, []);
+
+  const revealStudentControls = useCallback(() => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    setShowStudentControls(true);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowStudentControls(false);
+    }, 5000);
   }, []);
 
   const handleBridgeMessage = (event) => {
@@ -372,35 +340,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     bridgeRef.current?.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.close && window.ClaxiSessionBridge.close(); true;');
   };
 
-  const handleEndSession = () => {
-    if (!session?.id || actionBusy) {
-      return;
-    }
-
-    Alert.alert(
-      'End this class?',
-      'This will finalize billing and close the live classroom.',
-      [
-        { text: 'Keep class open', style: 'cancel' },
-        {
-          text: 'End class',
-          style: 'destructive',
-          onPress: async () => {
-            setActionBusy(true);
-            try {
-              closeRtcBridge();
-              await endSession(session);
-            } catch (nextError) {
-              setError(nextError.message || 'Unable to end this class.');
-            } finally {
-              setActionBusy(false);
-            }
-          },
-        },
-      ],
-    );
-  };
-
   const handleOpenCancel = () => {
     setCancelError('');
     setCancelReason('');
@@ -410,23 +349,21 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   const handleConfirmCancel = async () => {
     const trimmedReason = String(cancelReason || '').trim();
     if (!trimmedReason) {
-      setCancelError('Please enter a cancellation reason.');
+      setCancelError('Please enter a cancellation reason before canceling the class.');
       return;
     }
-
-    if (!session?.id || actionBusy) {
-      return;
-    }
+    if (!session?.id || actionBusy) return;
 
     setActionBusy(true);
     try {
       closeRtcBridge();
       await finalizeSessionClosure(session, {
-        closureType: session.status === 'waiting_student' ? 'canceled' : 'canceled_during',
+        closureType: 'canceled_during',
         canceledBy: 'student',
         canceledReason: trimmedReason,
       });
       setIsCancelOpen(false);
+      goBack('Sessions');
     } catch (nextError) {
       setCancelError(nextError.message || 'Unable to cancel this class.');
     } finally {
@@ -434,25 +371,57 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     }
   };
 
-  if (loading) {
-    return <LoadingState label="Loading session room" />;
-  }
+  const handleEndSession = async () => {
+    if (!session?.id || actionBusy) return;
+    setActionBusy(true);
+    try {
+      closeRtcBridge();
+      await endSession(session);
+      goBack('Sessions');
+    } catch (nextError) {
+      setError(nextError.message || 'Unable to end this class.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-  if (error && !session) {
-    return <ErrorState message={error} />;
-  }
+  const handleJoinNow = async () => {
+    if (!session || actionBusy) return;
+    const defaultMethod = (user?.paymentMethods || []).find((method) => method?.isDefault)
+      || user?.paymentMethods?.[0]
+      || null;
+    setActionBusy(true);
+    try {
+      await joinSessionAsStudent(session, defaultMethod?.id || '', defaultMethod?.last4 || '');
+    } catch (nextError) {
+      setError(nextError.message || 'Unable to join this session.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-  if (!session) {
-    return <ErrorState title="Session not found" message="We could not find this session room entry." />;
-  }
+  if (loading) return <LoadingState label="Loading session room" />;
+  if (error && !session) return <ErrorState message={error} />;
+  if (!session) return <ErrorState title="Session not found" message="Session not found or no access." />;
 
-  const statusLabel = statusMeta.label;
-  const connectionCopy = rtcState.networkError || rtcState.connectionMessage || 'Preparing live class...';
+  const connectionCopy = rtcState.connectionMessage || 'Connecting...';
+  const showOverlay = showStudentControls;
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.screen}>
-        <View style={styles.stage}>
+    <View style={styles.safe}>
+      <View style={styles.root}>
+        {isPortraitMobile ? (
+          <View style={styles.rotateOverlay}>
+            <Card style={styles.rotateCard}>
+              <Text style={styles.rotateTitle}>Rotate your device</Text>
+              <Text style={styles.rotateCopy}>
+                This tutoring room is best viewed in landscape so the board or shared screen can fill the page clearly.
+              </Text>
+            </Card>
+          </View>
+        ) : null}
+
+        <Pressable onPress={revealStudentControls} style={styles.stage}>
           {session.status === 'in_progress' && idToken ? (
             <StudentRtcSessionView
               bridgeRef={bridgeRef}
@@ -464,133 +433,94 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
             />
           ) : (
             <View style={styles.stageFallback}>
-              <Card style={styles.stageFallbackCard}>
-                <Text style={styles.stageKicker}>Live classroom</Text>
-                <Text style={styles.stageTitle}>{session.topic || session.subject || 'Class session'}</Text>
-                <Text style={styles.stageCopy}>
-                  {session.status === 'waiting_student'
-                    ? 'Joining the live classroom now.'
-                    : 'This session is not currently live. Review the latest session state and linked request details below.'}
+              <Card style={styles.fallbackCard}>
+                <Text style={styles.fallbackTitle}>No screen sharing has started yet.</Text>
+                <Text style={styles.fallbackCopy}>
+                  The tutor&apos;s shared screen will appear here once sharing starts.
                 </Text>
               </Card>
             </View>
           )}
 
-          <View style={styles.topOverlay}>
-            <View style={styles.overlayHeader}>
-              <Pressable accessibilityRole="button" onPress={() => goBack('Sessions')} style={styles.exitButton}>
-                <Text style={styles.exitButtonText}>Back</Text>
-              </Pressable>
-              <View style={styles.overlayTitleWrap}>
-                <Text style={styles.overlayKicker}>Claxi session room</Text>
-                <Text style={styles.overlayTitle} numberOfLines={1}>
-                  {session.topic || session.subject || 'Class session'}
-                </Text>
-              </View>
-              <StatusBadge label={statusLabel} tone={statusMeta.tone} />
-            </View>
-
+          <View style={[styles.topOverlay, !showOverlay && styles.hiddenOverlay]}>
             <View style={styles.badgeWrap}>
-              <FloatingBadge>Call {formatDuration(callSeconds)}</FloatingBadge>
-              <FloatingBadge tone={isBillableActive ? 'success' : 'warning'}>
+              <StageBadge icon="time-outline">Call length {formatDuration(callSeconds)}</StageBadge>
+              <StageBadge icon="cash-outline" tone={isStudentBillableActive ? 'success' : 'warning'}>
                 Billable {formatDuration(billedSeconds)}
-              </FloatingBadge>
-              <FloatingBadge tone={rtcState.networkError ? 'danger' : (rtcState.isPeerConnected ? 'success' : 'default')}>
-                {rtcState.networkError ? 'Connection issue' : connectionCopy}
-              </FloatingBadge>
-              <FloatingBadge tone={rtcState.isRemoteScreenSharing ? 'success' : 'warning'}>
-                {rtcState.isRemoteScreenSharing ? 'Screen live' : 'Waiting for tutor share'}
-              </FloatingBadge>
+              </StageBadge>
+              <StageBadge icon="wifi-outline" tone={connectionTone}>
+                {connectionCopy}
+              </StageBadge>
+              <StageBadge
+                icon={rtcState.networkError ? 'alert-circle-outline' : (rtcState.isRemoteScreenSharing ? 'desktop-outline' : 'hourglass-outline')}
+                tone={rtcState.networkError ? 'danger' : (rtcState.isRemoteScreenSharing ? 'success' : 'warning')}
+              >
+                {rtcState.networkError
+                  ? 'Connection issue'
+                  : rtcState.isRemoteScreenSharing
+                    ? 'Screen live'
+                    : 'Waiting for tutor to share'}
+              </StageBadge>
+              {session.status === 'waiting_student' ? (
+                <StageBadge icon="time-outline" tone="warning">Join window {graceRemaining}s</StageBadge>
+              ) : null}
               {hasAcceptedExtension ? (
-                <FloatingBadge tone={extensionGraceRemainingSeconds > 0 ? 'success' : 'default'}>
+                <StageBadge icon="time-outline" tone={extensionGraceRemainingSeconds > 0 ? 'success' : 'info'}>
                   {extensionGraceRemainingSeconds > 0
-                    ? `Grace ${extensionGraceRemainingSeconds}s`
+                    ? `Grace period ${extensionGraceRemainingSeconds}s`
                     : 'Overtime billed at locked rate'}
-                </FloatingBadge>
+                </StageBadge>
               ) : null}
             </View>
           </View>
 
-          {isPortrait ? (
-            <View style={styles.rotateOverlay}>
-              <Card style={styles.rotateCard}>
-                <Text style={styles.rotateTitle}>Rotate your device</Text>
-                <Text style={styles.rotateCopy}>
-                  This live classroom is designed for landscape so the tutor screen can fill the stage clearly.
-                </Text>
-              </Card>
+          <Pressable accessibilityRole="button" onPress={() => goBack('Sessions')} style={[styles.backButton, !showOverlay && styles.hiddenOverlay]}>
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+
+          <View style={[styles.controlsRailWrap, !showOverlay && styles.hiddenOverlay]}>
+            <View style={styles.controlsRail}>
+              <RailIconButton
+                active={!rtcState.isMuted}
+                icon={rtcState.isMuted ? 'mic-off-outline' : 'mic-outline'}
+                label={rtcState.isMuted ? 'Unmute' : 'Mute'}
+                onPress={handleToggleMute}
+              />
+              <RailIconButton icon="close-outline" label="Cancel" onPress={handleOpenCancel} />
+              <RailIconButton danger icon="call-outline" label={actionBusy ? 'Working' : 'End session'} onPress={handleEndSession} />
+            </View>
+          </View>
+
+          {session.status === 'waiting_student' ? (
+            <View style={[styles.joinNowWrap, !showOverlay && styles.hiddenOverlay]}>
+              <Button disabled={actionBusy} onPress={handleJoinNow} style={styles.joinNowButton}>
+                {actionBusy ? 'Joining...' : 'Join now'}
+              </Button>
             </View>
           ) : null}
+        </Pressable>
 
-          <View style={styles.controlsRail}>
-            <Pressable accessibilityRole="button" onPress={handleToggleMute} style={styles.controlButton}>
-              <Text style={styles.controlButtonText}>{rtcState.isMuted ? 'Unmute' : 'Mute'}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={handleOpenCancel} style={styles.controlButton}>
-              <Text style={styles.controlButtonText}>Cancel</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={handleEndSession} style={[styles.controlButton, styles.controlButtonDanger]}>
-              <Text style={[styles.controlButtonText, styles.controlButtonTextDanger]}>
-                {actionBusy ? 'Working...' : 'End'}
-              </Text>
-            </Pressable>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
           </View>
-        </View>
+        ) : null}
 
-        <View style={styles.metaSheet}>
-          <Card style={styles.metaCard}>
-            <Text style={styles.metaTitle}>Billing snapshot</Text>
-            <Text style={styles.metaValue}>
-              {snapshot
-                ? `Base ${formatRand(snapshot.adjustedBaseAmount ?? snapshot.baseAmount ?? 0)} | Rate ${formatRand(snapshot.adjustedRatePerMinute ?? snapshot.ratePerMinute ?? 0)}`
-                : 'Pricing loads from the linked request.'}
-            </Text>
-            <Text style={styles.metaCopy}>
-              Selected duration: {selectedDurationMinutes ? `${selectedDurationMinutes} min` : 'TBD'}
-            </Text>
-          </Card>
-
-          <Card style={styles.metaCard}>
-            <Text style={styles.metaTitle}>Tutor and request</Text>
-            <Text style={styles.metaValue}>{session.tutorName || session.tutorId || 'Tutor pending'}</Text>
-            <Text style={styles.metaCopy}>
-              {request?.id ? 'Request tracking and class details stay linked from this live room.' : 'Linked request details load when available.'}
-            </Text>
-            {request?.id ? (
-              <Button
-                onPress={() => navigate({ key: 'RequestStatus', params: { requestId: request.id, parentTab: 'Requests' } })}
-                style={styles.metaAction}
-                variant="secondary"
-              >
-                View request status
-              </Button>
-            ) : null}
-          </Card>
-
-          <Card style={styles.metaCard}>
-            <Text style={styles.metaTitle}>Uploaded attachments</Text>
-            <AttachmentButtons attachments={attachments} />
-          </Card>
-        </View>
-
-        <Modal animationType="fade" transparent visible={isCancelOpen} onRequestClose={() => setIsCancelOpen(false)}>
+        {isCancelOpen ? (
           <View style={styles.modalOverlay}>
             <Card style={styles.modalCard}>
               <Text style={styles.modalTitle}>Cancel this class</Text>
-              <Text style={styles.modalCopy}>
-                Tell us why you want to cancel this class. The same reason is written into the live production session record.
-              </Text>
-              <FormField
-                error={cancelError}
-                inputStyle={styles.modalField}
-                label="Cancellation reason"
+              <Text style={styles.modalCopy}>Please tell us why you want to cancel this class.</Text>
+              <TextInput
                 multiline
                 numberOfLines={4}
                 onChangeText={setCancelReason}
                 placeholder="Enter cancellation reason"
+                style={styles.modalInput}
                 textAlignVertical="top"
                 value={cancelReason}
               />
+              {cancelError ? <Text style={styles.modalError}>{cancelError}</Text> : null}
               <View style={styles.modalActions}>
                 <Button onPress={() => setIsCancelOpen(false)} style={styles.modalButton} variant="secondary">
                   Keep class open
@@ -601,255 +531,256 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
               </View>
             </Card>
           </View>
-        </Modal>
+        ) : null}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#ffffff',
   },
-  screen: {
+  root: {
+    backgroundColor: '#ffffff',
     flex: 1,
-    backgroundColor: '#000000',
   },
   stage: {
-    flex: 1,
     backgroundColor: '#000000',
+    flex: 1,
     overflow: 'hidden',
+    position: 'relative',
   },
   stageFallback: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    backgroundColor: '#000000',
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
   },
-  stageFallbackCard: {
-    backgroundColor: 'rgba(17,24,39,0.88)',
-    borderColor: 'rgba(255,255,255,0.12)',
+  fallbackCard: {
+    alignItems: 'center',
     maxWidth: 420,
     width: '100%',
   },
-  stageKicker: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 11,
-    fontWeight: '900',
-    textTransform: 'uppercase',
+  fallbackTitle: {
+    color: '#18181b',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
   },
-  stageTitle: {
-    color: '#ffffff',
-    fontSize: 28,
-    fontWeight: '900',
+  fallbackCopy: {
+    color: '#52525b',
+    fontSize: 14,
+    lineHeight: 20,
     marginTop: 8,
-  },
-  stageCopy: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 12,
+    textAlign: 'center',
   },
   topOverlay: {
-    left: 0,
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    left: 72,
     position: 'absolute',
-    right: 0,
-    top: 0,
+    right: 12,
+    top: 12,
+    zIndex: 20,
   },
-  overlayHeader: {
+  hiddenOverlay: {
+    opacity: 0,
+  },
+  badgeWrap: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderColor: 'rgba(228,228,231,1)',
+    borderRadius: 22,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: 10,
+  },
+  badge: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e4e4e7',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  badgeInner: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
+    gap: 6,
   },
-  exitButton: {
+  badgeSuccess: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+  },
+  badgeWarning: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fde68a',
+  },
+  badgeDanger: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+  },
+  badgeInfo: {
+    backgroundColor: '#f0f9ff',
+    borderColor: '#bae6fd',
+  },
+  badgeText: {
+    color: '#27272a',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  badgeTextSuccess: {
+    color: '#047857',
+  },
+  badgeTextWarning: {
+    color: '#b45309',
+  },
+  badgeTextDanger: {
+    color: '#be123c',
+  },
+  badgeTextInfo: {
+    color: '#0369a1',
+  },
+  backButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.95)',
-    borderColor: 'rgba(228,228,231,0.9)',
+    borderColor: '#e4e4e7',
     borderRadius: 18,
     borderWidth: 1,
     height: 48,
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    left: 12,
+    paddingHorizontal: 14,
+    position: 'absolute',
+    top: 12,
+    zIndex: 30,
   },
-  exitButtonText: {
-    color: colors.text,
+  backButtonText: {
+    color: '#27272a',
     fontSize: 13,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  overlayTitleWrap: {
-    flex: 1,
-  },
-  overlayKicker: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 11,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  overlayTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '900',
-    marginTop: 2,
-  },
-  badgeWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  floatingBadge: {
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderColor: 'rgba(228,228,231,0.88)',
-    borderRadius: 18,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  floatingBadgeSuccess: {
-    backgroundColor: 'rgba(16,185,129,0.16)',
-    borderColor: 'rgba(16,185,129,0.4)',
-  },
-  floatingBadgeWarning: {
-    backgroundColor: 'rgba(245,158,11,0.16)',
-    borderColor: 'rgba(245,158,11,0.36)',
-  },
-  floatingBadgeDanger: {
-    backgroundColor: 'rgba(244,63,94,0.16)',
-    borderColor: 'rgba(244,63,94,0.36)',
-  },
-  floatingBadgeText: {
-    color: colors.text,
-    fontSize: 12,
     fontWeight: '800',
   },
-  floatingBadgeTextSuccess: {
-    color: '#d1fae5',
+  controlsRailWrap: {
+    bottom: 16,
+    left: 16,
+    position: 'absolute',
+    zIndex: 30,
   },
-  floatingBadgeTextWarning: {
-    color: '#fef3c7',
+  controlsRail: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderColor: '#e4e4e7',
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 8,
+    padding: 8,
   },
-  floatingBadgeTextDanger: {
-    color: '#ffe4e6',
+  railIconButton: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderColor: '#e4e4e7',
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  railIconButtonActive: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#6ee7b7',
+  },
+  railIconButtonDanger: {
+    backgroundColor: '#f43f5e',
+    borderColor: '#f43f5e',
+  },
+  joinNowWrap: {
+    bottom: 16,
+    position: 'absolute',
+    right: 16,
+    zIndex: 30,
+  },
+  joinNowButton: {
+    borderRadius: 16,
+    minHeight: 46,
+    paddingHorizontal: 18,
+  },
+  errorBanner: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  errorText: {
+    color: '#be123c',
+    fontSize: 12,
+    fontWeight: '600',
   },
   rotateOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.44)',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
+    zIndex: 70,
   },
   rotateCard: {
     maxWidth: 360,
+    width: '100%',
   },
   rotateTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '900',
+    color: '#18181b',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   rotateCopy: {
-    color: colors.muted,
+    color: '#52525b',
     fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-  },
-  controlsRail: {
-    bottom: 18,
-    flexDirection: 'row',
-    gap: 10,
-    left: 16,
-    position: 'absolute',
-  },
-  controlButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderColor: 'rgba(228,228,231,0.9)',
-    borderRadius: 22,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 56,
-    minWidth: 88,
-    paddingHorizontal: 18,
-  },
-  controlButtonDanger: {
-    backgroundColor: '#f43f5e',
-    borderColor: '#f43f5e',
-  },
-  controlButtonText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  controlButtonTextDanger: {
-    color: '#ffffff',
-  },
-  metaSheet: {
-    backgroundColor: '#ffffff',
-    gap: 12,
-    padding: 16,
-  },
-  metaCard: {
-    gap: 10,
-  },
-  metaTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-  metaValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 21,
-  },
-  metaCopy: {
-    color: colors.muted,
-    fontSize: 13,
     lineHeight: 20,
-  },
-  metaAction: {
-    marginTop: 6,
-  },
-  attachmentList: {
-    gap: 10,
-  },
-  attachmentButton: {
-    alignSelf: 'flex-start',
+    marginTop: 8,
+    textAlign: 'center',
   },
   modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.4)',
-    flex: 1,
     justifyContent: 'center',
     padding: 16,
+    zIndex: 120,
   },
   modalCard: {
-    gap: 14,
+    gap: 12,
     maxWidth: 460,
     width: '100%',
   },
   modalTitle: {
-    color: colors.text,
+    color: '#18181b',
     fontSize: 24,
     fontWeight: '900',
   },
   modalCopy: {
-    color: colors.muted,
+    color: '#52525b',
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
   },
-  modalField: {
-    minHeight: 120,
-    paddingTop: 12,
+  modalInput: {
+    borderColor: '#d4d4d8',
+    borderRadius: 12,
+    borderWidth: 1,
+    color: '#18181b',
+    minHeight: 110,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  modalError: {
+    color: '#be123c',
+    fontSize: 12,
+    fontWeight: '600',
   },
   modalActions: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   modalButton: {
     flex: 1,
