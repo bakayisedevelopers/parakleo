@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   BadgeDollarSign,
   Clock3,
@@ -1100,12 +1100,6 @@ export default function SessionRoomPage() {
       <div className="flex min-h-screen items-center justify-center bg-white p-6">
         <div className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-xl">
           <p className="text-sm text-zinc-600">Session not found or no access.</p>
-          <Link
-            to="/app"
-            className="mt-4 inline-flex rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white"
-          >
-            Back to dashboard
-          </Link>
         </div>
       </div>
     );

@@ -474,10 +474,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
             </View>
           </View>
 
-          <Pressable accessibilityRole="button" onPress={() => goBack('Sessions')} style={[styles.backButton, !showOverlay && styles.hiddenOverlay]}>
-            <Text style={styles.backButtonText}>Back</Text>
-          </Pressable>
-
           <View style={[styles.controlsRailWrap, !showOverlay && styles.hiddenOverlay]}>
             <View style={styles.controlsRail}>
               <RailIconButton
@@ -641,25 +637,6 @@ const styles = StyleSheet.create({
   },
   badgeTextInfo: {
     color: '#0369a1',
-  },
-  backButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderColor: '#e4e4e7',
-    borderRadius: 18,
-    borderWidth: 1,
-    height: 48,
-    justifyContent: 'center',
-    left: 12,
-    paddingHorizontal: 14,
-    position: 'absolute',
-    top: 12,
-    zIndex: 30,
-  },
-  backButtonText: {
-    color: '#27272a',
-    fontSize: 13,
-    fontWeight: '800',
   },
   controlsRailWrap: {
     bottom: 16,
