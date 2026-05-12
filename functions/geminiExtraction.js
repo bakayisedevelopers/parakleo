@@ -245,6 +245,7 @@ async function extractStudentAttachmentWithGemini25Flash({ images, firebaseConfi
 
   return {
     parsedContent,
+    rawOutput: outputText,
     usage: result.response.usageMetadata || null,
   };
 }

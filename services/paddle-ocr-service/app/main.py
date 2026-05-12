@@ -2,6 +2,7 @@ import base64
 import io
 import os
 import time
+import traceback
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -10,15 +11,27 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from PIL import Image
 from paddleocr import PPStructure, PaddleOCR
+import paddleocr as paddleocr_pkg
 
 API_KEY = os.getenv('PADDLE_OCR_SERVICE_API_KEY', '').strip()
 MAX_PDF_PAGES = int(os.getenv('PADDLE_OCR_MAX_PDF_PAGES', '10'))
 MAX_IMAGE_BYTES = int(os.getenv('PADDLE_OCR_MAX_IMAGE_BYTES', str(20 * 1024 * 1024)))
+PADDLE_OCR_BASE_DIR = os.getenv('PADDLE_OCR_BASE_DIR', '/tmp/.paddleocr').strip() or '/tmp/.paddleocr'
+PP_STRUCTURE_VERSION = os.getenv('PADDLE_PP_STRUCTURE_VERSION', 'PP-StructureV3').strip()
+PP_STRUCTURE_RECOVERY = os.getenv('PADDLE_PP_STRUCTURE_RECOVERY', 'false').strip().lower() == 'true'
+PP_STRUCTURE_LAYOUT = os.getenv('PADDLE_PP_STRUCTURE_LAYOUT', 'true').strip().lower() != 'false'
+PP_STRUCTURE_TABLE = os.getenv('PADDLE_PP_STRUCTURE_TABLE', 'true').strip().lower() != 'false'
+PP_STRUCTURE_OCR = os.getenv('PADDLE_PP_STRUCTURE_OCR', 'true').strip().lower() != 'false'
+PP_STRUCTURE_RETURN_TABLE_OCR = os.getenv('PADDLE_PP_RETURN_OCR_IN_TABLE', 'true').strip().lower() != 'false'
 
 app = FastAPI(title='claxi-paddle-ocr-service')
 
+os.makedirs(PADDLE_OCR_BASE_DIR, exist_ok=True)
+os.makedirs('/tmp/.cache', exist_ok=True)
+
 ocr_engine: Optional[PaddleOCR] = None
 pp_structure: Optional[PPStructure] = None
+pp_structure_runtime_version: str = 'unknown'
 
 
 class ExtractRequest(BaseModel):
@@ -30,11 +43,32 @@ class ExtractRequest(BaseModel):
 
 
 def get_engines() -> tuple[PaddleOCR, PPStructure]:
-    global ocr_engine, pp_structure
+    global ocr_engine, pp_structure, pp_structure_runtime_version
     if ocr_engine is None:
-        ocr_engine = PaddleOCR(use_angle_cls=True, lang='en')
+        ocr_engine = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
     if pp_structure is None:
-        pp_structure = PPStructure()
+        try:
+            pp_structure = PPStructure(
+                show_log=False,
+                lang='en',
+                layout=PP_STRUCTURE_LAYOUT,
+                table=PP_STRUCTURE_TABLE,
+                ocr=PP_STRUCTURE_OCR,
+                recovery=PP_STRUCTURE_RECOVERY,
+                structure_version=PP_STRUCTURE_VERSION,
+            )
+            pp_structure_runtime_version = PP_STRUCTURE_VERSION
+        except Exception:
+            # Paddle 2.9.1 can reject explicit structure_version values in some builds.
+            pp_structure = PPStructure(
+                show_log=False,
+                lang='en',
+                layout=PP_STRUCTURE_LAYOUT,
+                table=PP_STRUCTURE_TABLE,
+                ocr=PP_STRUCTURE_OCR,
+                recovery=PP_STRUCTURE_RECOVERY,
+            )
+            pp_structure_runtime_version = 'auto_default'
     return ocr_engine, pp_structure
 
 
@@ -148,7 +182,20 @@ def normalize_structured_regions(structured: Any) -> tuple[List[Dict[str, Any]],
 
 @app.get('/healthz')
 def healthz() -> Dict[str, Any]:
-    return {'ok': True}
+    return {
+        'ok': True,
+        'service': 'claxi-paddle-ocr-service',
+        'paddleocrVersion': getattr(paddleocr_pkg, '__version__', 'unknown'),
+        'structureConfig': {
+            'structureVersionRequested': PP_STRUCTURE_VERSION,
+            'structureVersionRuntime': pp_structure_runtime_version,
+            'layout': PP_STRUCTURE_LAYOUT,
+            'table': PP_STRUCTURE_TABLE,
+            'ocr': PP_STRUCTURE_OCR,
+            'recovery': PP_STRUCTURE_RECOVERY,
+            'returnOcrResultInTable': PP_STRUCTURE_RETURN_TABLE_OCR,
+        },
+    }
 
 
 @app.post('/extract')
@@ -178,7 +225,7 @@ def extract(req: ExtractRequest, x_api_key: Optional[str] = Header(default=None)
         for i, page_img in enumerate(pages_np):
             ocr_result = ocr.ocr(page_img, cls=True)
             page_text, page_confidence = normalize_ocr_lines(ocr_result)
-            structured = structure(page_img)
+            structured = structure(page_img, return_ocr_result_in_table=PP_STRUCTURE_RETURN_TABLE_OCR)
             visual_regions, tables, formulas, extracted_images, page_warnings = normalize_structured_regions(structured)
 
             if page_text:
@@ -199,6 +246,7 @@ def extract(req: ExtractRequest, x_api_key: Optional[str] = Header(default=None)
                 'visualRegions': visual_regions,
                 'tables': tables,
                 'formulas': formulas,
+                'ppStructureVersion': pp_structure_runtime_version,
                 'status': 'complete' if page_text else 'failed',
                 'success': bool(page_text),
             })
@@ -219,10 +267,20 @@ def extract(req: ExtractRequest, x_api_key: Optional[str] = Header(default=None)
             'formulas': all_formulas,
             'confidence': confidence,
             'provider': 'paddleocr_ppstructure',
+            'ppStructureVersionRequested': PP_STRUCTURE_VERSION,
+            'ppStructureVersionRuntime': pp_structure_runtime_version,
+            'structureConfig': {
+                'layout': PP_STRUCTURE_LAYOUT,
+                'table': PP_STRUCTURE_TABLE,
+                'ocr': PP_STRUCTURE_OCR,
+                'recovery': PP_STRUCTURE_RECOVERY,
+                'returnOcrResultInTable': PP_STRUCTURE_RETURN_TABLE_OCR,
+            },
             'warnings': warnings[:20],
             'elapsedMs': elapsed_ms,
         }
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f'Extraction failed: {type(error).__name__}') from error
+        details = ''.join(traceback.format_exception_only(type(error), error)).strip()
+        raise HTTPException(status_code=500, detail=f'Extraction failed: {type(error).__name__}: {details}') from error

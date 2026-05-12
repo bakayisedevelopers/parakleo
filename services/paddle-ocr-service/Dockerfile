@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PORT=8080
+ENV PADDLE_OCR_BASE_DIR=/tmp/.paddleocr
+ENV HOME=/tmp
 
 WORKDIR /app
 
@@ -13,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
+
+RUN mkdir -p /tmp/.paddleocr /tmp/.cache
 
 COPY app ./app
 

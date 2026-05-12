@@ -36,11 +36,16 @@ function estimateMinutesLocally({
 
   const estimatedMinutes = clampMinutes(score);
   const confidenceScore = Math.max(0.35, Math.min(0.92, 0.45 + (questionCount * 0.05) + (words > 80 ? 0.12 : 0) + (tableCount ? 0.06 : 0)));
+  const hasEnoughSignals = questionCount > 0 || words >= 25 || Number(marksCount || 0) > 0 || Number(tableCount || 0) > 0 || Number(figureCount || 0) > 0 || Number(formulaCount || 0) > 0;
+  const needsGeminiFallback = !hasEnoughSignals || confidenceScore < 0.5;
+  const fallbackReason = !hasEnoughSignals ? 'insufficient_local_signals' : (confidenceScore < 0.5 ? 'low_local_minutes_confidence' : 'none');
 
   return {
     estimatedMinutes,
     confidence: confidenceScore >= 0.75 ? 'high' : (confidenceScore >= 0.5 ? 'low' : 'unknown'),
     confidenceScore,
+    needsGeminiFallback,
+    fallbackReason,
     signalsUsed: {
       words,
       questionCount,

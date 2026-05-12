@@ -2,6 +2,11 @@ function normalizeText(rawText = '') {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
 
+function toNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function clamp01(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -56,8 +61,51 @@ function evaluateExtractionQuality(text = '', confidence = 0) {
   };
 }
 
+function normalizeStructuredBlocks(payload = {}) {
+  const pages = Array.isArray(payload.pages) ? payload.pages : [];
+  const blocks = [];
+
+  pages.forEach((page = {}, pageIndex) => {
+    const pageNumber = Number(page?.pageNumber || pageIndex + 1);
+    const visualRegions = Array.isArray(page?.visualRegions) ? page.visualRegions : [];
+
+    visualRegions.forEach((region = {}, regionIndex) => {
+      const text = normalizeText(region?.description || region?.text || '');
+      if (!text) return;
+      blocks.push({
+        id: `p${pageNumber}_r${regionIndex + 1}`,
+        pageNumber,
+        type: String(region?.type || 'text').toLowerCase(),
+        text,
+        confidence: clamp01(region?.confidence || payload?.confidence || 0.5),
+        bbox: {
+          x: toNumber(region?.x),
+          y: toNumber(region?.y),
+          width: toNumber(region?.width),
+          height: toNumber(region?.height),
+        },
+      });
+    });
+  });
+
+  blocks.sort((a, b) => {
+    if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+    if (a.bbox.y !== b.bbox.y) return a.bbox.y - b.bbox.y;
+    return a.bbox.x - b.bbox.x;
+  });
+
+  const structuredText = blocks.map((block) => block.text).join('\n').trim();
+  return {
+    blocks,
+    structuredText,
+    blockCount: blocks.length,
+  };
+}
+
 function normalizePaddleResult(payload = {}, context = {}) {
-  const extractedText = normalizeText(payload.extractedText || payload.text || '');
+  const structured = normalizeStructuredBlocks(payload);
+  const rawText = normalizeText(payload.extractedText || payload.text || '');
+  const extractedText = normalizeText(structured.structuredText || rawText);
   const textLength = Number(payload.textLength || extractedText.length || 0);
   const pages = Array.isArray(payload.pages) ? payload.pages : [];
   const failedPageCount = pages.filter((page) => !page?.success).length;
@@ -81,6 +129,14 @@ function normalizePaddleResult(payload = {}, context = {}) {
     pageCount: pages.length || (context.isPdfInput ? null : 1),
     selectedPages: pages.map((page) => Number(page?.pageNumber || 0)).filter((pageNumber) => Number.isFinite(pageNumber) && pageNumber > 0),
     pages,
+    structuredData: {
+      blockCount: structured.blockCount,
+      blocks: structured.blocks,
+      structuredTextPreview: structured.structuredText.slice(0, 4000),
+      ppStructureVersion: String(payload.ppStructureVersionRuntime || payload.ppStructureVersion || ''),
+      ppStructureVersionRequested: String(payload.ppStructureVersionRequested || ''),
+      structureConfig: payload.structureConfig || {},
+    },
     failedPageCount,
     partialSuccess: Boolean(failedPageCount > 0 && textLength > 0),
     extractedImages: Array.isArray(payload.extractedImages) ? payload.extractedImages : [],
@@ -128,6 +184,7 @@ function normalizeGeminiFallbackResult(payload = {}, context = {}) {
 module.exports = {
   normalizeText,
   clamp01,
+  normalizeStructuredBlocks,
   evaluateExtractionQuality,
   normalizePaddleResult,
   normalizeGeminiFallbackResult,

@@ -22,6 +22,7 @@ const {
 const { classifySubjectLocally } = require('./extraction/localSubjectClassifier');
 const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
 const { estimateMinutesLocally, clampMinutes } = require('./extraction/minutesEstimator');
+const { classifyWithLocalMl } = require('./extraction/localMlClassifier');
 
 let aiSubjectExtractionModule = null;
 let geminiExtractionModule = null;
@@ -2924,7 +2925,11 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       failedPageCount: Number(extractionResult?.failedPageCount || 0),
       partialSuccess: Boolean(extractionResult?.partialSuccess),
       extractedImages: extractionResult?.extractedImages || [],
+      structuredData: extractionResult?.structuredData || null,
       source: extractionResult?.source || (isPdfInput ? 'pdf' : 'image'),
+      providerRoute: providerRoute || '',
+      providerReason: providerReason || '',
+      ppStructureVersion: extractionResult?.structuredData?.ppStructureVersion || '',
     });
   } catch (error) {
       logger.error('image_ocr_failed', {
@@ -2996,17 +3001,33 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       return marksInText;
     })();
     const tableCount = attachmentSummaries.reduce((sum, entry) => {
-      const preview = String(entry?.textPreview || '').toLowerCase();
+      const types = Array.isArray(entry?.structuredTypes) ? entry.structuredTypes : [];
+      if (types.some((type) => String(type || '').includes('table'))) return sum + 1;
+      const preview = String(entry?.structuredPreview || entry?.textPreview || '').toLowerCase();
       return sum + (preview.includes('table') ? 1 : 0);
     }, 0);
     const figureCount = attachmentSummaries.reduce((sum, entry) => {
-      const preview = String(entry?.textPreview || '').toLowerCase();
+      const types = Array.isArray(entry?.structuredTypes) ? entry.structuredTypes : [];
+      if (types.some((type) => ['figure', 'image', 'diagram', 'chart'].some((needle) => String(type || '').includes(needle)))) return sum + 1;
+      const preview = String(entry?.structuredPreview || entry?.textPreview || '').toLowerCase();
       return sum + ((preview.includes('diagram') || preview.includes('figure') || preview.includes('graph')) ? 1 : 0);
     }, 0);
     const formulaCount = attachmentSummaries.reduce((sum, entry) => {
-      const preview = String(entry?.textPreview || '').toLowerCase();
+      const types = Array.isArray(entry?.structuredTypes) ? entry.structuredTypes : [];
+      if (types.some((type) => ['formula', 'equation'].some((needle) => String(type || '').includes(needle)))) return sum + 1;
+      const preview = String(entry?.structuredPreview || entry?.textPreview || '').toLowerCase();
       return sum + ((preview.includes('equation') || preview.includes('formula')) ? 1 : 0);
     }, 0);
+
+    const localMl = classifyWithLocalMl({
+      text: inputText,
+      supportedSubjects,
+      questionBlocks,
+      marksCount: extractedMarksCount,
+      tableCount,
+      figureCount,
+      formulaCount,
+    });
 
     const localSubject = classifySubjectLocally({
       text: inputText,
@@ -3025,32 +3046,47 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       formulaCount,
     });
 
+    const mlMatchesRuleSubject = !localSubject.subject || !localMl.subject || localSubject.subject === localMl.subject;
+    const mlIsUsable = Boolean(localMl.available && !localMl.needsJsFallback && mlMatchesRuleSubject);
+    const mlCandidate = {
+      subject: mlIsUsable ? localMl.subject : '',
+      topic: mlIsUsable ? localMl.topic : '',
+      topics: mlIsUsable ? localMl.topics : [],
+      estimatedMinutes: mlIsUsable ? clampMinutes(localMl.estimatedMinutes) : clampMinutes(localMinutes.estimatedMinutes),
+      subjectConfidence: mlIsUsable ? localMl.subjectConfidence : 'unknown',
+      topicConfidence: mlIsUsable ? localMl.topicConfidence : localTopic.topicConfidence,
+      minutesConfidence: mlIsUsable ? localMl.minutesConfidence : localMinutes.confidence,
+      method: mlIsUsable ? 'local_ml_python' : '',
+    };
+
     let aiResult = {
       classification: {
-        subject: localSubject.subject || '',
+        subject: mlCandidate.subject || localSubject.subject || '',
         unsupportedSubject: '',
-        topic: localTopic.topic || '',
-        topics: localTopic.topics || [],
-        estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
-        subjectConfidence: localSubject.subjectConfidence || 'unknown',
-        needsManualSubjectSelection: !localSubject.subject || localSubject.subjectConfidence !== 'high',
+        topic: mlCandidate.topic || localTopic.topic || '',
+        topics: mlCandidate.topics.length ? mlCandidate.topics : (localTopic.topics || []),
+        estimatedMinutes: clampMinutes(mlCandidate.estimatedMinutes || localMinutes.estimatedMinutes),
+        subjectConfidence: mlCandidate.subjectConfidence || localSubject.subjectConfidence || 'unknown',
+        needsManualSubjectSelection: !(mlCandidate.subject || localSubject.subject) || (mlCandidate.subjectConfidence || localSubject.subjectConfidence) !== 'high',
         unsupportedSubjectRequested: false,
         unsupportedSubjectRecorded: false,
       },
       prompt: '',
       rawOutput: '',
-      model: 'local-rule-classifier',
+      model: mlCandidate.method || 'local-rule-classifier',
       backend: 'local',
       provider: 'local',
       error: '',
       meta: {
+        ml: localMl,
         subject: localSubject,
         topic: localTopic,
         minutes: localMinutes,
       },
     };
 
-    const shouldUseGeminiFallback = localSubject.needsGeminiFallback || localTopic.needsGeminiFallback;
+    const shouldUseGeminiFallback = !(mlCandidate.method)
+      && (localSubject.needsGeminiFallback || localTopic.needsGeminiFallback || localMinutes.needsGeminiFallback);
     if (shouldUseGeminiFallback) {
       const sampleQuestionBlocks = questionBlocks.slice(0, 12).map((block) => ({
         ...block,
@@ -3067,9 +3103,12 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
         supportedSubjects,
         firebaseConfig: getAiSecrets(),
       });
+      const rawAiMinutes = Number(aiResult?.classification?.estimatedMinutes);
+      const hasAiMinutes = Number.isFinite(rawAiMinutes) && rawAiMinutes > 0;
+      const aiEstimatedMinutes = clampMinutes(rawAiMinutes);
       aiResult.classification = {
         ...aiResult.classification,
-        estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
+        estimatedMinutes: hasAiMinutes ? aiEstimatedMinutes : clampMinutes(localMinutes.estimatedMinutes),
       };
     }
 
@@ -3088,18 +3127,26 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       },
     });
 
+    const usedGeminiForMinutes = aiResult.provider !== 'local' && shouldUseGeminiFallback;
     const classification = {
       ...aiResult.classification,
-      estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
+      estimatedMinutes: usedGeminiForMinutes
+        ? clampMinutes(aiResult?.classification?.estimatedMinutes)
+        : clampMinutes(localMinutes.estimatedMinutes),
       topics: Array.isArray(aiResult?.classification?.topics)
         ? aiResult.classification.topics
         : (aiResult?.classification?.topic ? [aiResult.classification.topic] : []),
-      topicConfidence: aiResult.provider === 'local' ? localTopic.topicConfidence : (localTopic.topicConfidence || 'unknown'),
-      topicMethod: aiResult.provider === 'local' ? 'local' : 'gemini_fallback',
-      minutesMethod: localMinutes.method,
-      minutesConfidence: localMinutes.confidence,
+      topicConfidence: aiResult.provider === 'local'
+        ? (mlCandidate.method ? mlCandidate.topicConfidence : localTopic.topicConfidence)
+        : (localTopic.topicConfidence || 'unknown'),
+      topicMethod: aiResult.provider === 'local' ? (mlCandidate.method || 'local') : 'gemini_fallback',
+      minutesMethod: usedGeminiForMinutes ? 'gemini_fallback' : (mlCandidate.method || localMinutes.method),
+      minutesConfidence: usedGeminiForMinutes ? 'fallback' : (mlCandidate.minutesConfidence || localMinutes.confidence),
       minutesSignalsUsed: localMinutes.signalsUsed,
-      subjectMethod: aiResult.provider === 'local' ? 'local' : 'gemini_fallback',
+      subjectMethod: aiResult.provider === 'local' ? (mlCandidate.method || 'local') : 'gemini_fallback',
+      classificationPipeline: aiResult.provider === 'local'
+        ? (mlCandidate.method ? 'local_ml_python->local_rules' : 'local_rules')
+        : 'local_ml_python->local_rules->gemini_fallback',
     };
     const unsupportedSubjectRecorded = Boolean(classification?.unsupportedSubjectRequested && classification?.unsupportedSubject);
     if (unsupportedSubjectRecorded) {
@@ -3129,12 +3176,31 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
         model: aiResult.model,
         backend: aiResult.backend,
         durationMs: Date.now() - startedAt,
+        localMlAvailable: Boolean(localMl.available),
+        localMlReason: localMl.reason || localMl.error || '',
         subject: classification.subject || '',
         subjectConfidence: classification.subjectConfidence || 'unknown',
         needsManualSubjectSelection: Boolean(classification.needsManualSubjectSelection),
         unsupportedSubjectRecorded,
       },
     });
+
+    await db.collection('classificationTrainingEvents').add({
+      uid: decoded.uid,
+      inputPreview: String(inputText || '').slice(0, 2000),
+      extractedMarksCount,
+      tableCount,
+      figureCount,
+      formulaCount,
+      classification,
+      localMl,
+      localSubject,
+      localTopic,
+      localMinutes,
+      provider: aiResult.provider || 'local',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAtMs: Date.now(),
+    }).catch(() => null);
 
     logger.info('subject_classification_completed', {
       uid: decoded.uid,

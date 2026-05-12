@@ -69,6 +69,20 @@ function normalizePageQuestionsToText(questions = []) {
     .filter(Boolean);
 }
 
+function buildFallbackTextFromParsed(parsed = {}, page = {}) {
+  const subject = String(parsed?.subject || '').trim();
+  const topics = Array.isArray(parsed?.topics) ? parsed.topics.map((value) => String(value || '').trim()).filter(Boolean) : [];
+  const warnings = Array.isArray(parsed?.warnings) ? parsed.warnings.map((value) => String(value || '').trim()).filter(Boolean) : [];
+  const pageWarnings = Array.isArray(page?.warnings) ? page.warnings.map((value) => String(value || '').trim()).filter(Boolean) : [];
+
+  const fragments = [];
+  if (subject && subject.toLowerCase() !== 'unknown') fragments.push(`Subject: ${subject}`);
+  if (topics.length) fragments.push(`Topics: ${topics.join(', ')}`);
+  if (warnings.length) fragments.push(`Warnings: ${warnings.join(' | ')}`);
+  if (pageWarnings.length) fragments.push(`Page warnings: ${pageWarnings.join(' | ')}`);
+  return fragments.join('\n').trim();
+}
+
 async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', aiConfig = {}, timeoutMs = 45000 }) {
   const isPdf = String(mimeType || '').toLowerCase() === 'application/pdf' || (Buffer.isBuffer(imageBuffer) && imageBuffer.slice(0, 5).toString('utf8') === '%PDF-');
   const imageBuffers = await convertPdfToImages(imageBuffer, { firebaseConfig: aiConfig }).catch(() => [imageBuffer]);
@@ -89,10 +103,12 @@ async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', ai
   );
 
   const parsed = result?.parsedContent || {};
+  const rawOutput = String(result?.rawOutput || '').trim();
   const pages = Array.isArray(parsed.pages) ? parsed.pages : [];
   const pageOutputs = pages.map((page = {}, index) => {
     const questions = Array.isArray(page.questions) ? page.questions : [];
-    const pageText = normalizePageQuestionsToText(questions).join('\n\n').trim();
+    const questionText = normalizePageQuestionsToText(questions).join('\n\n').trim();
+    const pageText = questionText || buildFallbackTextFromParsed(parsed, page);
     return {
       pageNumber: Number(page.pageNumber || index + 1),
       extractionMethod: 'gemini_fallback',
@@ -107,20 +123,21 @@ async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', ai
   });
 
   const extractedText = pageOutputs.map((page) => page.extractedText).filter(Boolean).join('\n\n').trim();
+  const synthesizedText = extractedText || buildFallbackTextFromParsed(parsed, {}) || rawOutput;
   const failedPageCount = pageOutputs.filter((page) => !page.success).length;
 
   return {
-    success: Boolean(extractedText),
-    extractedText,
-    text: extractedText,
-    textLength: extractedText.length,
+    success: Boolean(synthesizedText),
+    extractedText: synthesizedText,
+    text: synthesizedText,
+    textLength: synthesizedText.length,
     pages: pageOutputs,
     failedPageCount,
-    partialSuccess: Boolean(failedPageCount > 0 && extractedText),
+    partialSuccess: Boolean(failedPageCount > 0 && synthesizedText),
     scannedPdfDetected: isPdf,
     ocrStatus: isPdf
-      ? (failedPageCount ? (extractedText ? 'partial' : 'failed') : 'complete')
-      : (extractedText ? 'complete' : 'failed'),
+      ? (failedPageCount ? (synthesizedText ? 'partial' : 'failed') : 'complete')
+      : (synthesizedText ? 'complete' : 'failed'),
     extractedImages: [],
     confidence: Number(parsed.subjectConfidence || 0.5),
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],

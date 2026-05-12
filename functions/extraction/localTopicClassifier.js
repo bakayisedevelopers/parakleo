@@ -8,15 +8,34 @@ const TOPIC_RULES = {
     Trigonometry: ['trig', 'sine', 'cosine', 'tangent'],
     Geometry: ['angle', 'triangle', 'circle', 'theorem'],
     Calculus: ['differentiate', 'integrate', 'derivative', 'limit'],
+    Probability: ['probability', 'random', 'outcome', 'tree diagram'],
+  },
+  'Mathematical Literacy': {
+    Finance: ['interest', 'budget', 'loan', 'repayment', 'profit', 'loss'],
+    Measurement: ['area', 'volume', 'perimeter', 'scale drawing', 'distance'],
+    DataHandling: ['table', 'graph', 'mean', 'median', 'mode', 'percentage'],
   },
   'Physical Sciences': {
     Mechanics: ['force', 'newton', 'velocity', 'acceleration'],
     Electricity: ['current', 'voltage', 'resistance', 'circuit'],
     Chemistry: ['reaction', 'mole', 'acid', 'base', 'stoichiometry'],
   },
+  'Life Sciences': {
+    Genetics: ['dna', 'gene', 'allele', 'inheritance', 'genotype'],
+    Ecology: ['ecosystem', 'food chain', 'biodiversity', 'population'],
+    Cells: ['cell', 'organelle', 'mitosis', 'meiosis'],
+  },
+  'Natural Sciences': {
+    MatterAndMaterials: ['states of matter', 'mixture', 'compound', 'element'],
+    EarthAndBeyond: ['planet', 'solar system', 'earth', 'atmosphere'],
+  },
   Accounting: {
     Bookkeeping: ['ledger', 'debit', 'credit', 'journal'],
     FinancialStatements: ['income statement', 'balance sheet', 'cash flow'],
+  },
+  English: {
+    Comprehension: ['comprehension', 'passage', 'infer', 'main idea'],
+    CreativeWriting: ['essay', 'narrative', 'descriptive', 'transactional'],
   },
 };
 

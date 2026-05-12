@@ -6,3 +6,6 @@ web/dist
 mobile/.expo/
 .firebase-config/
 commands.txt
+.gcloud/
+**/__pycache__/
+*.pyc

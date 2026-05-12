@@ -148,6 +148,8 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
 
   const attachmentSummaries = attachmentExtractions.slice(0, 6).map((entry, index) => {
     const extractedText = normalizeText(entry?.extractedText || entry?.text);
+    const structuredBlocks = Array.isArray(entry?.structuredData?.blocks) ? entry.structuredData.blocks : [];
+    const structuredTypes = [...new Set(structuredBlocks.map((block) => normalizeText(block?.type)).filter(Boolean))];
     return {
       index,
       fileName: normalizeText(entry?.fileName || entry?.uploadedAttachment?.fileName || entry?.uploadedAttachment?.name),
@@ -162,6 +164,13 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
       textLength: extractedText.length,
       selectedPages: Array.isArray(entry?.selectedPages) ? entry.selectedPages.slice(0, 10) : [],
       failedPageCount: Number(entry?.failedPageCount || 0),
+      provider: normalizeText(entry?.provider),
+      providerRoute: normalizeText(entry?.providerRoute),
+      providerReason: normalizeText(entry?.providerReason),
+      ppStructureVersion: normalizeText(entry?.ppStructureVersion),
+      structuredBlockCount: structuredBlocks.length,
+      structuredTypes,
+      structuredPreview: truncateText(normalizeText(entry?.structuredData?.structuredTextPreview), 800),
     };
   });
 

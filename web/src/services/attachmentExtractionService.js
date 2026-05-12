@@ -491,6 +491,12 @@ function buildExtractionResult({
   partialSuccess = false,
   failedPageCount = 0,
   text = extractedText,
+  provider = '',
+  providerRoute = '',
+  providerReason = '',
+  confidence = 0,
+  structuredData = null,
+  ppStructureVersion = '',
 }) {
   return {
     fileName: file?.name || 'unknown-file',
@@ -511,6 +517,12 @@ function buildExtractionResult({
     pages,
     extractedImages,
     failedPageCount,
+    provider,
+    providerRoute,
+    providerReason,
+    confidence: Number(confidence || 0),
+    structuredData: structuredData && typeof structuredData === 'object' ? structuredData : null,
+    ppStructureVersion: String(ppStructureVersion || structuredData?.ppStructureVersion || ''),
   };
 }
 
@@ -534,18 +546,33 @@ export async function extractSingleAttachment(file) {
     });
   }
 
-  if (fileType === 'image') {
-    console.debug('[attachmentExtraction] extraction path chosen', { fileName: file.name, path: 'image->ocr' });
+  if (fileType === 'image' || fileType === 'pdf') {
+    console.debug('[attachmentExtraction] extraction path chosen', { fileName: file.name, path: `${fileType}->backend-ocr-router` });
     try {
       const imageResult = await extractFromImage(file);
       return buildExtractionResult({
         file,
         fileType,
-        extractionMethod: 'ocr',
+        extractionMethod: imageResult.extractionMethod || (fileType === 'pdf' ? 'pdf_ocr' : 'ocr'),
         extractedText: imageResult.extractedText,
+        text: imageResult.text || imageResult.extractedText,
         textLength: imageResult.textLength,
-        extractionQuality: imageResult.success ? 'good' : 'failed',
+        extractionQuality: imageResult.extractionQuality || (imageResult.success ? 'good' : 'failed'),
         success: imageResult.success,
+        partialSuccess: Boolean(imageResult.partialSuccess),
+        scannedPdfDetected: Boolean(imageResult.scannedPdfDetected),
+        selectedPages: Array.isArray(imageResult.selectedPages) ? imageResult.selectedPages : [],
+        ocrStatus: imageResult.ocrStatus || (fileType === 'pdf' ? (imageResult.success ? 'complete' : 'failed') : 'not_needed'),
+        pageCount: Number(imageResult.pageCount || 0) || null,
+        pages: Array.isArray(imageResult.pages) ? imageResult.pages : [],
+        extractedImages: Array.isArray(imageResult.extractedImages) ? imageResult.extractedImages : [],
+        failedPageCount: Number(imageResult.failedPageCount || 0),
+        provider: imageResult.provider || '',
+        providerRoute: imageResult.providerRoute || '',
+        providerReason: imageResult.providerReason || '',
+        confidence: Number(imageResult.confidence || 0),
+        structuredData: imageResult.structuredData || null,
+        ppStructureVersion: imageResult.ppStructureVersion || '',
       });
     } catch (error) {
       console.debug('[attachmentExtraction] image OCR failed', { fileName: file.name, error: error?.message });
@@ -561,50 +588,15 @@ export async function extractSingleAttachment(file) {
     }
   }
 
-  console.debug('[attachmentExtraction] extraction path chosen', { fileName: file.name, path: 'pdf->digital-first' });
-
-  try {
-    const pdfResult = await extractPdfPerPage(file);
-    console.debug('[attachmentExtraction] pdf extraction completed', {
-      fileName: file.name,
-      textLength: pdfResult.textLength,
-      pageCount: pdfResult.pageCount,
-      failedPageCount: pdfResult.failedPageCount,
-      ocrStatus: pdfResult.ocrStatus,
-    });
-
-    return buildExtractionResult({
-      file,
-      fileType,
-      source: 'pdf',
-      extractionMethod: 'pdf',
-      extractedText: pdfResult.extractedText,
-      text: pdfResult.text,
-      textLength: pdfResult.textLength,
-      extractionQuality: pdfResult.extractionQuality,
-      success: pdfResult.success,
-      partialSuccess: pdfResult.partialSuccess,
-      scannedPdfDetected: pdfResult.scannedPdfDetected,
-      requiresPageSelection: false,
-      selectedPages: pdfResult.selectedPages,
-      ocrStatus: pdfResult.ocrStatus,
-      pageCount: pdfResult.pageCount,
-      pages: pdfResult.pages,
-      extractedImages: pdfResult.extractedImages,
-      failedPageCount: pdfResult.failedPageCount,
-    });
-  } catch (error) {
-    console.debug('[attachmentExtraction] pdf extraction failed', { fileName: file.name, error: error?.message });
-    return buildExtractionResult({
-      file,
-      fileType,
-      extractionMethod: 'fallback',
-      extractedText: '',
-      textLength: 0,
-      extractionQuality: 'failed',
-      success: false,
-    });
-  }
+  return buildExtractionResult({
+    file,
+    fileType,
+    extractionMethod: 'fallback',
+    extractedText: '',
+    textLength: 0,
+    extractionQuality: 'failed',
+    success: false,
+  });
 }
 
 export async function extractAttachments(files = [], onProgress) {

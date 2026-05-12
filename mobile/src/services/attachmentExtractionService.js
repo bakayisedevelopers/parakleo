@@ -36,9 +36,13 @@ function buildExtractionResult(attachment, payload = {}, overrides = {}) {
     pageCount: Number(payload?.pageCount || 0) || null,
     pages: Array.isArray(payload?.pages) ? payload.pages : [],
     extractedImages: Array.isArray(payload?.extractedImages) ? payload.extractedImages : [],
+    structuredData: payload?.structuredData && typeof payload.structuredData === 'object' ? payload.structuredData : null,
     failedPageCount: Number(payload?.failedPageCount || 0),
     provider: String(payload?.provider || ''),
+    providerRoute: String(payload?.providerRoute || ''),
+    providerReason: String(payload?.providerReason || ''),
     confidence: Number(payload?.confidence || 0),
+    ppStructureVersion: String(payload?.ppStructureVersion || payload?.structuredData?.ppStructureVersion || ''),
   };
 }
 

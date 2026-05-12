@@ -79,6 +79,9 @@ export function RequestDetailsScreen({ route, navigate, goBack }) {
     : request.attachment?.downloadUrl
       ? [request.attachment]
       : [];
+  const extractionEntries = Array.isArray(request?.boardPreparationSource?.attachmentExtractions)
+    ? request.boardPreparationSource.attachmentExtractions
+    : [];
   const statusMeta = getRequestStatusMeta(request.status);
 
   return (
@@ -125,6 +128,14 @@ export function RequestDetailsScreen({ route, navigate, goBack }) {
               {relatedSession
                 ? `Status ${relatedSession.status || 'waiting_student'} | Length ${relatedSession.duration || request.duration || 'TBD'}`
                 : 'Session will appear here once tutor accepts'}
+            </Text>
+          </View>
+          <View style={styles.metric}>
+            <Text style={styles.metricLabel}>OCR diagnostics</Text>
+            <Text style={styles.metricValue}>
+              {extractionEntries.length
+                ? extractionEntries.map((entry) => `${entry.fileName || 'Attachment'}: ${entry.providerRoute || entry.extractionMethod || 'unknown'}`).join(' | ')
+                : 'No OCR diagnostics saved'}
             </Text>
           </View>
         </View>

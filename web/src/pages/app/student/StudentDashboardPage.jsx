@@ -19,13 +19,8 @@ import { useStudentRequests } from '../../../hooks/useClassRequests';
 import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
-import { appendUserAiLog, subscribeToUserAiLogs } from '../../../services/aiLogService';
-import {
-  LOCAL_VISUAL_CROP_FILE,
-  attachVisualCropsToExtraction,
-  extractAttachmentsWithGPT,
-  streamAttachmentsWithGPT,
-} from '../../../services/gptExtractionService';
+import { subscribeToUserAiLogs } from '../../../services/aiLogService';
+import { extractAttachments } from '../../../services/attachmentExtractionService';
 import { createClassRequest } from '../../../services/classRequestService';
 import { fetchPricingQuote } from '../../../services/pricingService';
 import { uploadUserFile } from '../../../services/storageService';
@@ -63,32 +58,6 @@ function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
   });
 
   return matched?.value || '';
-}
-
-function resolveSupportedSubjectFromDetection(detectedSubject, supportedSubjects = SUBJECT_OPTIONS) {
-  const normalizedDetected = String(detectedSubject || '').trim().toLowerCase();
-  if (!normalizedDetected || normalizedDetected === 'unknown') {
-    return { subject: '', isSupported: false };
-  }
-
-  const directMatch = supportedSubjects.find((option) => {
-    const value = String(option?.value || '').toLowerCase();
-    const label = String(option?.label || '').toLowerCase();
-    return normalizedDetected === value || normalizedDetected === label;
-  });
-  if (directMatch) {
-    return { subject: directMatch.value, isSupported: true };
-  }
-
-  const aliasMatch = supportedSubjects.find((option) => {
-    const aliases = SUBJECT_ALIASES[option.value] || [];
-    return aliases.some((alias) => normalizedDetected.includes(String(alias || '').toLowerCase()));
-  });
-  if (aliasMatch) {
-    return { subject: aliasMatch.value, isSupported: true };
-  }
-
-  return { subject: '', isSupported: false };
 }
 
 function getAttachmentKey(file) {
@@ -154,16 +123,7 @@ function renderExtractionStatusIcon(status = '') {
   return null;
 }
 
-function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {}, gptExtraction = null }) {
-  if (gptExtraction) {
-    return {
-      extractedText: '',
-      attachmentExtractions: [],
-      ocrImageReferences: [],
-      gptExtraction,
-    };
-  }
-
+function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {} }) {
   const attachmentExtractions = attachments.map((file, index) => {
     const fileKey = getAttachmentKey(file);
     const extraction = attachmentExtractionByKey[fileKey] || null;
@@ -186,6 +146,10 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       pages: Array.isArray(extraction?.pages) ? extraction.pages : [],
       extractedImages: Array.isArray(extraction?.extractedImages) ? extraction.extractedImages : [],
       failedPageCount: Number(extraction?.failedPageCount || 0),
+      provider: extraction?.provider || '',
+      providerRoute: extraction?.providerRoute || '',
+      providerReason: extraction?.providerReason || '',
+      confidence: Number(extraction?.confidence || 0),
     };
   });
 
@@ -200,88 +164,6 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
     attachmentExtractions,
     ocrImageReferences: [],
   };
-}
-
-function shouldFallbackFromStreamExtraction(extractionResult = null) {
-  const streamMeta = extractionResult?.streamMeta || {};
-  const classificationCount = Number(streamMeta.classificationCount || 0);
-  const questionCount = Number(streamMeta.questionCount || 0);
-  const parsedEventCount = Number(streamMeta.parsedEventCount || 0);
-  const completeCount = Number(streamMeta.completeCount || 0);
-  const hadError = Boolean(streamMeta.hadError || streamMeta.errorCount > 0);
-
-  if (hadError) return true;
-  if (classificationCount === 0 && questionCount === 0) return true;
-  if (completeCount > 0 && parsedEventCount === 0) return true;
-  return false;
-}
-
-function stripLocalExtractionPayload(extraction = null) {
-  if (!extraction || typeof extraction !== 'object') return extraction;
-  const { sourceImages: _sourceImages, ...safeExtraction } = extraction;
-
-  return {
-    ...safeExtraction,
-    pages: Array.isArray(safeExtraction.pages)
-      ? safeExtraction.pages.map((page) => ({
-        ...page,
-        questions: Array.isArray(page?.questions)
-          ? page.questions.map((question) => ({
-            ...question,
-            images: Array.isArray(question?.images)
-              ? question.images.map((image) => {
-                const { [LOCAL_VISUAL_CROP_FILE]: _localFile, ...safeImage } = image || {};
-                return safeImage;
-              })
-              : [],
-          }))
-          : [],
-      }))
-      : [],
-  };
-}
-
-async function uploadGptExtractionVisualCrops({ extraction = null, userId = '' } = {}) {
-  if (!extraction || !userId) return stripLocalExtractionPayload(extraction);
-  const { sourceImages: _sourceImages, ...safeExtraction } = extraction;
-
-  const nextExtraction = {
-    ...safeExtraction,
-    pages: Array.isArray(safeExtraction.pages)
-      ? await Promise.all(safeExtraction.pages.map(async (page) => ({
-        ...page,
-        questions: Array.isArray(page?.questions)
-          ? await Promise.all(page.questions.map(async (question) => ({
-            ...question,
-            images: Array.isArray(question?.images)
-              ? await Promise.all(question.images.map(async (image) => {
-                const localFile = image?.[LOCAL_VISUAL_CROP_FILE];
-                const { [LOCAL_VISUAL_CROP_FILE]: _localFile, ...safeImage } = image || {};
-                if (!localFile) return safeImage;
-
-                const uploadResult = await uploadUserFile({
-                  userId,
-                  file: localFile,
-                  pathPrefix: 'request-attachment-crops',
-                });
-
-                return {
-                  ...safeImage,
-                  src: uploadResult.downloadUrl,
-                  downloadUrl: uploadResult.downloadUrl,
-                  path: uploadResult.objectPath,
-                  size: Number(localFile.size || 0),
-                  mimeType: localFile.type || safeImage.mimeType || 'image/jpeg',
-                };
-              }))
-              : [],
-          })))
-          : [],
-      })))
-      : [],
-  };
-
-  return stripLocalExtractionPayload(nextExtraction);
 }
 
 function normalizeEstimatedDuration(estimatedMinutes) {
@@ -328,7 +210,6 @@ export default function StudentDashboardPage() {
   const loggedUnsupportedSubjectsRef = useRef(new Set());
   const extractionOverlayRedirectTimeoutRef = useRef(null);
   const loggedAiLogIdsRef = useRef(new Set());
-  const visualCropPromiseRef = useRef(null);
   const classificationRunCounterRef = useRef(0);
 
   const [stage, setStage] = useState('input');
@@ -340,7 +221,6 @@ export default function StudentDashboardPage() {
   const [attachments, setAttachments] = useState([]);
   const [attachmentExtractionByKey, setAttachmentExtractionByKey] = useState({});
   const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
-  const [gptExtraction, setGptExtraction] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState('');
   const [classifiedTopic, setClassifiedTopic] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(DEFAULT_LESSON_DURATION);
@@ -544,8 +424,6 @@ export default function StudentDashboardPage() {
     const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
-    setGptExtraction(null);
-    visualCropPromiseRef.current = null;
     setAttachmentExtractionStatusByKey((prev) => {
       const next = { ...prev };
       newFilesForExtraction.forEach((file) => {
@@ -557,106 +435,71 @@ export default function StudentDashboardPage() {
     try {
       setClassificationState('running');
       setClassificationStatus('Analyzing your request...');
-      let classificationApplied = false;
+      const extractedByKey = {};
+      await extractAttachments(newFilesForExtraction, (result, index) => {
+        const file = newFilesForExtraction[index];
+        const fileKey = getAttachmentKey(file);
+        extractedByKey[fileKey] = result;
+        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
+        setAttachmentExtractionStatusByKey((prev) => ({
+          ...prev,
+          [fileKey]: result.success ? 'text extracted' : 'extraction weak',
+        }));
+      });
 
-      const applyClassification = (classificationEvent = {}) => {
-        const detectedTopic = String(classificationEvent?.topic || classificationEvent?.topics?.[0] || '').trim();
-        const detectedMinutes = Number(classificationEvent?.estimatedMinutes || DEFAULT_LESSON_DURATION);
-        const detectedSubject = String(classificationEvent?.subject || '').trim();
-        const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
-        const { subject: supportedSubject, isSupported } = resolveSupportedSubjectFromDetection(detectedSubject, supportedCatalog);
+      const mergedExtractions = { ...attachmentExtractionByKey, ...extractedByKey };
+      const attachmentExtractions = nextAttachments
+        .map((file) => mergedExtractions[getAttachmentKey(file)])
+        .filter(Boolean);
 
-        setClassifiedTopic(detectedTopic);
-        setEstimatedMinutes(detectedMinutes || DEFAULT_LESSON_DURATION);
-        setClassificationState('done');
-        if (isSupported) {
-          if (!isManualSubjectRef.current) {
-            setSelectedSubject(supportedSubject);
-          }
-          setClassificationStatus('Subject and study focus detected from your request.');
-          setUnsupportedSubjectRequest(null);
-        } else {
+      const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
+      const classificationInput = buildSubjectClassificationInput({
+        typedText: topic,
+        attachmentExtractions,
+        supportedSubjects: supportedCatalog,
+      });
+
+      const result = await classifySubjectFromText({
+        inputText: classificationInput.combinedText,
+        inputPayload: classificationInput.structuredPayload,
+        supportedSubjects: supportedCatalog,
+      });
+
+      const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
+      setClassifiedTopic(result.topic || '');
+      setEstimatedMinutes(nextEstimatedMinutes);
+      setClassificationState('done');
+
+      const detectedSubject = result.subject || '';
+      if (detectedSubject) {
+        if (!isManualSubjectRef.current) {
+          setSelectedSubject(detectedSubject);
+        }
+        setClassificationStatus(
+          result.needsManualSubjectSelection || result.subjectConfidence === 'low'
+            ? 'Subject detected. Please confirm before sending.'
+            : 'Subject and study focus detected from your request.',
+        );
+      } else {
+        if (!isManualSubjectRef.current) {
           setSelectedSubject('');
-          setClassificationStatus(
-            detectedSubject && detectedSubject.toLowerCase() !== 'unknown'
-              ? `Sorry, ${detectedSubject} is not offered yet.`
-              : 'Choose the subject manually before sending.',
-          );
-          if (detectedSubject && detectedSubject.toLowerCase() !== 'unknown') {
-            setUnsupportedSubjectRequest({
-              subject: detectedSubject,
-              inputText: topic,
-              recorded: false,
-            });
-          }
         }
-        if (!hasManualDurationOverride) {
-          setDurationMinutes(detectedMinutes || DEFAULT_LESSON_DURATION);
-        }
-        setAttachmentExtractionStatusByKey((prev) => {
-          const next = { ...prev };
-          nextAttachments.forEach((file) => {
-            next[getAttachmentKey(file)] = 'text extracted';
-          });
-          return next;
-        });
-      };
-
-      let extractionResult = null;
-      try {
-        extractionResult = await streamAttachmentsWithGPT(nextAttachments, {
-          topicHint: topic,
-          onEvent: (event, partialExtraction) => {
-            const type = String(event?.type || '').toLowerCase();
-            if (partialExtraction) {
-              setGptExtraction(partialExtraction);
-            }
-            if (type === 'classification') {
-              classificationApplied = true;
-              applyClassification(event);
-            }
-          },
-        });
-
-        if (shouldFallbackFromStreamExtraction(extractionResult)) {
-          console.debug('[studentAttachmentExtraction] stream produced no usable extraction; falling back', {
-            streamMeta: extractionResult?.streamMeta || null,
-          });
-          extractionResult = await extractAttachmentsWithGPT(nextAttachments);
-        }
-      } catch (streamError) {
-        console.debug('[studentAttachmentExtraction] stream failed; falling back', {
-          error: streamError?.message,
-        });
-        extractionResult = await extractAttachmentsWithGPT(nextAttachments);
+        setClassificationStatus('Choose the subject manually before sending.');
       }
 
-      if (!extractionResult) {
-        throw new Error('Extraction failed. Please try again or upload a clearer image.');
+      if (result.unsupportedSubjectRequested && result.unsupportedSubject) {
+        setUnsupportedSubjectRequest({
+          subject: result.unsupportedSubject,
+          inputText: topic,
+          recorded: Boolean(result.unsupportedSubjectRecorded),
+        });
+      } else {
+        setUnsupportedSubjectRequest(null);
       }
 
-      setGptExtraction(extractionResult);
-      if (!classificationApplied) {
-        applyClassification({
-          subject: extractionResult.subject,
-          topic: extractionResult.topics?.[0] || '',
-          topics: extractionResult.topics || [],
-          estimatedMinutes: extractionResult.estimatedMinutes || DEFAULT_LESSON_DURATION,
-        });
+      if (!hasManualDurationOverride) {
+        setDurationMinutes(nextEstimatedMinutes);
       }
-
-      const cropPromise = attachVisualCropsToExtraction(extractionResult)
-        .then((croppedExtraction) => {
-          setGptExtraction((current) => (current === extractionResult ? croppedExtraction : current));
-          return croppedExtraction;
-        })
-        .catch((cropError) => {
-          console.debug('[studentAttachmentExtraction] background visual cropping failed', {
-            error: cropError?.message,
-          });
-          return extractionResult;
-        });
-      visualCropPromiseRef.current = cropPromise;
     } catch (err) {
       console.error(err);
       setError(err.message || 'Extraction failed. Please try again or upload a clearer image.');
@@ -695,8 +538,6 @@ export default function StudentDashboardPage() {
     const nextAttachments = attachmentsRef.current.filter((_, index) => index !== indexToRemove);
     attachmentsRef.current = nextAttachments;
     setAttachments(nextAttachments);
-    setGptExtraction(null);
-    visualCropPromiseRef.current = null;
     setClassifiedTopic('');
     setEstimatedMinutes(DEFAULT_LESSON_DURATION);
     setClassificationStatus('');
@@ -789,21 +630,10 @@ export default function StudentDashboardPage() {
         );
       }
 
-      const croppedExtraction = visualCropPromiseRef.current
-        ? await visualCropPromiseRef.current.catch(() => gptExtraction)
-        : gptExtraction;
-      const persistedGptExtraction = croppedExtraction
-        ? await uploadGptExtractionVisualCrops({
-          extraction: croppedExtraction,
-          userId: user.uid,
-        })
-        : null;
-
       const boardPreparationSource = buildBoardPreparationSource({
         attachments,
         uploadedAttachments,
         attachmentExtractionByKey,
-        gptExtraction: persistedGptExtraction,
       });
 
       const requestId = await createClassRequest({

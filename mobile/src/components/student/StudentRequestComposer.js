@@ -122,6 +122,10 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       pages: Array.isArray(extraction?.pages) ? extraction.pages : [],
       extractedImages: Array.isArray(extraction?.extractedImages) ? extraction.extractedImages : [],
       failedPageCount: Number(extraction?.failedPageCount || 0),
+      provider: extraction?.provider || '',
+      providerRoute: extraction?.providerRoute || '',
+      providerReason: extraction?.providerReason || '',
+      confidence: Number(extraction?.confidence || 0),
     };
   });
 

@@ -46,6 +46,9 @@ export default function StudentRequestDetailsPage() {
       ? [request.attachment]
       : [];
   const relatedSession = sessions.find((session) => session.requestId === requestId);
+  const extractionEntries = Array.isArray(request?.boardPreparationSource?.attachmentExtractions)
+    ? request.boardPreparationSource.attachmentExtractions
+    : [];
 
   return (
     <div className="space-y-6">
@@ -125,6 +128,14 @@ export default function StudentRequestDetailsPage() {
                   ? `Status ${relatedSession.status || 'waiting_student'} • Length ${relatedSession.duration || request.duration || 'TBD'}`
                   : 'Session will appear here once tutor accepts'}
                 muted={!relatedSession}
+              />
+              <DetailItem
+                icon={FileText}
+                label="OCR diagnostics"
+                value={extractionEntries.length
+                  ? extractionEntries.map((entry) => `${entry.fileName || 'Attachment'}: ${entry.providerRoute || entry.extractionMethod || 'unknown'}`).join(' | ')
+                  : 'No OCR diagnostics saved'}
+                muted={!extractionEntries.length}
               />
             </div>
 
