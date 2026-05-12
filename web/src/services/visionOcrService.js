@@ -53,7 +53,7 @@ export async function extractImageTextWithVision(file) {
     success: Boolean(payload.success),
     extractedText: String(payload.extractedText || ''),
     textLength: Number(payload.textLength || 0),
-    extractionMethod: 'ocr',
-    provider: 'google-vision',
+    extractionMethod: String(payload.extractionMethod || 'ocr'),
+    provider: String(payload.provider || 'paddleocr_ppstructure'),
   };
 }

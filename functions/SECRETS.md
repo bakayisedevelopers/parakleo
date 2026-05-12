@@ -43,7 +43,12 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
   "GEMINI_VISION_MODEL": "REPLACE_ME",
   "GEMINI_CLASSIFICATION_MODEL": "REPLACE_ME",
   "GEMINI_CLASSIFICATION_TIMEOUT_MS": "30000",
-  "MAX_PDF_PAGES": "30"
+  "MAX_PDF_PAGES": "30",
+  "PADDLE_OCR_SERVICE_URL": "https://claxi-paddle-ocr-...-uc.a.run.app",
+  "PADDLE_OCR_SERVICE_API_KEY": "claxi-paddle-secret-...",
+  "PADDLE_OCR_TIMEOUT_MS": "30000",
+  "PADDLE_OCR_MIN_CONFIDENCE": "0.55",
+  "OCR_PROVIDER_MODE": "paddle_first"
 }
 ```
 

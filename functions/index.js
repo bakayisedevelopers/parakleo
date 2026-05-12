@@ -19,14 +19,34 @@ const {
   normalizeSubjectName,
   isAllowedGrade1To12Subject,
 } = require('./subjectExtraction');
-const {
-  convertPdfToImages,
-  extractTutorResultsWithGemini25Flash,
-  classifySubjectWithAI,
-  streamBoardExtractionWithAI,
-  validateSubjectClassification,
-} = require('./aiSubjectExtraction');
-const { extractStudentAttachmentWithGemini25Flash } = require('./geminiExtraction');
+const { classifySubjectLocally } = require('./extraction/localSubjectClassifier');
+const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
+const { estimateMinutesLocally, clampMinutes } = require('./extraction/minutesEstimator');
+
+let aiSubjectExtractionModule = null;
+let geminiExtractionModule = null;
+let ocrProviderRouterModule = null;
+
+function getAiSubjectExtractionModule() {
+  if (!aiSubjectExtractionModule) {
+    aiSubjectExtractionModule = require('./aiSubjectExtraction');
+  }
+  return aiSubjectExtractionModule;
+}
+
+function getGeminiExtractionModule() {
+  if (!geminiExtractionModule) {
+    geminiExtractionModule = require('./geminiExtraction');
+  }
+  return geminiExtractionModule;
+}
+
+function getOcrProviderRouterModule() {
+  if (!ocrProviderRouterModule) {
+    ocrProviderRouterModule = require('./ocr/ocrProviderRouter');
+  }
+  return ocrProviderRouterModule;
+}
 
 admin.initializeApp();
 
@@ -1349,7 +1369,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       byteLength: documentBuffer.length,
     });
     const aiConfig = getAiSecrets();
-    const images = await convertPdfToImages(documentBuffer, {
+    const images = await getAiSubjectExtractionModule().convertPdfToImages(documentBuffer, {
       firebaseConfig: aiConfig,
     });
     console.debug('[tutorResultsAI] document converted to images', {
@@ -1377,7 +1397,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       imageCount: images.length,
       imageBytes: images.map((image) => image.length),
     });
-    const aiResult = await extractTutorResultsWithGemini25Flash(images, {
+    const aiResult = await getAiSubjectExtractionModule().extractTutorResultsWithGemini25Flash(images, {
       logger,
       logContext: {
         docId,
@@ -2025,7 +2045,7 @@ async function runVisionOcrOnBuffer(imageBuffer) {
 }
 
 async function runPdfVisionOcr(pdfBuffer) {
-  const images = await convertPdfToImages(pdfBuffer, {});
+  const images = await getAiSubjectExtractionModule().convertPdfToImages(pdfBuffer, {});
   const pages = [];
 
   for (let index = 0; index < images.length; index += 1) {
@@ -2167,6 +2187,11 @@ function getAiSecrets() {
     GEMINI_CLASSIFICATION_MODEL: groupedSecrets.GEMINI_CLASSIFICATION_MODEL || '',
     GEMINI_CLASSIFICATION_TIMEOUT_MS: groupedSecrets.GEMINI_CLASSIFICATION_TIMEOUT_MS || '',
     MAX_PDF_PAGES: groupedSecrets.MAX_PDF_PAGES || '',
+    PADDLE_OCR_SERVICE_URL: groupedSecrets.PADDLE_OCR_SERVICE_URL || '',
+    PADDLE_OCR_SERVICE_API_KEY: groupedSecrets.PADDLE_OCR_SERVICE_API_KEY || '',
+    PADDLE_OCR_TIMEOUT_MS: groupedSecrets.PADDLE_OCR_TIMEOUT_MS || '',
+    PADDLE_OCR_MIN_CONFIDENCE: groupedSecrets.PADDLE_OCR_MIN_CONFIDENCE || '',
+    OCR_PROVIDER_MODE: groupedSecrets.OCR_PROVIDER_MODE || '',
   };
 
   assertRequiredSecrets('CLAXI_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
@@ -2326,7 +2351,7 @@ async function extractAttachmentGemini(req, res) {
     // Retry once
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        result = await extractStudentAttachmentWithGemini25Flash({
+        result = await getGeminiExtractionModule().extractStudentAttachmentWithGemini25Flash({
           images,
           firebaseConfig: aiConfig,
           model: 'gemini-2.5-flash',
@@ -2575,7 +2600,7 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] },
       requestRefExists: Boolean(requestRef),
     });
 
-    streamMeta = await streamBoardExtractionWithAI({
+    streamMeta = await getAiSubjectExtractionModule().streamBoardExtractionWithAI({
       images,
       requestContext: {
         topic: requestData.topic || '',
@@ -2764,7 +2789,7 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] },
   }
 });
 
-exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
+exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -2814,51 +2839,94 @@ exports.extractImageOcr = onRequest({ cors: true }, async (req, res) => {
   }
 
   try {
-      let imageBuffer;
-      if (objectPath) {
-        const bucket = admin.storage().bucket();
-        const [bytes] = await bucket.file(objectPath).download();
+    let imageBuffer;
+    if (objectPath) {
+      const bucket = admin.storage().bucket();
+      const [bytes] = await bucket.file(objectPath).download();
       imageBuffer = bytes;
-      } else {
-        imageBuffer = Buffer.from(imageBase64, 'base64');
-      }
+    } else {
+      imageBuffer = Buffer.from(imageBase64, 'base64');
+    }
 
-      const isPdfInput = mimeType === 'application/pdf' || isPdfAttachmentBuffer(imageBuffer);
-      const extractionResult = isPdfInput
-        ? await runPdfVisionOcr(imageBuffer)
-        : await runVisionOcrOnBuffer(imageBuffer);
-      const extractedText = extractionResult.extractedText;
-      const textLength = extractionResult.textLength;
-  
-      logger.info('image_ocr_completed', {
-        uid: decoded.uid,
-        source: sourceLabel,
-        success: textLength > 0,
-        textLength,
-        provider: 'google-vision',
-        fileType: isPdfInput ? 'pdf' : 'image',
-      });
-  
-      res.status(200).json({
-        success: textLength > 0,
-        extractedText,
-        textLength,
-        text: extractionResult.text || extractedText,
-        extractionMethod: extractionResult.extractionMethod || 'ocr',
-        provider: 'google-vision',
-        fileType: extractionResult.fileType || (isPdfInput ? 'pdf' : 'image'),
-        extractionQuality: extractionResult.extractionQuality || (textLength > 0 ? 'good' : 'failed'),
-        scannedPdfDetected: Boolean(extractionResult.scannedPdfDetected),
-        ocrStatus: extractionResult.ocrStatus || (isPdfInput ? 'complete' : 'not_needed'),
-        pageCount: extractionResult.pageCount || null,
-        selectedPages: extractionResult.selectedPages || [],
-        pages: extractionResult.pages || [],
-        failedPageCount: Number(extractionResult.failedPageCount || 0),
-        partialSuccess: Boolean(extractionResult.partialSuccess),
-        extractedImages: extractionResult.extractedImages || [],
-        source: extractionResult.source || (isPdfInput ? 'pdf' : 'image'),
-      });
-    } catch (error) {
+    const isPdfInput = mimeType === 'application/pdf' || isPdfAttachmentBuffer(imageBuffer);
+    const aiConfig = (() => {
+      try {
+        return getAiSecrets();
+      } catch (error) {
+        return {};
+      }
+    })();
+    const fallbackMimeType = mimeType || (isPdfInput ? 'application/pdf' : 'image/png');
+    const fallbackBase64 = imageBase64 || imageBuffer.toString('base64');
+
+    const { result: extractionResult, route: providerRoute, reason: providerReason } = await getOcrProviderRouterModule().runOcrProviderRouter({
+      imageBuffer,
+      imageBase64: fallbackBase64,
+      mimeType: fallbackMimeType,
+      fileName: fileName || 'attachment',
+      sourceLabel,
+      aiConfig,
+      logger,
+      legacyVisionRunner: async () => {
+        const legacy = isPdfInput
+          ? await runPdfVisionOcr(imageBuffer)
+          : await runVisionOcrOnBuffer(imageBuffer);
+        return {
+          success: Boolean(legacy.textLength > 0),
+          extractedText: legacy.extractedText,
+          textLength: legacy.textLength,
+          text: legacy.text || legacy.extractedText,
+          extractionMethod: legacy.extractionMethod || (isPdfInput ? 'pdf_ocr' : 'ocr'),
+          provider: 'google-vision',
+          fileType: legacy.fileType || (isPdfInput ? 'pdf' : 'image'),
+          extractionQuality: legacy.extractionQuality || (legacy.textLength > 0 ? 'good' : 'failed'),
+          scannedPdfDetected: Boolean(legacy.scannedPdfDetected),
+          ocrStatus: legacy.ocrStatus || (isPdfInput ? 'complete' : 'not_needed'),
+          pageCount: legacy.pageCount || null,
+          selectedPages: legacy.selectedPages || [],
+          pages: legacy.pages || [],
+          failedPageCount: Number(legacy.failedPageCount || 0),
+          partialSuccess: Boolean(legacy.partialSuccess),
+          extractedImages: legacy.extractedImages || [],
+          source: legacy.source || (isPdfInput ? 'pdf' : 'image'),
+        };
+      },
+    });
+
+    const extractedText = String(extractionResult?.extractedText || '').trim();
+    const textLength = Number(extractionResult?.textLength || extractedText.length || 0);
+
+    logger.info('image_ocr_completed', {
+      uid: decoded.uid,
+      source: sourceLabel,
+      success: textLength > 0,
+      textLength,
+      provider: extractionResult?.provider || 'unknown',
+      providerRoute,
+      providerReason,
+      fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
+    });
+
+    res.status(200).json({
+      success: Boolean(extractionResult?.success && textLength > 0),
+      extractedText,
+      textLength,
+      text: extractionResult?.text || extractedText,
+      extractionMethod: extractionResult?.extractionMethod || (isPdfInput ? 'pdf_ocr' : 'ocr'),
+      provider: extractionResult?.provider || 'paddleocr_ppstructure',
+      fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
+      extractionQuality: extractionResult?.extractionQuality || (textLength > 0 ? 'good' : 'failed'),
+      scannedPdfDetected: Boolean(extractionResult?.scannedPdfDetected),
+      ocrStatus: extractionResult?.ocrStatus || (isPdfInput ? 'complete' : 'not_needed'),
+      pageCount: extractionResult?.pageCount || null,
+      selectedPages: extractionResult?.selectedPages || [],
+      pages: extractionResult?.pages || [],
+      failedPageCount: Number(extractionResult?.failedPageCount || 0),
+      partialSuccess: Boolean(extractionResult?.partialSuccess),
+      extractedImages: extractionResult?.extractedImages || [],
+      source: extractionResult?.source || (isPdfInput ? 'pdf' : 'image'),
+    });
+  } catch (error) {
       logger.error('image_ocr_failed', {
         uid: decoded.uid,
         source: sourceLabel,
@@ -2921,21 +2989,118 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       inputPayload,
     });
 
-    const aiResult = await classifySubjectWithAI({
-      inputText,
-      inputPayload,
+    const questionBlocks = Array.isArray(inputPayload?.questionBlocks) ? inputPayload.questionBlocks : [];
+    const attachmentSummaries = Array.isArray(inputPayload?.attachmentSummaries) ? inputPayload.attachmentSummaries : [];
+    const extractedMarksCount = (() => {
+      const marksInText = (inputText.match(/\b\d+\s*marks?\b/gi) || []).length;
+      return marksInText;
+    })();
+    const tableCount = attachmentSummaries.reduce((sum, entry) => {
+      const preview = String(entry?.textPreview || '').toLowerCase();
+      return sum + (preview.includes('table') ? 1 : 0);
+    }, 0);
+    const figureCount = attachmentSummaries.reduce((sum, entry) => {
+      const preview = String(entry?.textPreview || '').toLowerCase();
+      return sum + ((preview.includes('diagram') || preview.includes('figure') || preview.includes('graph')) ? 1 : 0);
+    }, 0);
+    const formulaCount = attachmentSummaries.reduce((sum, entry) => {
+      const preview = String(entry?.textPreview || '').toLowerCase();
+      return sum + ((preview.includes('equation') || preview.includes('formula')) ? 1 : 0);
+    }, 0);
+
+    const localSubject = classifySubjectLocally({
+      text: inputText,
       supportedSubjects,
-      firebaseConfig: getAiSecrets(),
     });
-    console.debug('[studentRequestAI] classification AI result', {
+    const localTopic = detectTopicsLocally({
+      text: inputText,
+      subject: localSubject.subject || '',
+    });
+    const localMinutes = estimateMinutesLocally({
+      text: inputText,
+      questionBlocks,
+      marksCount: extractedMarksCount,
+      tableCount,
+      figureCount,
+      formulaCount,
+    });
+
+    let aiResult = {
+      classification: {
+        subject: localSubject.subject || '',
+        unsupportedSubject: '',
+        topic: localTopic.topic || '',
+        topics: localTopic.topics || [],
+        estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
+        subjectConfidence: localSubject.subjectConfidence || 'unknown',
+        needsManualSubjectSelection: !localSubject.subject || localSubject.subjectConfidence !== 'high',
+        unsupportedSubjectRequested: false,
+        unsupportedSubjectRecorded: false,
+      },
+      prompt: '',
+      rawOutput: '',
+      model: 'local-rule-classifier',
+      backend: 'local',
+      provider: 'local',
+      error: '',
+      meta: {
+        subject: localSubject,
+        topic: localTopic,
+        minutes: localMinutes,
+      },
+    };
+
+    const shouldUseGeminiFallback = localSubject.needsGeminiFallback || localTopic.needsGeminiFallback;
+    if (shouldUseGeminiFallback) {
+      const sampleQuestionBlocks = questionBlocks.slice(0, 12).map((block) => ({
+        ...block,
+        text: String(block?.text || '').slice(0, 600),
+      }));
+      const samplePayload = {
+        ...(inputPayload || {}),
+        questionBlocks: sampleQuestionBlocks,
+        combinedTextPreview: String(inputPayload?.combinedTextPreview || inputText).slice(0, 3000),
+      };
+      aiResult = await getAiSubjectExtractionModule().classifySubjectWithAI({
+        inputText: String(inputText || '').slice(0, 6000),
+        inputPayload: samplePayload,
+        supportedSubjects,
+        firebaseConfig: getAiSecrets(),
+      });
+      aiResult.classification = {
+        ...aiResult.classification,
+        estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
+      };
+    }
+
+    console.debug('[studentRequestAI] classification result', {
       uid: decoded.uid,
+      provider: aiResult.provider || 'local',
       prompt: aiResult.prompt,
       rawOutput: aiResult.rawOutput,
       classification: aiResult.classification,
       model: aiResult.model,
       backend: aiResult.backend,
+      localMeta: aiResult.meta || {
+        subject: localSubject,
+        topic: localTopic,
+        minutes: localMinutes,
+      },
     });
-    const classification = aiResult.classification;
+
+    const classification = {
+      ...aiResult.classification,
+      estimatedMinutes: clampMinutes(localMinutes.estimatedMinutes),
+      topics: Array.isArray(aiResult?.classification?.topics)
+        ? aiResult.classification.topics
+        : (aiResult?.classification?.topic ? [aiResult.classification.topic] : []),
+      topicConfidence: aiResult.provider === 'local' ? localTopic.topicConfidence : (localTopic.topicConfidence || 'unknown'),
+      topicMethod: aiResult.provider === 'local' ? 'local' : 'gemini_fallback',
+      minutesMethod: localMinutes.method,
+      minutesConfidence: localMinutes.confidence,
+      minutesSignalsUsed: localMinutes.signalsUsed,
+      subjectMethod: aiResult.provider === 'local' ? 'local' : 'gemini_fallback',
+    };
     const unsupportedSubjectRecorded = Boolean(classification?.unsupportedSubjectRequested && classification?.unsupportedSubject);
     if (unsupportedSubjectRecorded) {
       try {
@@ -2973,7 +3138,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
 
     logger.info('subject_classification_completed', {
       uid: decoded.uid,
-      provider: 'firebase-ai-logic',
+      provider: aiResult.provider || 'local',
       model: aiResult.model,
       backend: aiResult.backend,
       durationMs: Date.now() - startedAt,
@@ -2992,7 +3157,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       res.status(200).json({
         success: true,
         classification,
-        provider: 'firebase-ai-logic',
+        provider: aiResult.provider || 'local',
         aiPrompt: aiResult.prompt,
         aiRawOutput: aiResult.rawOutput,
         aiError: aiResult.error || '',
@@ -3008,7 +3173,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       error: error.message,
     });
 
-    const fallbackClassification = validateSubjectClassification(null, supportedSubjects);
+    const fallbackClassification = getAiSubjectExtractionModule().validateSubjectClassification(null, supportedSubjects);
     await writeAiLog({
       userId: decoded.uid,
       source: 'student_subject_classification',

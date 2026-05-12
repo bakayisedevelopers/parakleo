@@ -37,6 +37,8 @@ function buildExtractionResult(attachment, payload = {}, overrides = {}) {
     pages: Array.isArray(payload?.pages) ? payload.pages : [],
     extractedImages: Array.isArray(payload?.extractedImages) ? payload.extractedImages : [],
     failedPageCount: Number(payload?.failedPageCount || 0),
+    provider: String(payload?.provider || ''),
+    confidence: Number(payload?.confidence || 0),
   };
 }
 
