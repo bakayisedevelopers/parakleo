@@ -108,7 +108,7 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
     return {
       fileName: file.name,
       uploadedAttachment,
-      extractedText: String(extraction?.extractedText || '').trim(),
+      extractedText: String(extraction?.extractedText || extraction?.text || '').trim(),
       text: String(extraction?.text || extraction?.extractedText || '').trim(),
       extractionMethod: extraction?.extractionMethod || '',
       extractionQuality: extraction?.extractionQuality || '',
@@ -130,7 +130,7 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
   });
 
   const extractedText = attachmentExtractions
-    .map((item) => item.extractedText)
+    .map((item) => item.extractedText || item.text)
     .filter(Boolean)
     .join('\n\n')
     .trim();

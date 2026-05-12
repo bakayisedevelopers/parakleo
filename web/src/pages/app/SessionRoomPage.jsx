@@ -261,12 +261,18 @@ export default function SessionRoomPage() {
   const getSessionBoardSeedContent = useCallback(() => {
     const boardPreparationSource = session?.boardPreparationSource || request?.boardPreparationSource || null;
     const attachmentExtractions = boardPreparationSource?.attachmentExtractions || [];
+    const extractedFromAttachments = attachmentExtractions
+      .map((entry) => String(entry?.extractedText || entry?.text || '').trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
     const gptExtraction = boardPreparationSource?.gptExtraction || null;
     const attachments = session?.attachments
       || request?.attachments
       || (session?.requestAttachment ? [session.requestAttachment] : [])
       || (request?.attachment ? [request.attachment] : []);
     const extractedText = boardPreparationSource?.extractedText
+      || extractedFromAttachments
       || session?.requestDescription
       || request?.description
       || session?.topic

@@ -105,7 +105,9 @@ function normalizeStructuredBlocks(payload = {}) {
 function normalizePaddleResult(payload = {}, context = {}) {
   const structured = normalizeStructuredBlocks(payload);
   const rawText = normalizeText(payload.extractedText || payload.text || '');
-  const extractedText = normalizeText(structured.structuredText || rawText);
+  const structuredText = normalizeText(structured.structuredText || '');
+  // Prefer the richer text between OCR raw text and sparse structured-region text.
+  const extractedText = rawText.length >= structuredText.length ? rawText : structuredText;
   const textLength = Number(payload.textLength || extractedText.length || 0);
   const pages = Array.isArray(payload.pages) ? payload.pages : [];
   const failedPageCount = pages.filter((page) => !page?.success).length;
@@ -114,7 +116,7 @@ function normalizePaddleResult(payload = {}, context = {}) {
   const quality = evaluateExtractionQuality(extractedText, confidence);
 
   return {
-    success: Boolean(payload.success && textLength > 0),
+    success: Boolean(textLength > 0 && (payload.success !== false)),
     extractedText,
     text: normalizeText(payload.text || extractedText),
     textLength,

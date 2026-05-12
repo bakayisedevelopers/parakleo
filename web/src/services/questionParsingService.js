@@ -245,7 +245,7 @@ function normalizeAttachmentExtractions(attachmentExtractions = []) {
         .filter(Boolean);
 
       return {
-        text: String(entry?.extractedText || ''),
+        text: String(entry?.extractedText || entry?.text || ''),
         images: dedupeImages([
           ...pageImages,
           ...extractedImages,

@@ -10,8 +10,12 @@ import pypdfium2 as pdfium
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from PIL import Image
-from paddleocr import PPStructure, PaddleOCR
+from paddleocr import PaddleOCR
 import paddleocr as paddleocr_pkg
+try:
+    from paddleocr import PPStructureV3 as PaddlePPStructure
+except ImportError:
+    from paddleocr import PPStructure as PaddlePPStructure
 
 API_KEY = os.getenv('PADDLE_OCR_SERVICE_API_KEY', '').strip()
 MAX_PDF_PAGES = int(os.getenv('PADDLE_OCR_MAX_PDF_PAGES', '10'))
@@ -30,7 +34,7 @@ os.makedirs(PADDLE_OCR_BASE_DIR, exist_ok=True)
 os.makedirs('/tmp/.cache', exist_ok=True)
 
 ocr_engine: Optional[PaddleOCR] = None
-pp_structure: Optional[PPStructure] = None
+pp_structure: Optional[Any] = None
 pp_structure_runtime_version: str = 'unknown'
 
 
@@ -42,33 +46,60 @@ class ExtractRequest(BaseModel):
     downloadUrl: Optional[str] = None
 
 
-def get_engines() -> tuple[PaddleOCR, PPStructure]:
+def _init_ocr_engine() -> PaddleOCR:
+    try:
+        return PaddleOCR(lang='en', use_angle_cls=True)
+    except Exception:
+        try:
+            return PaddleOCR(lang='en')
+        except Exception:
+            return PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+
+
+def _init_pp_structure() -> tuple[Any, str]:
+    base_kwargs = {
+        'lang': 'en',
+        'layout': PP_STRUCTURE_LAYOUT,
+        'table': PP_STRUCTURE_TABLE,
+        'ocr': PP_STRUCTURE_OCR,
+        'recovery': PP_STRUCTURE_RECOVERY,
+    }
+
+    class_name = getattr(PaddlePPStructure, '__name__', '')
+    if class_name == 'PPStructureV3':
+        try:
+            return PaddlePPStructure(**base_kwargs), 'PP-StructureV3'
+        except TypeError:
+            # Some builds expose PPStructureV3 with reduced constructor args.
+            return PaddlePPStructure(), 'PP-StructureV3'
+
+    try:
+        return PaddlePPStructure(
+            **base_kwargs,
+            structure_version=PP_STRUCTURE_VERSION,
+        ), PP_STRUCTURE_VERSION
+    except TypeError:
+        try:
+            return PaddlePPStructure(**base_kwargs), 'auto_default'
+        except TypeError:
+            return PaddlePPStructure(), 'auto_default'
+
+
+def get_engines() -> tuple[PaddleOCR, Any]:
     global ocr_engine, pp_structure, pp_structure_runtime_version
     if ocr_engine is None:
-        ocr_engine = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+        ocr_engine = _init_ocr_engine()
     if pp_structure is None:
         try:
-            pp_structure = PPStructure(
-                show_log=False,
-                lang='en',
-                layout=PP_STRUCTURE_LAYOUT,
-                table=PP_STRUCTURE_TABLE,
-                ocr=PP_STRUCTURE_OCR,
-                recovery=PP_STRUCTURE_RECOVERY,
-                structure_version=PP_STRUCTURE_VERSION,
-            )
-            pp_structure_runtime_version = PP_STRUCTURE_VERSION
-        except Exception:
-            # Paddle 2.9.1 can reject explicit structure_version values in some builds.
-            pp_structure = PPStructure(
-                show_log=False,
-                lang='en',
-                layout=PP_STRUCTURE_LAYOUT,
-                table=PP_STRUCTURE_TABLE,
-                ocr=PP_STRUCTURE_OCR,
-                recovery=PP_STRUCTURE_RECOVERY,
-            )
-            pp_structure_runtime_version = 'auto_default'
+            pp_structure, pp_structure_runtime_version = _init_pp_structure()
+        except Exception as init_error:
+            # Last-resort fallback for runtime-specific constructor incompatibilities.
+            try:
+                pp_structure = PaddlePPStructure()
+                pp_structure_runtime_version = 'auto_default'
+            except Exception:
+                pp_structure = None
+                pp_structure_runtime_version = f'unavailable:{type(init_error).__name__}'
     return ocr_engine, pp_structure
 
 
@@ -107,8 +138,31 @@ def image_bytes_to_np(data: bytes) -> np.ndarray:
 def normalize_ocr_lines(ocr_result: Any) -> tuple[str, float]:
     text_parts: List[str] = []
     confidences: List[float] = []
-    if isinstance(ocr_result, list):
+    if isinstance(ocr_result, dict):
+        rec_texts = ocr_result.get('rec_texts') or []
+        rec_scores = ocr_result.get('rec_scores') or []
+        if isinstance(rec_texts, list):
+            for index, line in enumerate(rec_texts):
+                line_text = str(line or '').strip()
+                if not line_text:
+                    continue
+                line_conf = rec_scores[index] if index < len(rec_scores) else 0
+                text_parts.append(line_text)
+                confidences.append(max(0.0, min(1.0, float(line_conf or 0))))
+    elif isinstance(ocr_result, list):
         for block in ocr_result:
+            if isinstance(block, dict):
+                rec_texts = block.get('rec_texts') or []
+                rec_scores = block.get('rec_scores') or []
+                if isinstance(rec_texts, list):
+                    for index, line in enumerate(rec_texts):
+                        line_text = str(line or '').strip()
+                        if not line_text:
+                            continue
+                        line_conf = rec_scores[index] if index < len(rec_scores) else 0
+                        text_parts.append(line_text)
+                        confidences.append(max(0.0, min(1.0, float(line_conf or 0))))
+                continue
             if not isinstance(block, list):
                 continue
             for line in block:
@@ -223,9 +277,21 @@ def extract(req: ExtractRequest, x_api_key: Optional[str] = Header(default=None)
         warnings: List[str] = []
 
         for i, page_img in enumerate(pages_np):
-            ocr_result = ocr.ocr(page_img, cls=True)
+            try:
+                ocr_result = ocr.ocr(page_img, cls=True)
+            except TypeError:
+                ocr_result = ocr.ocr(page_img)
             page_text, page_confidence = normalize_ocr_lines(ocr_result)
-            structured = structure(page_img, return_ocr_result_in_table=PP_STRUCTURE_RETURN_TABLE_OCR)
+            try:
+                if structure is None:
+                    raise RuntimeError('PP-Structure engine unavailable')
+                structured = structure(page_img, return_ocr_result_in_table=PP_STRUCTURE_RETURN_TABLE_OCR)
+            except Exception as structure_error:
+                structured = []
+                warnings.append(
+                    f'PP-Structure fallback on page {i + 1}: '
+                    f'{type(structure_error).__name__}: {str(structure_error)[:180]}'
+                )
             visual_regions, tables, formulas, extracted_images, page_warnings = normalize_structured_regions(structured)
 
             if page_text:
