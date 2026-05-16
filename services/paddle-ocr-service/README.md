@@ -1,6 +1,6 @@
 # Paddle OCR Service (Cloud Run)
 
-This service provides raw OCR + structured layout extraction for Claxi using PaddleOCR and PP-StructureV3.
+This service provides OCR + document parsing for Claxi using PaddleOCR-VL 1.5 on CPU (Cloud Run).
 
 ## Endpoint
 - `POST /extract`
@@ -30,7 +30,7 @@ Includes:
 - `tables[]`
 - `formulas[]`
 - `confidence`
-- `provider` (`paddleocr_ppstructure`)
+- `provider` (`paddleocr_vl_1_5`)
 - `warnings[]`
 - `elapsedMs`
 
@@ -38,6 +38,11 @@ Includes:
 - `PADDLE_OCR_SERVICE_API_KEY` (optional API key check via `x-api-key`)
 - `PADDLE_OCR_MAX_PDF_PAGES` (default `10`)
 - `PADDLE_OCR_MAX_IMAGE_BYTES` (default `20971520`)
+- `PADDLE_OCR_VL_PIPELINE_VERSION` (default `v1.5`)
+- `PADDLE_OCR_VL_DEVICE` (default `cpu`)
+- `PADDLE_OCR_VL_USE_LAYOUT_DETECTION` (default `true`)
+- `PADDLE_OCR_VL_USE_DOC_ORIENTATION_CLASSIFY` (default `false`)
+- `PADDLE_OCR_VL_USE_DOC_UNWARPING` (default `false`)
 
 ## Local Run
 ```bash
@@ -56,9 +61,11 @@ gcloud run deploy claxi-paddle-ocr \
   --cpu 4 \
   --memory 8Gi \
   --concurrency 2 \
+  --cpu-boost \
   --min-instances 0 \
   --max-instances 20 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --set-env-vars PADDLE_OCR_VL_PIPELINE_VERSION=v1.5,PADDLE_OCR_VL_DEVICE=cpu,PADDLE_OCR_VL_USE_LAYOUT_DETECTION=true,PADDLE_OCR_VL_USE_DOC_ORIENTATION_CLASSIFY=false,PADDLE_OCR_VL_USE_DOC_UNWARPING=false
 ```
 
 Use authenticated ingress + API key in production.

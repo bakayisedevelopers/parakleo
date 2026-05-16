@@ -58,6 +58,40 @@ export function detectAttachmentType(file) {
   return null;
 }
 
+function emitStatus(onStatus, payload = {}) {
+  if (typeof onStatus !== 'function') return;
+  try {
+    onStatus({
+      phase: String(payload.phase || ''),
+      label: String(payload.label || ''),
+      fileName: String(payload.fileName || ''),
+      fileType: String(payload.fileType || ''),
+      level: String(payload.level || 'info'),
+      details: payload.details || null,
+      ts: Date.now(),
+    });
+  } catch (error) {
+    console.debug('[attachmentExtraction] status callback failed', { error: error?.message });
+  }
+}
+
+function waitMs(durationMs = 0) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
+}
+
+function mapProviderReasonToStatus(reason = '') {
+  const normalized = String(reason || '').toLowerCase();
+  if (!normalized) return 'Provider route completed';
+  if (normalized === 'low_confidence') return 'Paddle low confidence, fallback engaged';
+  if (normalized === 'paddle_error') return 'Paddle error, fallback engaged';
+  if (normalized === 'paddle_service_not_configured') return 'Paddle service not configured, fallback engaged';
+  if (normalized === 'paddle_unsuccessful') return 'Paddle returned weak/empty output, fallback engaged';
+  if (normalized === 'mode_gemini_only') return 'Gemini-only mode enabled';
+  if (normalized === 'mode_legacy_vision') return 'Legacy OCR route engaged';
+  if (normalized === 'paddle_success') return 'Paddle route succeeded';
+  return `Provider route: ${normalized.replace(/_/g, ' ')}`;
+}
+
 export function evaluateExtractionQuality(rawText) {
   const extractedText = String(rawText || '').replace(/\s+/g, ' ').trim();
   const textLength = extractedText.length;
@@ -93,13 +127,93 @@ export function evaluateExtractionQuality(rawText) {
   };
 }
 
-async function extractFromImage(file) {
+async function extractFromImage(file, onStatus) {
+  const fileType = detectAttachmentType(file) || '';
+  emitStatus(onStatus, {
+    phase: 'firebase_upload_payload',
+    label: 'Picture going to Firebase function',
+    fileName: file?.name || '',
+    fileType,
+  });
+
+  emitStatus(onStatus, {
+    phase: 'paddle_route_start',
+    label: 'Paddle called',
+    fileName: file?.name || '',
+    fileType,
+  });
+
   try {
-    return await extractImageTextWithVision(file);
+    const startedAt = Date.now();
+    const result = await extractImageTextWithVision(file);
+    const route = String(result?.providerRoute || '');
+    const reason = String(result?.providerReason || '');
+    const elapsedMs = Date.now() - startedAt;
+
+    const trace = Array.isArray(result?.processingTrace) ? result.processingTrace : [];
+    for (let index = 0; index < trace.length; index += 1) {
+      const entry = trace[index] || {};
+      emitStatus(onStatus, {
+        phase: String(entry.phase || ''),
+        label: String(entry.label || ''),
+        fileName: file?.name || '',
+        fileType,
+        details: entry.details || null,
+      });
+      await waitMs(index === 0 ? 80 : 180);
+    }
+
+    if (route === 'gemini_fallback') {
+      emitStatus(onStatus, {
+        phase: 'gemini_fallback',
+        label: 'Gemini fallback activated',
+        fileName: file?.name || '',
+        fileType,
+        level: 'warn',
+        details: { reason, elapsedMs },
+      });
+      emitStatus(onStatus, {
+        phase: 'provider_reason',
+        label: mapProviderReasonToStatus(reason),
+        fileName: file?.name || '',
+        fileType,
+        level: 'warn',
+      });
+    } else {
+      emitStatus(onStatus, {
+        phase: 'paddle_processing',
+        label: 'Paddle processing',
+        fileName: file?.name || '',
+        fileType,
+        details: { route, reason, elapsedMs },
+      });
+      emitStatus(onStatus, {
+        phase: 'paddle_done',
+        label: 'Paddle done',
+        fileName: file?.name || '',
+        fileType,
+      });
+      emitStatus(onStatus, {
+        phase: 'provider_reason',
+        label: mapProviderReasonToStatus(reason),
+        fileName: file?.name || '',
+        fileType,
+      });
+    }
+
+    return result;
   } catch (error) {
     console.debug('[attachmentExtraction][ocr] image OCR extraction via google-vision failed', {
       fileName: file?.name,
       error: error?.message,
+    });
+    emitStatus(onStatus, {
+      phase: 'ocr_failed',
+      label: 'OCR failed',
+      fileName: file?.name || '',
+      fileType,
+      level: 'error',
+      details: { message: error?.message || 'Unknown OCR failure' },
     });
     return buildOcrResult('');
   }
@@ -526,8 +640,15 @@ function buildExtractionResult({
   };
 }
 
-export async function extractSingleAttachment(file) {
+export async function extractSingleAttachment(file, options = {}) {
+  const { onStatus } = options;
   const fileType = detectAttachmentType(file);
+  emitStatus(onStatus, {
+    phase: 'file_detected',
+    label: 'Attachment detected',
+    fileName: file?.name || '',
+    fileType: fileType || 'unknown',
+  });
   console.debug('[attachmentExtraction] file type detected', {
     fileName: file?.name,
     mimeType: file?.type,
@@ -549,7 +670,18 @@ export async function extractSingleAttachment(file) {
   if (fileType === 'image' || fileType === 'pdf') {
     console.debug('[attachmentExtraction] extraction path chosen', { fileName: file.name, path: `${fileType}->backend-ocr-router` });
     try {
-      const imageResult = await extractFromImage(file);
+      const imageResult = await extractFromImage(file, onStatus);
+      if (String(imageResult?.providerRoute || '') === 'paddle_primary') {
+        emitStatus(onStatus, {
+          phase: 'cold_start_hint',
+          label: 'Container cold start check (hint)',
+          fileName: file?.name || '',
+          fileType,
+          details: {
+            elapsedMs: Number(imageResult?.structuredData?.elapsedMs || imageResult?.elapsedMs || 0),
+          },
+        });
+      }
       return buildExtractionResult({
         file,
         fileType,
@@ -576,6 +708,14 @@ export async function extractSingleAttachment(file) {
       });
     } catch (error) {
       console.debug('[attachmentExtraction] image OCR failed', { fileName: file.name, error: error?.message });
+      emitStatus(onStatus, {
+        phase: 'extraction_failed',
+        label: 'Extraction failed',
+        fileName: file?.name || '',
+        fileType,
+        level: 'error',
+        details: { message: error?.message || 'Unknown extraction failure' },
+      });
       return buildExtractionResult({
         file,
         fileType,
@@ -599,11 +739,17 @@ export async function extractSingleAttachment(file) {
   });
 }
 
-export async function extractAttachments(files = [], onProgress) {
+export async function extractAttachments(files = [], onProgress, onStatus) {
   const results = [];
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
+    emitStatus(onStatus, {
+      phase: 'file_started',
+      label: `Starting extraction ${index + 1}/${files.length}`,
+      fileName: file?.name || '',
+      fileType: detectAttachmentType(file) || '',
+    });
     console.debug('[attachmentExtraction] extraction started', {
       fileName: file?.name,
       index,
@@ -613,7 +759,7 @@ export async function extractAttachments(files = [], onProgress) {
     let result;
 
     try {
-      result = await extractSingleAttachment(file);
+      result = await extractSingleAttachment(file, { onStatus });
     } catch (error) {
       console.debug('[attachmentExtraction] extraction crashed; returning fallback', {
         fileName: file?.name,
@@ -629,6 +775,20 @@ export async function extractAttachments(files = [], onProgress) {
         success: false,
       });
     }
+
+    emitStatus(onStatus, {
+      phase: 'file_completed',
+      label: result.success ? 'Extraction complete' : 'Extraction completed with weak/empty text',
+      fileName: result.fileName || file?.name || '',
+      fileType: result.fileType || '',
+      level: result.success ? 'info' : 'warn',
+      details: {
+        success: Boolean(result.success),
+        provider: String(result.provider || ''),
+        providerRoute: String(result.providerRoute || ''),
+        textLength: Number(result.textLength || 0),
+      },
+    });
 
     console.debug('[attachmentExtraction] extraction completed', {
       fileName: result.fileName,

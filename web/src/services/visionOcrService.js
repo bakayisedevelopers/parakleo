@@ -64,11 +64,17 @@ export async function extractImageTextWithVision(file) {
     pages: Array.isArray(payload.pages) ? payload.pages : [],
     extractedImages: Array.isArray(payload.extractedImages) ? payload.extractedImages : [],
     failedPageCount: Number(payload.failedPageCount || 0),
-    provider: String(payload.provider || 'paddleocr_ppstructure'),
+    provider: String(payload.provider || 'paddleocr_vl_1_5'),
     providerRoute: String(payload.providerRoute || ''),
     providerReason: String(payload.providerReason || ''),
     confidence: Number(payload.confidence || 0),
     structuredData: payload?.structuredData && typeof payload.structuredData === 'object' ? payload.structuredData : null,
     ppStructureVersion: String(payload?.ppStructureVersion || payload?.structuredData?.ppStructureVersion || ''),
+    processingTrace: Array.isArray(payload?.processingTrace) ? payload.processingTrace : [],
+    geminiSubject: String(payload?.structuredData?.geminiSubject || ''),
+    geminiTopic: String(payload?.structuredData?.geminiTopic || ''),
+    geminiTopics: Array.isArray(payload?.structuredData?.geminiTopics) ? payload.structuredData.geminiTopics : [],
+    geminiEstimatedMinutes: Number(payload?.structuredData?.geminiEstimatedMinutes || 0) || 0,
+    geminiVisualRegionCount: Number(payload?.structuredData?.geminiVisualRegionCount || 0) || 0,
   };
 }

@@ -83,6 +83,17 @@ function buildFallbackTextFromParsed(parsed = {}, page = {}) {
   return fragments.join('\n').trim();
 }
 
+function getGeminiVisualRegionCount(parsed = {}) {
+  const pages = Array.isArray(parsed?.pages) ? parsed.pages : [];
+  return pages.reduce((total, page = {}) => {
+    const questions = Array.isArray(page?.questions) ? page.questions : [];
+    return total + questions.reduce((innerTotal, question = {}) => {
+      const regions = Array.isArray(question?.visualRegions) ? question.visualRegions : [];
+      return innerTotal + regions.length;
+    }, 0);
+  }, 0);
+}
+
 async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', aiConfig = {}, timeoutMs = 45000 }) {
   const isPdf = String(mimeType || '').toLowerCase() === 'application/pdf' || (Buffer.isBuffer(imageBuffer) && imageBuffer.slice(0, 5).toString('utf8') === '%PDF-');
   const imageBuffers = await convertPdfToImages(imageBuffer, { firebaseConfig: aiConfig }).catch(() => [imageBuffer]);
@@ -125,6 +136,9 @@ async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', ai
   const extractedText = pageOutputs.map((page) => page.extractedText).filter(Boolean).join('\n\n').trim();
   const synthesizedText = extractedText || buildFallbackTextFromParsed(parsed, {}) || rawOutput;
   const failedPageCount = pageOutputs.filter((page) => !page.success).length;
+  const geminiTopics = Array.isArray(parsed?.topics) ? parsed.topics.map((value) => String(value || '').trim()).filter(Boolean) : [];
+  const geminiEstimatedMinutes = Number(parsed?.estimatedMinutes || 0);
+  const geminiVisualRegionCount = getGeminiVisualRegionCount(parsed);
 
   return {
     success: Boolean(synthesizedText),
@@ -144,6 +158,11 @@ async function geminiOcrFallback({ imageBuffer, mimeType = '', fileName = '', ai
     provider: 'gemini-2.5-flash-fallback',
     fileType: isPdf ? 'pdf' : 'image',
     fileName,
+    geminiSubject: String(parsed?.subject || '').trim(),
+    geminiTopic: String(parsed?.topic || '').trim(),
+    geminiTopics,
+    geminiEstimatedMinutes: Number.isFinite(geminiEstimatedMinutes) ? geminiEstimatedMinutes : 0,
+    geminiVisualRegionCount,
   };
 }
 

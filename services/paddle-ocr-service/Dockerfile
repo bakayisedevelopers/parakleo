@@ -18,6 +18,8 @@ RUN pip install -r requirements.txt
 
 RUN mkdir -p /tmp/.paddleocr /tmp/.cache
 
+COPY sitecustomize.py ./sitecustomize.py
+RUN cp ./sitecustomize.py /usr/local/lib/python3.11/site-packages/sitecustomize.py
 COPY app ./app
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

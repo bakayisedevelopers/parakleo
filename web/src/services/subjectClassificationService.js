@@ -168,6 +168,13 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
       providerRoute: normalizeText(entry?.providerRoute),
       providerReason: normalizeText(entry?.providerReason),
       ppStructureVersion: normalizeText(entry?.ppStructureVersion),
+      geminiSubject: normalizeText(entry?.geminiSubject || entry?.structuredData?.geminiSubject),
+      geminiTopic: normalizeText(entry?.geminiTopic || entry?.structuredData?.geminiTopic),
+      geminiTopics: Array.isArray(entry?.geminiTopics || entry?.structuredData?.geminiTopics)
+        ? (entry.geminiTopics || entry.structuredData.geminiTopics).map((value) => normalizeText(value)).filter(Boolean).slice(0, 10)
+        : [],
+      geminiEstimatedMinutes: Number(entry?.geminiEstimatedMinutes || entry?.structuredData?.geminiEstimatedMinutes || 0) || 0,
+      geminiVisualRegionCount: Number(entry?.geminiVisualRegionCount || entry?.structuredData?.geminiVisualRegionCount || 0) || 0,
       structuredBlockCount: structuredBlocks.length,
       structuredTypes,
       structuredPreview: truncateText(normalizeText(entry?.structuredData?.structuredTextPreview), 800),

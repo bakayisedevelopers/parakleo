@@ -20,7 +20,7 @@ import { useStudentSessions } from '../../../hooks/useSessions';
 import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
 import { subscribeToUserAiLogs } from '../../../services/aiLogService';
-import { extractAttachments } from '../../../services/attachmentExtractionService';
+import { detectAttachmentType, extractAttachments } from '../../../services/attachmentExtractionService';
 import { createClassRequest } from '../../../services/classRequestService';
 import { fetchPricingQuote } from '../../../services/pricingService';
 import { uploadUserFile } from '../../../services/storageService';
@@ -93,6 +93,125 @@ function getExtractionStatusLabel(status = '') {
   return 'Scanning...';
 }
 
+function formatProgressLabel(event) {
+  const label = String(event?.label || '').trim();
+  if (label) return label;
+  return 'Processing...';
+}
+
+async function loadPdfJsForPreview() {
+  const pdfjs = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+  return pdfjs;
+}
+
+async function buildPdfPageImageAssets(file) {
+  const pdfjs = await loadPdfJsForPreview();
+  const pdfData = await file.arrayBuffer();
+  const pdfDocument = await pdfjs.getDocument({ data: pdfData }).promise;
+  const assets = [];
+
+  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+    const page = await pdfDocument.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.35 });
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) continue;
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+    assets.push({
+      id: `${file.name}-pdf-page-${pageNumber}`,
+      fileName: `${file.name} page ${pageNumber}`,
+      src: canvas.toDataURL('image/png'),
+      mimeType: 'image/png',
+      width: canvas.width,
+      height: canvas.height,
+      pageNumber,
+    });
+  }
+
+  return assets;
+}
+
+async function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to read file as image data URL.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadImageFromDataUrl(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load source image for cropping.'));
+    image.src = src;
+  });
+}
+
+function toPixelRect(block, width, height) {
+  const xRaw = Number(block?.bbox?.x || 0);
+  const yRaw = Number(block?.bbox?.y || 0);
+  const wRaw = Number(block?.bbox?.width || 0);
+  const hRaw = Number(block?.bbox?.height || 0);
+  const isNormalized = xRaw >= 0 && yRaw >= 0 && wRaw > 0 && hRaw > 0 && xRaw <= 1 && yRaw <= 1 && wRaw <= 1.2 && hRaw <= 1.2;
+
+  const x = Math.max(0, Math.round(isNormalized ? xRaw * width : xRaw));
+  const y = Math.max(0, Math.round(isNormalized ? yRaw * height : yRaw));
+  const w = Math.max(1, Math.round(isNormalized ? wRaw * width : wRaw));
+  const h = Math.max(1, Math.round(isNormalized ? hRaw * height : hRaw));
+  return {
+    x: Math.min(width - 1, x),
+    y: Math.min(height - 1, y),
+    w: Math.min(width, w),
+    h: Math.min(height, h),
+  };
+}
+
+async function cropDiagramAssetsFromBlocks({ blocks = [], sourceImages = [], fileName = '' }) {
+  const relevantBlocks = (blocks || [])
+    .filter((block) => ['diagram', 'figure', 'graph', 'image', 'chart', 'equation', 'formula', 'table'].includes(String(block?.type || '').toLowerCase()))
+    .slice(0, 24);
+  if (!relevantBlocks.length || !sourceImages.length) return [];
+
+  const assets = [];
+  for (let index = 0; index < relevantBlocks.length; index += 1) {
+    const block = relevantBlocks[index];
+    const pageNumber = Number(block?.pageNumber || 1);
+    const pageSource = sourceImages.find((entry) => Number(entry?.pageNumber || 1) === pageNumber) || sourceImages[0];
+    if (!pageSource?.src) continue;
+    try {
+      const image = await loadImageFromDataUrl(pageSource.src);
+      const rect = toPixelRect(block, image.naturalWidth || image.width, image.naturalHeight || image.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = rect.w;
+      canvas.height = rect.h;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      context.drawImage(image, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+      assets.push({
+        id: `${fileName}-crop-${pageNumber}-${index + 1}`,
+        fileName: `${fileName} crop ${index + 1}`,
+        src: canvas.toDataURL('image/png'),
+        mimeType: 'image/png',
+        width: rect.w,
+        height: rect.h,
+        pageNumber,
+      });
+    } catch (error) {
+      console.error('[attachmentExtraction] block crop failed', {
+        fileName,
+        pageNumber,
+        message: error?.message,
+      });
+    }
+  }
+  return assets;
+}
+
 function renderExtractionStatusIcon(status = '') {
   const normalizedStatus = String(status || '').toLowerCase();
 
@@ -150,6 +269,14 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       providerRoute: extraction?.providerRoute || '',
       providerReason: extraction?.providerReason || '',
       confidence: Number(extraction?.confidence || 0),
+      geminiSubject: extraction?.geminiSubject || extraction?.structuredData?.geminiSubject || '',
+      geminiTopic: extraction?.geminiTopic || extraction?.structuredData?.geminiTopic || '',
+      geminiTopics: Array.isArray(extraction?.geminiTopics || extraction?.structuredData?.geminiTopics)
+        ? (extraction.geminiTopics || extraction.structuredData.geminiTopics)
+        : [],
+      geminiEstimatedMinutes: Number(extraction?.geminiEstimatedMinutes || extraction?.structuredData?.geminiEstimatedMinutes || 0) || 0,
+      geminiVisualRegionCount: Number(extraction?.geminiVisualRegionCount || extraction?.structuredData?.geminiVisualRegionCount || 0) || 0,
+      structuredData: extraction?.structuredData || null,
     };
   });
 
@@ -237,6 +364,8 @@ export default function StudentDashboardPage() {
   const [showExtractionOverlay, setShowExtractionOverlay] = useState(false);
   const [showSlowExtractionMessage, setShowSlowExtractionMessage] = useState(false);
   const [extractionOverlayState, setExtractionOverlayState] = useState('idle');
+  const [extractionStatusEvents, setExtractionStatusEvents] = useState([]);
+  const [extractionErrors, setExtractionErrors] = useState([]);
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
   const { subjectOptions } = useSubjectCatalog();
@@ -420,6 +549,10 @@ export default function StudentDashboardPage() {
     setShowExtractionOverlay(true);
     setShowSlowExtractionMessage(false);
     setExtractionOverlayState('processing');
+    setExtractionStatusEvents([
+      { ts: Date.now(), phase: 'start', label: 'Upload started', level: 'info' },
+    ]);
+    setExtractionErrors([]);
 
     const nextAttachments = [...attachmentsRef.current, ...newFilesForExtraction];
     attachmentsRef.current = nextAttachments;
@@ -436,15 +569,80 @@ export default function StudentDashboardPage() {
       setClassificationState('running');
       setClassificationStatus('Analyzing your request...');
       const extractedByKey = {};
-      await extractAttachments(newFilesForExtraction, (result, index) => {
+      await extractAttachments(newFilesForExtraction, async (result, index) => {
         const file = newFilesForExtraction[index];
         const fileKey = getAttachmentKey(file);
-        extractedByKey[fileKey] = result;
-        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
+        let nextResult = result;
+        const sourceImages = [];
+        if (detectAttachmentType(file) === 'pdf') {
+          try {
+            const pdfPageImages = await buildPdfPageImageAssets(file);
+            if (pdfPageImages.length) {
+              const existingImages = Array.isArray(result?.extractedImages) ? result.extractedImages : [];
+              sourceImages.push(...pdfPageImages);
+              nextResult = {
+                ...result,
+                extractedImages: [...existingImages, ...pdfPageImages],
+              };
+            }
+          } catch (pdfPreviewError) {
+            console.error('[attachmentExtraction] pdf preview image generation failed', {
+              fileName: file?.name,
+              message: pdfPreviewError?.message,
+            });
+            setExtractionErrors((prev) => [
+              ...prev,
+              `PDF page render failed for ${file?.name || 'file'}: ${pdfPreviewError?.message || 'Unknown error'}`,
+            ]);
+          }
+        } else if (detectAttachmentType(file) === 'image') {
+          try {
+            const src = await readFileAsDataUrl(file);
+            sourceImages.push({
+              id: `${file.name}-page-1`,
+              fileName: `${file.name} source`,
+              src,
+              mimeType: file.type || 'image/png',
+              pageNumber: 1,
+            });
+          } catch (imageSourceError) {
+            console.error('[attachmentExtraction] image source conversion failed', {
+              fileName: file?.name,
+              message: imageSourceError?.message,
+            });
+          }
+        }
+
+        const structuredBlocks = Array.isArray(nextResult?.structuredData?.blocks) ? nextResult.structuredData.blocks : [];
+        if (structuredBlocks.length && sourceImages.length) {
+          const crops = await cropDiagramAssetsFromBlocks({
+            blocks: structuredBlocks,
+            sourceImages,
+            fileName: file?.name || 'attachment',
+          });
+          if (crops.length) {
+            const existingImages = Array.isArray(nextResult?.extractedImages) ? nextResult.extractedImages : [];
+            nextResult = {
+              ...nextResult,
+              extractedImages: [...existingImages, ...crops],
+            };
+            setExtractionStatusEvents((prev) => [
+              ...prev.slice(-11),
+              { ts: Date.now(), phase: 'diagram_cropping', label: `Diagram cropping metadata applied (${crops.length})`, level: 'info' },
+            ]);
+          }
+        }
+        extractedByKey[fileKey] = nextResult;
+        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: nextResult }));
         setAttachmentExtractionStatusByKey((prev) => ({
           ...prev,
-          [fileKey]: result.success ? 'text extracted' : 'extraction weak',
+          [fileKey]: nextResult.success ? 'text extracted' : 'extraction weak',
         }));
+      }, (statusEvent) => {
+        setExtractionStatusEvents((prev) => [...prev.slice(-11), statusEvent]);
+        if (statusEvent?.level === 'error') {
+          setExtractionErrors((prev) => [...prev, `${statusEvent?.fileName || 'file'}: ${statusEvent?.details?.message || statusEvent?.label || 'Error'}`]);
+        }
       });
 
       const mergedExtractions = { ...attachmentExtractionByKey, ...extractedByKey };
@@ -469,6 +667,12 @@ export default function StudentDashboardPage() {
       setClassifiedTopic(result.topic || '');
       setEstimatedMinutes(nextEstimatedMinutes);
       setClassificationState('done');
+      setExtractionStatusEvents((prev) => [
+        ...prev.slice(-11),
+        { ts: Date.now(), phase: 'subject_detection', label: 'Subject detection', level: 'info' },
+        { ts: Date.now(), phase: 'time_estimation', label: 'Time estimation', level: 'info' },
+        { ts: Date.now(), phase: 'topics_detected', label: 'Topics detected', level: 'info' },
+      ]);
 
       const detectedSubject = result.subject || '';
       if (detectedSubject) {
@@ -503,6 +707,8 @@ export default function StudentDashboardPage() {
     } catch (err) {
       console.error(err);
       setError(err.message || 'Extraction failed. Please try again or upload a clearer image.');
+      setExtractionStatusEvents((prev) => [...prev.slice(-11), { ts: Date.now(), phase: 'fatal', label: 'Extraction failed', level: 'error' }]);
+      setExtractionErrors((prev) => [...prev, err.message || 'Extraction failed']);
       setClassificationState('done');
       setClassificationStatus('Choose the subject manually before sending.');
       setAttachmentExtractionStatusByKey((prev) => {
@@ -867,6 +1073,8 @@ export default function StudentDashboardPage() {
     setShowExtractionOverlay(false);
     setShowSlowExtractionMessage(false);
     setExtractionOverlayState('idle');
+    setExtractionStatusEvents([]);
+    setExtractionErrors([]);
 
     if (extractionOverlayRedirectTimeoutRef.current) {
       clearTimeout(extractionOverlayRedirectTimeoutRef.current);
@@ -1347,6 +1555,30 @@ export default function StudentDashboardPage() {
                 <p className="mt-3 rounded-2xl border border-amber-300/60 bg-amber-100 px-4 py-3 text-sm text-zinc-900">
                   Your file is big, scanning your file is taking long, please bear with us.
                 </p>
+              ) : null}
+
+              <div className="mt-3 w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Live extraction status</p>
+                <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+                  {extractionStatusEvents.length ? extractionStatusEvents.map((event, idx) => (
+                    <p key={`${event.ts}-${idx}`} className={`text-xs ${event.level === 'error' ? 'text-rose-600' : event.level === 'warn' ? 'text-amber-700' : 'text-zinc-700'}`}>
+                      {formatProgressLabel(event)}
+                    </p>
+                  )) : (
+                    <p className="text-xs text-zinc-500">Waiting for status updates...</p>
+                  )}
+                </div>
+              </div>
+
+              {extractionErrors.length ? (
+                <div className="mt-3 w-full rounded-2xl border border-rose-300 bg-rose-50 p-3 text-left">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-rose-700">Errors</p>
+                  <div className="mt-2 max-h-24 overflow-y-auto space-y-1">
+                    {extractionErrors.slice(-6).map((entry, idx) => (
+                      <p key={`extract-err-${idx}`} className="text-xs text-rose-700">{entry}</p>
+                    ))}
+                  </div>
+                </div>
               ) : null}
             </div>
 

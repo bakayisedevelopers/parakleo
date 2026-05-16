@@ -121,7 +121,7 @@ function normalizePaddleResult(payload = {}, context = {}) {
     text: normalizeText(payload.text || extractedText),
     textLength,
     extractionMethod: context.isPdfInput ? 'pdf_ocr' : 'ocr',
-    provider: 'paddleocr_ppstructure',
+    provider: String(payload.provider || 'paddleocr_vl_1_5'),
     fileType: context.isPdfInput ? 'pdf' : 'image',
     extractionQuality: quality.extractionQuality,
     scannedPdfDetected,
@@ -136,6 +136,7 @@ function normalizePaddleResult(payload = {}, context = {}) {
       blocks: structured.blocks,
       structuredTextPreview: structured.structuredText.slice(0, 4000),
       ppStructureVersion: String(payload.ppStructureVersionRuntime || payload.ppStructureVersion || ''),
+      paddleOcrVlPipelineVersion: String(payload.paddleOcrVlPipelineVersion || payload.pipelineVersion || ''),
       ppStructureVersionRequested: String(payload.ppStructureVersionRequested || ''),
       structureConfig: payload.structureConfig || {},
     },
@@ -155,6 +156,7 @@ function normalizeGeminiFallbackResult(payload = {}, context = {}) {
   const textLength = Number(payload.textLength || extractedText.length || 0);
   const pages = Array.isArray(payload.pages) ? payload.pages : [];
   const failedPageCount = pages.filter((page) => !page?.success).length;
+  const structured = normalizeStructuredBlocks(payload);
 
   return {
     success: Boolean(textLength > 0),
@@ -172,6 +174,16 @@ function normalizeGeminiFallbackResult(payload = {}, context = {}) {
     pageCount: pages.length || (context.isPdfInput ? null : 1),
     selectedPages: pages.map((page) => Number(page?.pageNumber || 0)).filter((pageNumber) => Number.isFinite(pageNumber) && pageNumber > 0),
     pages,
+    structuredData: {
+      blockCount: structured.blockCount,
+      blocks: structured.blocks,
+      structuredTextPreview: structured.structuredText.slice(0, 4000),
+      geminiSubject: normalizeText(payload?.geminiSubject || ''),
+      geminiTopic: normalizeText(payload?.geminiTopic || ''),
+      geminiTopics: Array.isArray(payload?.geminiTopics) ? payload.geminiTopics.map((value) => normalizeText(value)).filter(Boolean).slice(0, 10) : [],
+      geminiEstimatedMinutes: Number(payload?.geminiEstimatedMinutes || 0) || 0,
+      geminiVisualRegionCount: Number(payload?.geminiVisualRegionCount || 0) || structured.blockCount || 0,
+    },
     failedPageCount,
     partialSuccess: Boolean(failedPageCount > 0 && textLength > 0),
     extractedImages: Array.isArray(payload.extractedImages) ? payload.extractedImages : [],

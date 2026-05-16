@@ -2840,13 +2840,36 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
   }
 
   try {
+    const processingTrace = [];
+    const trace = (phase, label, details = {}) => {
+      processingTrace.push({
+        phase,
+        label,
+        details,
+        ts: Date.now(),
+      });
+    };
+    trace('request_received', 'Request received', {
+      source: sourceLabel,
+      hasObjectPath: Boolean(objectPath),
+      hasInlineImage: Boolean(imageBase64),
+      mimeType,
+    });
+
     let imageBuffer;
     if (objectPath) {
+      trace('firebase_storage_download_start', 'Picture going to Firebase storage read');
       const bucket = admin.storage().bucket();
       const [bytes] = await bucket.file(objectPath).download();
       imageBuffer = bytes;
+      trace('firebase_storage_download_done', 'Firebase storage read complete', {
+        bytes: Number(bytes?.length || 0),
+      });
     } else {
       imageBuffer = Buffer.from(imageBase64, 'base64');
+      trace('inline_payload_ready', 'Inline image payload ready', {
+        bytes: Number(imageBuffer?.length || 0),
+      });
     }
 
     const isPdfInput = mimeType === 'application/pdf' || isPdfAttachmentBuffer(imageBuffer);
@@ -2860,6 +2883,9 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
     const fallbackMimeType = mimeType || (isPdfInput ? 'application/pdf' : 'image/png');
     const fallbackBase64 = imageBase64 || imageBuffer.toString('base64');
 
+    trace('paddle_called', 'Paddle called', {
+      providerMode: aiConfig?.OCR_PROVIDER_MODE || process.env.OCR_PROVIDER_MODE || 'paddle_first',
+    });
     const { result: extractionResult, route: providerRoute, reason: providerReason } = await getOcrProviderRouterModule().runOcrProviderRouter({
       imageBuffer,
       imageBase64: fallbackBase64,
@@ -2896,6 +2922,21 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
 
     const extractedText = String(extractionResult?.extractedText || '').trim();
     const textLength = Number(extractionResult?.textLength || extractedText.length || 0);
+    trace('ocr_route_completed', 'OCR route completed', {
+      providerRoute,
+      providerReason,
+      provider: extractionResult?.provider || '',
+      textLength,
+    });
+    if (providerRoute === 'gemini_fallback') {
+      trace('gemini_fallback_activated', 'Gemini fallback activated', {
+        providerReason,
+      });
+    } else {
+      trace('paddle_processing_done', 'Paddle done', {
+        providerReason,
+      });
+    }
 
     logger.info('image_ocr_completed', {
       uid: decoded.uid,
@@ -2914,7 +2955,7 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       textLength,
       text: extractionResult?.text || extractedText,
       extractionMethod: extractionResult?.extractionMethod || (isPdfInput ? 'pdf_ocr' : 'ocr'),
-      provider: extractionResult?.provider || 'paddleocr_ppstructure',
+      provider: extractionResult?.provider || 'paddleocr_vl_1_5',
       fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
       extractionQuality: extractionResult?.extractionQuality || (textLength > 0 ? 'good' : 'failed'),
       scannedPdfDetected: Boolean(extractionResult?.scannedPdfDetected),
@@ -2929,7 +2970,8 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       source: extractionResult?.source || (isPdfInput ? 'pdf' : 'image'),
       providerRoute: providerRoute || '',
       providerReason: providerReason || '',
-      ppStructureVersion: extractionResult?.structuredData?.ppStructureVersion || '',
+      ppStructureVersion: extractionResult?.structuredData?.ppStructureVersion || extractionResult?.structuredData?.paddleOcrVlPipelineVersion || '',
+      processingTrace,
     });
   } catch (error) {
       logger.error('image_ocr_failed', {
@@ -3048,6 +3090,22 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
 
     const mlMatchesRuleSubject = !localSubject.subject || !localMl.subject || localSubject.subject === localMl.subject;
     const mlIsUsable = Boolean(localMl.available && !localMl.needsJsFallback && mlMatchesRuleSubject);
+    const geminiAttachmentHints = attachmentSummaries
+      .map((entry) => ({
+        subject: String(entry?.geminiSubject || '').trim(),
+        topic: String(entry?.geminiTopic || '').trim(),
+        topics: Array.isArray(entry?.geminiTopics) ? entry.geminiTopics.map((value) => String(value || '').trim()).filter(Boolean) : [],
+        estimatedMinutes: Number(entry?.geminiEstimatedMinutes || 0),
+        providerRoute: String(entry?.providerRoute || '').trim(),
+      }))
+      .filter((entry) => entry.subject || entry.topic || entry.topics.length || Number.isFinite(entry.estimatedMinutes));
+    const geminiAttachmentPrimary = geminiAttachmentHints[0] || null;
+    const geminiHintSubject = normalizeSubjectName(String(geminiAttachmentPrimary?.subject || '').trim()) || '';
+    const geminiHintTopic = String(geminiAttachmentPrimary?.topic || '').trim();
+    const geminiHintTopics = Array.isArray(geminiAttachmentPrimary?.topics) ? geminiAttachmentPrimary.topics : [];
+    const geminiHintMinutes = Number(geminiAttachmentPrimary?.estimatedMinutes || 0);
+    const hasGeminiAttachmentHints = geminiAttachmentHints.length > 0;
+    const hasGeminiFallbackRoute = attachmentSummaries.some((entry) => String(entry?.providerRoute || '').trim() === 'gemini_fallback');
     const mlCandidate = {
       subject: mlIsUsable ? localMl.subject : '',
       topic: mlIsUsable ? localMl.topic : '',
@@ -3061,13 +3119,13 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
 
     let aiResult = {
       classification: {
-        subject: mlCandidate.subject || localSubject.subject || '',
+        subject: mlCandidate.subject || localSubject.subject || geminiHintSubject || '',
         unsupportedSubject: '',
-        topic: mlCandidate.topic || localTopic.topic || '',
-        topics: mlCandidate.topics.length ? mlCandidate.topics : (localTopic.topics || []),
-        estimatedMinutes: clampMinutes(mlCandidate.estimatedMinutes || localMinutes.estimatedMinutes),
+        topic: mlCandidate.topic || localTopic.topic || geminiHintTopic || '',
+        topics: mlCandidate.topics.length ? mlCandidate.topics : ((localTopic.topics && localTopic.topics.length) ? localTopic.topics : geminiHintTopics),
+        estimatedMinutes: clampMinutes(mlCandidate.estimatedMinutes || localMinutes.estimatedMinutes || geminiHintMinutes || 10),
         subjectConfidence: mlCandidate.subjectConfidence || localSubject.subjectConfidence || 'unknown',
-        needsManualSubjectSelection: !(mlCandidate.subject || localSubject.subject) || (mlCandidate.subjectConfidence || localSubject.subjectConfidence) !== 'high',
+        needsManualSubjectSelection: !(mlCandidate.subject || localSubject.subject || geminiHintSubject) || (mlCandidate.subjectConfidence || localSubject.subjectConfidence) !== 'high',
         unsupportedSubjectRequested: false,
         unsupportedSubjectRecorded: false,
       },
@@ -3086,7 +3144,13 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
     };
 
     const shouldUseGeminiFallback = !(mlCandidate.method)
-      && (localSubject.needsGeminiFallback || localTopic.needsGeminiFallback || localMinutes.needsGeminiFallback);
+      && (
+        localSubject.needsGeminiFallback
+        || localTopic.needsGeminiFallback
+        || localMinutes.needsGeminiFallback
+        || hasGeminiFallbackRoute
+        || hasGeminiAttachmentHints
+      );
     if (shouldUseGeminiFallback) {
       const sampleQuestionBlocks = questionBlocks.slice(0, 12).map((block) => ({
         ...block,
