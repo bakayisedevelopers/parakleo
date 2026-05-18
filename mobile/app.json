@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Claxi",
-    "slug": "claxi-mobile",
-    "scheme": "claxi",
+    "name": "Parakleo",
+    "slug": "parakleo-mobile",
+    "scheme": "parakleo",
     "version": "0.1.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
@@ -10,7 +10,7 @@
       "**/*"
     ],
     "android": {
-      "package": "com.anonymous.claximobile"
+      "package": "com.anonymous.parakleomobile"
     }
   }
 }

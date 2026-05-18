@@ -48,7 +48,7 @@ export function SessionsScreen({ navigate }) {
             <Text style={styles.cardTitle}>{session.topic || session.subject || 'Class session'}</Text>
             <Text style={styles.copy}>Tutor: {session.tutorName || session.tutorId || 'Pending'}</Text>
             <Text style={styles.meta}>Duration: {session.duration || `${session.durationMinutes || 10} minutes`}</Text>
-            <Text style={styles.meta}>Meeting provider: {session.meetingProvider || 'Claxi WebRTC'}</Text>
+            <Text style={styles.meta}>Meeting provider: {session.meetingProvider || 'Parakleo WebRTC'}</Text>
             {session.pricingSnapshot ? (
               <Text style={styles.meta}>
                 Billing snapshot: Base {formatRand(session.pricingSnapshot.adjustedBaseAmount ?? session.pricingSnapshot.baseAmount ?? 0)} | Rate {formatRand(session.pricingSnapshot.adjustedRatePerMinute ?? session.pricingSnapshot.ratePerMinute ?? 0)}

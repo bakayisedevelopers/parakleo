@@ -19,7 +19,7 @@ export function DashboardScreen({ navigate }) {
   const [composerStage, setComposerStage] = useState('input');
   const [shareFeedback, setShareFeedback] = useState('');
   const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://claxi.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
+  const referralLink = referralSlug ? `https://parakleo.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
   const referralPreview = referralLink.length > 42 ? `${referralLink.slice(0, 42)}...` : referralLink;
 
   useEffect(() => subscribeToStudentRequests(
@@ -48,8 +48,8 @@ export function DashboardScreen({ navigate }) {
     if (!referralLink) return;
     try {
       await Share.share({
-        title: 'Join Claxi',
-        message: `Use my Claxi referral link to sign up and start learning.\n${referralLink}`,
+        title: 'Join Parakleo',
+        message: `Use my Parakleo referral link to sign up and start learning.\n${referralLink}`,
         url: referralLink,
       });
       setShareFeedback('Link shared.');

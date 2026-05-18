@@ -14,7 +14,7 @@ const firebaseConfig = {
 
 const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
 const emulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '10.0.2.2';
-const projectId = firebaseConfig.projectId || 'claxi-bakayise';
+const projectId = firebaseConfig.projectId || 'parakleo';
 let emulatorsConnected = false;
 let authInstance = null;
 

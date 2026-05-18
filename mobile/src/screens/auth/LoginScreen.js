@@ -48,7 +48,7 @@ export function LoginScreen({ navigate }) {
           <Text style={styles.link}>Forgot password?</Text>
         </View>
         <Text style={styles.policy}>
-          By signing in, you agree to Claxi's Terms of Service, Privacy Policy, and Payment Policy.
+          By signing in, you agree to Parakleo's Terms of Service, Privacy Policy, and Payment Policy.
         </Text>
         <Button disabled={busy || !email || !password} onPress={submit}>
           {busy ? 'Signing in...' : 'Sign in'}

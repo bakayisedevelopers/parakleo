@@ -796,7 +796,7 @@ function buildRtcHtml(payload) {
         }
       }
 
-      window.ClaxiSessionBridge = {
+      window.ParakleoSessionBridge = {
         toggleAudio,
         close: destroyRtc,
       };

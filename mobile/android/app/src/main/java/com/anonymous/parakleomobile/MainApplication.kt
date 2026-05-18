@@ -1,4 +1,4 @@
-package com.anonymous.claximobile
+package com.anonymous.parakleomobile
 
 import android.app.Application
 import android.content.res.Configuration

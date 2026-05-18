@@ -239,7 +239,7 @@ export function RootNavigator() {
   const isFullscreenRoute = activeRoute.key === 'SessionRoom';
   const unreadCount = notifications.filter((item) => !item?.read).length;
   const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://claxi.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
+  const referralLink = referralSlug ? `https://parakleo.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
 
   const handleLogout = async () => {
     setAuthRoute('Home');
@@ -253,8 +253,8 @@ export function RootNavigator() {
     if (!referralLink) return;
     try {
       await Share.share({
-        title: 'Join Claxi',
-        message: `Use my Claxi referral link to sign up and start learning.\n${referralLink}`,
+        title: 'Join Parakleo',
+        message: `Use my Parakleo referral link to sign up and start learning.\n${referralLink}`,
         url: referralLink,
       });
     } catch (_error) {
@@ -302,7 +302,7 @@ export function RootNavigator() {
                   <Text style={styles.logoText}>C</Text>
                 </View>
                 <View style={styles.sidebarTitleWrap}>
-                  <Text style={styles.sidebarTitle}>Claxi</Text>
+                  <Text style={styles.sidebarTitle}>Parakleo</Text>
                   <Text style={styles.sidebarSubtitle}>student workspace</Text>
                 </View>
               </View>

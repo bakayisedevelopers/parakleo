@@ -32,7 +32,7 @@ function buildTimeline(status, statusDetail) {
     {
       key: 'searching',
       title: 'Searching for tutor',
-      description: 'Claxi is matching your request with an available tutor.',
+      description: 'Parakleo is matching your request with an available tutor.',
       state: ['pending', 'matching'].includes(normalized)
         ? 'current'
         : ['offered', 'accepted', 'waiting_student', 'in_progress', 'in_session', 'completed', 'no_tutor_available'].includes(normalized)

@@ -1,4 +1,4 @@
-# Claxi Mobile Plan (React Native, Student App Only)
+# Parakleo Mobile Plan (React Native, Student App Only)
 
 This document replaces the previous starter-only note and serves as the implementation plan for the **student-only** mobile application.
 
@@ -108,7 +108,7 @@ Each phase is intended to be implemented in Codex Web as a standalone milestone 
 - Payment method addition must mirror the web Paystack flow: tap "Add a Card", open Paystack authorization, charge R1, receive the Paystack callback reference, call `verifyPaystack`, save the returned card, and show the same success/cancel/error messaging pattern.
 - Any difference from the web application must be documented in the relevant phase tracker with the exact React Native limitation that forced the difference.
 - Web services remain the source of truth for Firestore schema, Functions endpoints, pricing, request lifecycle, onboarding requirements, payment behavior, session lifecycle, and status mapping.
-- Students should feel they are using the same Claxi app across web and mobile. Visual language, screen order, copy, and interaction flow must stay consistent unless a native platform constraint prevents it.
+- Students should feel they are using the same Parakleo app across web and mobile. Visual language, screen order, copy, and interaction flow must stay consistent unless a native platform constraint prevents it.
 
 > 2026-04-27 parity update: keep the existing phased plan, but execute it against the current web app shape: dashboard-first student request flow, `firebase@11.10.0`, React 18.3.1 parity, Paystack verification endpoints, OCR/classification/growth endpoints, sidebar/drawer app navigation, and the full-screen WebRTC/screen-share session room.
 
@@ -153,7 +153,7 @@ Results:
 - Added student screens for dashboard, requests, sessions/classes, wallet, and profile.
 - Added a lightweight internal auth/sidebar navigator so the app shell mirrors the web topbar plus sidebar/drawer pattern; React Navigation remains the intended replacement once dependency installation completes.
 - Added reusable native UI primitives for buttons, compact cards, form fields, status badges, loading, empty, error, and global error boundary states.
-- Added Claxi design tokens for white/zinc surfaces, emerald brand, cyan/indigo accents, rounded panels, and soft shadows.
+- Added Parakleo design tokens for white/zinc surfaces, emerald brand, cyan/indigo accents, rounded panels, and soft shadows.
 - Added shared mobile service boundaries mirroring web names/contracts where practical: `authService`, `userService`, `classRequestService`, `sessionService`, `walletService`, and `paymentMethodService`.
 - Added Firestore listener boundaries for student profile, requests, sessions, and wallet data.
 - Migration rule for this phase: navigation and app shell must mirror the web topbar/sidebar structure, not introduce mobile-only bottom-tab behavior.

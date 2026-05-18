@@ -156,7 +156,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   });
 
   const iceEndpoint = getFunctionEndpoint('getIceConfig');
-  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'claxi-bakayise';
+  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'parakleo';
   const selectedDurationMinutes = Number(session?.durationMinutes || session?.pricingSnapshot?.durationMinutes || 0);
   const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
   const graceRemaining = Math.max(0, Math.ceil(((session?.joinGraceEndsAt || 0) - Date.now()) / 1000));
@@ -304,7 +304,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   useEffect(() => () => {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (bridgeRef.current) {
-      bridgeRef.current.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.close && window.ClaxiSessionBridge.close(); true;');
+      bridgeRef.current.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
     }
   }, []);
 
@@ -333,11 +333,11 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   };
 
   const handleToggleMute = () => {
-    bridgeRef.current?.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.toggleAudio && window.ClaxiSessionBridge.toggleAudio(); true;');
+    bridgeRef.current?.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.toggleAudio && window.ParakleoSessionBridge.toggleAudio(); true;');
   };
 
   const closeRtcBridge = () => {
-    bridgeRef.current?.injectJavaScript('window.ClaxiSessionBridge && window.ClaxiSessionBridge.close && window.ClaxiSessionBridge.close(); true;');
+    bridgeRef.current?.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
   };
 
   const handleOpenCancel = () => {
