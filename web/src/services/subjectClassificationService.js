@@ -2,7 +2,8 @@ import { getFirebaseClients } from '../firebase/config';
 import { appendUserAiLog } from './aiLogService';
 import { cleanExtractedText, parseQuestionsFromExtraction } from './questionParsingService';
 
-const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT || '/classify-subject';
+const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT
+  || 'https://us-central1-claxi-bakayise.cloudfunctions.net/classifySubject';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const CLASSIFICATION_TIMEOUT_MS = 12000;
 
@@ -320,6 +321,7 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       needsManualSubjectSelection,
       unsupportedSubjectRequested: Boolean(parsed?.unsupportedSubjectRequested || parsed?.unsupportedSubject),
       unsupportedSubjectRecorded: Boolean(payload?.unsupportedSubjectRecorded),
+      academicBrainOutput: parsed?.academicBrainOutput || null,
       isFallback: false,
     };
   } catch (error) {

@@ -26,6 +26,7 @@ import { fetchPricingQuote } from '../../../services/pricingService';
 import { uploadUserFile } from '../../../services/storageService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSubjectService';
+import { recordAcademicBrainFeedback } from '../../../services/academicBrainFeedbackService';
 import {
   buildSubjectClassificationInput,
   classifySubjectFromText,
@@ -333,6 +334,7 @@ export default function StudentDashboardPage() {
   const navigate = useNavigate();
   const textareaRef = useRef(null);
   const attachmentsRef = useRef([]);
+  const attachmentExtractionByKeyRef = useRef({});
   const isManualSubjectRef = useRef(false);
   const loggedUnsupportedSubjectsRef = useRef(new Set());
   const extractionOverlayRedirectTimeoutRef = useRef(null);
@@ -350,6 +352,7 @@ export default function StudentDashboardPage() {
   const [attachmentExtractionStatusByKey, setAttachmentExtractionStatusByKey] = useState({});
   const [selectedSubject, setSelectedSubject] = useState('');
   const [classifiedTopic, setClassifiedTopic] = useState('');
+  const [latestClassification, setLatestClassification] = useState(null);
   const [estimatedMinutes, setEstimatedMinutes] = useState(DEFAULT_LESSON_DURATION);
   const [classificationStatus, setClassificationStatus] = useState('');
   const [classificationState, setClassificationState] = useState('idle');
@@ -565,87 +568,118 @@ export default function StudentDashboardPage() {
       return next;
     });
 
+    const extractionRunId = classificationRunCounterRef.current + 1;
+    classificationRunCounterRef.current = extractionRunId;
+
     try {
       setClassificationState('running');
       setClassificationStatus('Analyzing your request...');
       const extractedByKey = {};
-      await extractAttachments(newFilesForExtraction, async (result, index) => {
+      await extractAttachments(newFilesForExtraction, (result, index) => {
+        if (classificationRunCounterRef.current !== extractionRunId) return;
         const file = newFilesForExtraction[index];
         const fileKey = getAttachmentKey(file);
-        let nextResult = result;
-        const sourceImages = [];
-        if (detectAttachmentType(file) === 'pdf') {
-          try {
-            const pdfPageImages = await buildPdfPageImageAssets(file);
-            if (pdfPageImages.length) {
-              const existingImages = Array.isArray(result?.extractedImages) ? result.extractedImages : [];
-              sourceImages.push(...pdfPageImages);
-              nextResult = {
-                ...result,
-                extractedImages: [...existingImages, ...pdfPageImages],
-              };
-            }
-          } catch (pdfPreviewError) {
-            console.error('[attachmentExtraction] pdf preview image generation failed', {
-              fileName: file?.name,
-              message: pdfPreviewError?.message,
-            });
-            setExtractionErrors((prev) => [
-              ...prev,
-              `PDF page render failed for ${file?.name || 'file'}: ${pdfPreviewError?.message || 'Unknown error'}`,
-            ]);
-          }
-        } else if (detectAttachmentType(file) === 'image') {
-          try {
-            const src = await readFileAsDataUrl(file);
-            sourceImages.push({
-              id: `${file.name}-page-1`,
-              fileName: `${file.name} source`,
-              src,
-              mimeType: file.type || 'image/png',
-              pageNumber: 1,
-            });
-          } catch (imageSourceError) {
-            console.error('[attachmentExtraction] image source conversion failed', {
-              fileName: file?.name,
-              message: imageSourceError?.message,
-            });
-          }
-        }
-
-        const structuredBlocks = Array.isArray(nextResult?.structuredData?.blocks) ? nextResult.structuredData.blocks : [];
-        if (structuredBlocks.length && sourceImages.length) {
-          const crops = await cropDiagramAssetsFromBlocks({
-            blocks: structuredBlocks,
-            sourceImages,
-            fileName: file?.name || 'attachment',
-          });
-          if (crops.length) {
-            const existingImages = Array.isArray(nextResult?.extractedImages) ? nextResult.extractedImages : [];
-            nextResult = {
-              ...nextResult,
-              extractedImages: [...existingImages, ...crops],
-            };
-            setExtractionStatusEvents((prev) => [
-              ...prev.slice(-11),
-              { ts: Date.now(), phase: 'diagram_cropping', label: `Diagram cropping metadata applied (${crops.length})`, level: 'info' },
-            ]);
-          }
-        }
-        extractedByKey[fileKey] = nextResult;
-        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: nextResult }));
+        extractedByKey[fileKey] = result;
+        setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
         setAttachmentExtractionStatusByKey((prev) => ({
           ...prev,
-          [fileKey]: nextResult.success ? 'text extracted' : 'extraction weak',
+          [fileKey]: result.success ? 'text extracted' : 'extraction weak',
         }));
       }, (statusEvent) => {
+        if (classificationRunCounterRef.current !== extractionRunId) return;
         setExtractionStatusEvents((prev) => [...prev.slice(-11), statusEvent]);
         if (statusEvent?.level === 'error') {
           setExtractionErrors((prev) => [...prev, `${statusEvent?.fileName || 'file'}: ${statusEvent?.details?.message || statusEvent?.label || 'Error'}`]);
         }
       });
 
-      const mergedExtractions = { ...attachmentExtractionByKey, ...extractedByKey };
+      for (const file of newFilesForExtraction) {
+        if (classificationRunCounterRef.current !== extractionRunId) break;
+        const fileKey = getAttachmentKey(file);
+        const currentResult = extractedByKey[fileKey];
+        if (!currentResult) continue;
+
+        try {
+          let nextResult = currentResult;
+          const sourceImages = [];
+          if (detectAttachmentType(file) === 'pdf') {
+            try {
+              const pdfPageImages = await buildPdfPageImageAssets(file);
+              if (pdfPageImages.length) {
+                const existingImages = Array.isArray(nextResult?.extractedImages) ? nextResult.extractedImages : [];
+                sourceImages.push(...pdfPageImages);
+                nextResult = {
+                  ...nextResult,
+                  extractedImages: [...existingImages, ...pdfPageImages],
+                };
+              }
+            } catch (pdfPreviewError) {
+              console.error('[attachmentExtraction] pdf preview image generation failed', {
+                fileName: file?.name,
+                message: pdfPreviewError?.message,
+              });
+              setExtractionErrors((prev) => [
+                ...prev,
+                `PDF page render failed for ${file?.name || 'file'}: ${pdfPreviewError?.message || 'Unknown error'}`,
+              ]);
+            }
+          } else if (detectAttachmentType(file) === 'image') {
+            try {
+              const src = await readFileAsDataUrl(file);
+              sourceImages.push({
+                id: `${file.name}-page-1`,
+                fileName: `${file.name} source`,
+                src,
+                mimeType: file.type || 'image/png',
+                pageNumber: 1,
+              });
+            } catch (imageSourceError) {
+              console.error('[attachmentExtraction] image source conversion failed', {
+                fileName: file?.name,
+                message: imageSourceError?.message,
+              });
+            }
+          }
+
+          const structuredBlocks = Array.isArray(nextResult?.structuredData?.blocks) ? nextResult.structuredData.blocks : [];
+          if (structuredBlocks.length && sourceImages.length) {
+            const crops = await cropDiagramAssetsFromBlocks({
+              blocks: structuredBlocks,
+              sourceImages,
+              fileName: file?.name || 'attachment',
+            });
+            if (crops.length) {
+              const existingImages = Array.isArray(nextResult?.extractedImages) ? nextResult.extractedImages : [];
+              nextResult = {
+                ...nextResult,
+                extractedImages: [...existingImages, ...crops],
+              };
+              setExtractionStatusEvents((prev) => [
+                ...prev.slice(-11),
+                { ts: Date.now(), phase: 'diagram_cropping', label: `Diagram cropping metadata applied (${crops.length})`, level: 'info' },
+              ]);
+            }
+          }
+
+          extractedByKey[fileKey] = nextResult;
+          setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: nextResult }));
+        } catch (enrichmentError) {
+          console.error('[attachmentExtraction] enrichment failed; continuing with OCR output', {
+            fileName: file?.name,
+            message: enrichmentError?.message,
+          });
+          setExtractionErrors((prev) => [
+            ...prev,
+            `${file?.name || 'file'}: enrichment failed; continuing with OCR text`,
+          ]);
+        }
+      }
+
+      if (classificationRunCounterRef.current !== extractionRunId) {
+        return;
+      }
+
+      const mergedExtractions = { ...attachmentExtractionByKeyRef.current, ...extractedByKey };
       const attachmentExtractions = nextAttachments
         .map((file) => mergedExtractions[getAttachmentKey(file)])
         .filter(Boolean);
@@ -664,6 +698,7 @@ export default function StudentDashboardPage() {
       });
 
       const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
+      setLatestClassification(result || null);
       setClassifiedTopic(result.topic || '');
       setEstimatedMinutes(nextEstimatedMinutes);
       setClassificationState('done');
@@ -865,6 +900,39 @@ export default function StudentDashboardPage() {
         boardPreparationSource,
       });
 
+      const predicted = latestClassification?.academicBrainOutput || null;
+      if (predicted) {
+        const selectedTopic = String(reviewTopic || '').trim();
+        const predictedTopic = String(latestClassification?.topic || '').trim();
+        const selectedMinutes = Number(durationMinutes || 0);
+        const predictedMinutes = Number(latestClassification?.estimatedMinutes || estimatedMinutes || 0);
+        const correctionType = [
+          selectedSubject && predicted?.subject?.subjectId && selectedSubject !== predicted.subject.subjectId ? 'subject' : '',
+          selectedTopic && predictedTopic && selectedTopic !== predictedTopic ? 'topic' : '',
+          selectedMinutes && predictedMinutes && selectedMinutes !== predictedMinutes ? 'minutes' : '',
+        ].filter(Boolean).join('|') || 'none';
+
+        recordAcademicBrainFeedback({
+          role: 'student',
+          country: 'ZA',
+          grade: '',
+          selectedSubjectId: selectedSubject,
+          originalOcrText: String(boardPreparationSource?.extractedText || topic || ''),
+          originalOcrBlocks: [],
+          predictedOutput: predicted,
+          correctedOutput: {
+            subjectId: selectedSubject,
+            topic: selectedTopic,
+            estimatedMinutes: selectedMinutes,
+          },
+          correctionType,
+          engineVersion: String(predicted?.engine?.version || '1.0.0'),
+          subjectPackVersions: Array.isArray(predicted?.engine?.subjectPackVersions) ? predicted.engine.subjectPackVersions : [],
+          uploadId: requestId,
+          sessionId: '',
+        }).catch(() => null);
+      }
+
       navigate(`/app/student/request/${requestId}`, {
         state: {
           requestId,
@@ -901,6 +969,10 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  useEffect(() => {
+    attachmentExtractionByKeyRef.current = attachmentExtractionByKey;
+  }, [attachmentExtractionByKey]);
 
   useEffect(() => {
     if (flowState !== 'request_flow') {
@@ -955,6 +1027,7 @@ export default function StudentDashboardPage() {
         if (isCancelled || classificationRunCounterRef.current !== runId) return;
 
         const nextEstimatedMinutes = normalizeEstimatedDuration(result.estimatedMinutes);
+        setLatestClassification(result || null);
         setClassifiedTopic(result.topic || '');
         setEstimatedMinutes(nextEstimatedMinutes);
         setClassificationState('done');
