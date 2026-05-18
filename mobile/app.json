@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Claxi",
+    "slug": "claxi-mobile",
+    "scheme": "claxi",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.anonymous.claximobile"
+    }
+  }
+}

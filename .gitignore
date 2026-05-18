@@ -1,0 +1,13 @@
+node_modules
+.env
+.firebase
+web/node_models
+web/dist
+mobile/.expo/
+.firebase-config/
+commands.txt
+.gcloud/
+**/__pycache__/
+*.pyc
+
+.tools/
