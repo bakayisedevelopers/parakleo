@@ -147,7 +147,7 @@ export default function TutorDashboardPage() {
       ) : null}
       {isTutorRestrictedMobile ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          To teach and accept class requests, please access Claxi from a laptop or tablet in landscape mode.
+          To teach and accept class requests, please access Parakleo from a laptop or tablet in landscape mode.
         </div>
       ) : null}
 

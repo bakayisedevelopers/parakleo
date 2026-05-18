@@ -9,8 +9,8 @@ export default function PrivacyPolicyPage() {
 
         <div className="mt-8 space-y-8 text-sm leading-7">
           <p>
-            This Privacy Policy explains how Claxi collects, uses, stores, shares, and protects personal information
-            when students, tutors, and administrators use the Claxi website and tutoring platform.
+            This Privacy Policy explains how Parakleo collects, uses, stores, shares, and protects personal information
+            when students, tutors, and administrators use the Parakleo website and tutoring platform.
           </p>
 
           <div>
@@ -42,7 +42,7 @@ export default function PrivacyPolicyPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">3. Payments and cards</h2>
             <p className="mt-3">
-              Claxi uses third-party payment providers to authorize and charge cards. We do not store raw full card numbers or
+              Parakleo uses third-party payment providers to authorize and charge cards. We do not store raw full card numbers or
               CVV codes in our application database. We may store payment tokens, card brand, last four digits, expiry month and
               year, nickname, transaction IDs, authorization status, charge status, refund status, wallet balance, debt balance,
               and related metadata needed to operate the service.
@@ -53,8 +53,8 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">4. Voice, screen sharing, and attachments</h2>
             <p className="mt-3">
               Live sessions may request microphone access for audio-only WebRTC calls. Tutors may share their screen during a
-              class. Claxi processes connection state, ICE candidate metadata, microphone permission status, and screen sharing
-              state to connect and troubleshoot sessions. Claxi does not intentionally record live voice calls or screen shares
+              class. Parakleo processes connection state, ICE candidate metadata, microphone permission status, and screen sharing
+              state to connect and troubleshoot sessions. Parakleo does not intentionally record live voice calls or screen shares
               unless a specific recording feature is introduced and clearly disclosed.
             </p>
             <p className="mt-3">
@@ -67,7 +67,7 @@ export default function PrivacyPolicyPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">5. Sharing information</h2>
             <p className="mt-3">
-              We share information only as needed to operate Claxi. This may include sharing class requests and session details
+              We share information only as needed to operate Parakleo. This may include sharing class requests and session details
               between matched students and tutors, payment information with payment processors, authentication and hosting data
               with cloud providers, OCR data with extraction providers, notifications with email or messaging providers, and
               information with regulators, law enforcement, courts, or advisers where legally required or necessary to protect
@@ -79,7 +79,7 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">6. Retention</h2>
             <p className="mt-3">
               We keep account, profile, session, request, payment, payout, support, and audit records for as long as needed to
-              provide Claxi, meet financial and tax obligations, prevent abuse, resolve disputes, and comply with applicable law.
+              provide Parakleo, meet financial and tax obligations, prevent abuse, resolve disputes, and comply with applicable law.
               Some payment and transaction records may need to be retained after account deletion. Where possible, we delete,
               anonymize, or restrict information that is no longer needed.
             </p>
@@ -103,7 +103,7 @@ export default function PrivacyPolicyPage() {
             </p>
           </div>
 
-          <p>Contact: privacy@claxi.app</p>
+          <p>Contact: privacy@parakleo.app</p>
         </div>
       </section>
     </MainLayout>

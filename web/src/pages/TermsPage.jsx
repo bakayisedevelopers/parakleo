@@ -9,7 +9,7 @@ export default function TermsPage() {
 
         <div className="mt-8 space-y-8 text-sm leading-7">
           <p>
-            These Terms govern use of Claxi by students, tutors, and administrators. By creating an account, signing in,
+            These Terms govern use of Parakleo by students, tutors, and administrators. By creating an account, signing in,
             requesting a class, accepting a class, joining a session, adding a payment method, or receiving a payout, you agree
             to these Terms and the policies linked from this page.
           </p>
@@ -19,7 +19,7 @@ export default function TermsPage() {
             <p className="mt-3">
               You must provide accurate account, profile, payment, and payout information. Students are responsible for class
               requests they submit and payment methods they add. Tutors must provide truthful qualification, subject, grade,
-              availability, banking, and identity-related information. Claxi may reject, suspend, restrict, or terminate accounts
+              availability, banking, and identity-related information. Parakleo may reject, suspend, restrict, or terminate accounts
               where information is false, unsafe, abusive, unlawful, or creates risk for users or the platform.
             </p>
           </div>
@@ -27,9 +27,9 @@ export default function TermsPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">2. Tutoring marketplace</h2>
             <p className="mt-3">
-              Claxi provides tools for students to request tutoring and for tutors to accept suitable requests. Tutors are
-              independent service providers and are not employees of Claxi unless a separate written agreement says otherwise.
-              Claxi may verify tutor profiles, but students and tutors remain responsible for their own conduct, preparation,
+              Parakleo provides tools for students to request tutoring and for tutors to accept suitable requests. Tutors are
+              independent service providers and are not employees of Parakleo unless a separate written agreement says otherwise.
+              Parakleo may verify tutor profiles, but students and tutors remain responsible for their own conduct, preparation,
               punctuality, communication, and lawful use of the service.
             </p>
           </div>
@@ -38,7 +38,7 @@ export default function TermsPage() {
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">3. Conduct rules</h2>
             <p className="mt-3">
               Users must not harass, threaten, discriminate, impersonate others, share illegal content, request academic fraud,
-              bypass Claxi payments, misuse screen sharing or microphone access, upload malicious files, scrape the service, or
+              bypass Parakleo payments, misuse screen sharing or microphone access, upload malicious files, scrape the service, or
               interfere with platform security. Tutors must teach within their verified capability and treat students
               professionally. Students must use sessions for lawful learning support.
             </p>
@@ -57,10 +57,10 @@ export default function TermsPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">5. Live sessions and technology</h2>
             <p className="mt-3">
-              Claxi may use WebRTC, microphone access, screen sharing, notifications, OCR, and third-party infrastructure to
+              Parakleo may use WebRTC, microphone access, screen sharing, notifications, OCR, and third-party infrastructure to
               provide sessions. Users are responsible for stable internet, compatible devices, and granting required permissions.
-              Claxi may not be liable for failures caused by unsupported devices, blocked networks, third-party outages, user
-              settings, or interruptions outside Claxi&apos;s reasonable control.
+              Parakleo may not be liable for failures caused by unsupported devices, blocked networks, third-party outages, user
+              settings, or interruptions outside Parakleo&apos;s reasonable control.
             </p>
           </div>
 
@@ -68,7 +68,7 @@ export default function TermsPage() {
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">6. Content and intellectual property</h2>
             <p className="mt-3">
               Users keep ownership of content they submit, such as questions, images, documents, messages, and profile material.
-              Users grant Claxi the rights needed to host, display, process, transmit, extract text from, moderate, and use that
+              Users grant Parakleo the rights needed to host, display, process, transmit, extract text from, moderate, and use that
               content to provide, secure, support, and improve the service. Users must have permission to upload any content they
               submit.
             </p>
@@ -77,7 +77,7 @@ export default function TermsPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">7. Suspension and termination</h2>
             <p className="mt-3">
-              Claxi may suspend or terminate access for policy violations, fraud risk, non-payment, chargebacks, unsafe conduct,
+              Parakleo may suspend or terminate access for policy violations, fraud risk, non-payment, chargebacks, unsafe conduct,
               legal requests, repeated disputes, or platform abuse. Users remain responsible for amounts owed before suspension
               or termination.
             </p>
@@ -86,7 +86,7 @@ export default function TermsPage() {
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">8. Disclaimers and liability</h2>
             <p className="mt-3">
-              Claxi is provided on an as-is and as-available basis to the extent permitted by law. We do not guarantee any
+              Parakleo is provided on an as-is and as-available basis to the extent permitted by law. We do not guarantee any
               specific academic outcome, tutor availability, uninterrupted session, or error-free service. Nothing in these Terms
               excludes liability that cannot be excluded under applicable law.
             </p>
@@ -94,7 +94,7 @@ export default function TermsPage() {
 
           <div>
             <h2 className="text-xl font-black text-zinc-900 dark:text-white">9. Contact</h2>
-            <p className="mt-3">Legal questions, complaints, and dispute notices may be sent to legal@claxi.app.</p>
+            <p className="mt-3">Legal questions, complaints, and dispute notices may be sent to legal@parakleo.app.</p>
           </div>
         </div>
       </section>

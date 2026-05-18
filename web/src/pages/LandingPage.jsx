@@ -105,7 +105,7 @@ export default function LandingPage() {
           <div className="rounded-[32px] border border-brand/20 bg-white p-8 shadow-sm">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-brand" />
-              <h2 className="text-3xl font-black text-zinc-900">How Claxi Works</h2>
+              <h2 className="text-3xl font-black text-zinc-900">How Parakleo Works</h2>
             </div>
             <div className="mt-6 grid gap-4 md:grid-cols-3">
               {[

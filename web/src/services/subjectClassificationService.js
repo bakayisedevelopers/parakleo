@@ -3,7 +3,7 @@ import { appendUserAiLog } from './aiLogService';
 import { cleanExtractedText, parseQuestionsFromExtraction } from './questionParsingService';
 
 const CLASSIFY_SUBJECT_ENDPOINT = import.meta.env.VITE_CLASSIFY_SUBJECT_ENDPOINT
-  || 'https://us-central1-claxi-bakayise.cloudfunctions.net/classifySubject';
+  || 'https://us-central1-parakleo.cloudfunctions.net/classifySubject';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const CLASSIFICATION_TIMEOUT_MS = 12000;
 

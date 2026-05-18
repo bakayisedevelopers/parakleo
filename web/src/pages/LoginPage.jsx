@@ -127,7 +127,7 @@ export default function LoginPage() {
             </div>
 
             <p className="rounded-2xl border border-brand/20 bg-brand/5 p-3 text-xs text-zinc-700">
-              By signing in, you agree to Claxi&apos;s{' '}
+              By signing in, you agree to Parakleo&apos;s{' '}
               <Link to="/terms" className="font-bold text-brand underline">Terms of Service</Link>,{' '}
               <Link to="/privacy-policy" className="font-bold text-brand underline">Privacy Policy</Link>, and{' '}
               <Link to="/payment-pricing-policy" className="font-bold text-brand underline">Payment Policy</Link>.

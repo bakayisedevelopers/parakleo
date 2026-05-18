@@ -25,11 +25,11 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
         <Link to="/app" onClick={onNavigate} className="flex items-center gap-3">
           <img
             src="/logo.png"
-            alt="Claxi logo"
+            alt="Parakleo logo"
             className="h-10 w-10 rounded-2xl object-cover shadow-sm ring-1 ring-zinc-200"
           />
           <div>
-            <p className="text-sm font-bold tracking-tight text-zinc-900">Claxi</p>
+            <p className="text-sm font-bold tracking-tight text-zinc-900">Parakleo</p>
             <div className="flex items-center gap-2">
               <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{role} workspace</p>
               {isAdmin ? (

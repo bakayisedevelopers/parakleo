@@ -82,7 +82,7 @@ async function createUserNotification({
 
   const notification = {
     userId,
-    title: String(title || 'Claxi update'),
+    title: String(title || 'Parakleo update'),
     message: String(message || 'You have a new update.'),
     type: String(type || 'update'),
     requestId: requestId || null,
@@ -299,10 +299,10 @@ async function deleteStorageObjectIfPresent(bucket, objectPath) {
   }
 }
 
-const CLAXI_PAYMENTS_SECRETS = defineSecret('CLAXI_PAYMENTS_SECRETS');
-const CLAXI_EMAIL_SECRETS = defineSecret('CLAXI_EMAIL_SECRETS');
-const CLAXI_REALTIME_SECRETS = defineSecret('CLAXI_REALTIME_SECRETS');
-const CLAXI_AI_KEYS = defineSecret('CLAXI_AI_KEYS');
+const PARAKLEO_PAYMENTS_SECRETS = defineSecret('PARAKLEO_PAYMENTS_SECRETS');
+const PARAKLEO_EMAIL_SECRETS = defineSecret('PARAKLEO_EMAIL_SECRETS');
+const PARAKLEO_REALTIME_SECRETS = defineSecret('PARAKLEO_REALTIME_SECRETS');
+const PARAKLEO_AI_KEYS = defineSecret('PARAKLEO_AI_KEYS');
 
 const DEFAULT_STUN_URLS = ['stun:stun.l.google.com:19302'];
 const DEFAULT_TURN_TTL_SECONDS = 600;
@@ -1636,7 +1636,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
 
 exports.processTutorDocument = onDocumentCreated({
   document: 'tutorDocuments/{docId}',
-  secrets: [CLAXI_AI_KEYS],
+  secrets: [PARAKLEO_AI_KEYS],
 }, async (event) => {
   const docId = event.params.docId;
   const data = event.data?.data() || {};
@@ -1645,7 +1645,7 @@ exports.processTutorDocument = onDocumentCreated({
 
 exports.retryTutorDocumentProcessing = onDocumentWritten({
   document: 'tutorDocuments/{docId}',
-  secrets: [CLAXI_AI_KEYS],
+  secrets: [PARAKLEO_AI_KEYS],
 }, async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
@@ -1817,12 +1817,12 @@ function escapeHtml(value) {
 }
 
 function renderEmailTemplate({
-  eyebrow = 'Claxi',
+  eyebrow = 'Parakleo',
   title,
   intro,
   details = [],
   tone = 'emerald',
-  closing = 'Thanks for learning with Claxi.',
+  closing = 'Thanks for learning with Parakleo.',
 }) {
   const accent = tone === 'rose'
     ? { solid: '#f43f5e', soft: '#ffe4e6', glow: 'rgba(244, 63, 94, 0.22)' }
@@ -1881,7 +1881,7 @@ function renderEmailTemplate({
             </tr>
             <tr>
               <td style="padding-top: 14px; text-align: center; color: #a1a1aa; font-size: 12px; line-height: 1.6;">
-                Claxi account notifications
+                Parakleo account notifications
               </td>
             </tr>
           </table>
@@ -1896,11 +1896,11 @@ function buildEmailPayload(eventType, payload) {
     case 'welcome':
       return {
         to: payload.email,
-        subject: `Welcome to Claxi, ${payload.fullName}!`,
+        subject: `Welcome to Parakleo, ${payload.fullName}!`,
         html: renderEmailTemplate({
           eyebrow: 'Welcome',
-          title: `Welcome to Claxi, ${payload.fullName || 'there'}`,
-          intro: `Your ${payload.role || 'Claxi'} account is ready. You can now manage requests, sessions, and payments from one place.`,
+          title: `Welcome to Parakleo, ${payload.fullName || 'there'}`,
+          intro: `Your ${payload.role || 'Parakleo'} account is ready. You can now manage requests, sessions, and payments from one place.`,
           details: [
             { label: 'Account type', value: payload.role || 'User' },
           ],
@@ -1909,7 +1909,7 @@ function buildEmailPayload(eventType, payload) {
     case 'card_added':
       return {
         to: payload.email,
-        subject: 'Card added to your Claxi profile',
+        subject: 'Card added to your Parakleo profile',
         html: renderEmailTemplate({
           eyebrow: 'Card added',
           title: 'Card added to your profile',
@@ -2021,7 +2021,7 @@ function buildEmailPayload(eventType, payload) {
             ...(payload.failureReason ? [{ label: 'Failure reason', value: payload.failureReason }] : []),
           ],
           tone: payload.status === 'paid' ? 'emerald' : payload.status === 'unsuccessful' ? 'rose' : 'sky',
-          closing: 'Review the payout record in Claxi if you need the full session breakdown.',
+          closing: 'Review the payout record in Parakleo if you need the full session breakdown.',
         }),
       };
     default:
@@ -2112,32 +2112,32 @@ function assertRequiredSecrets(groupName, secrets, requiredKeys) {
 
 function getPaymentsSecrets() {
   const groupedSecrets = parseGroupedSecretJson(
-    'CLAXI_PAYMENTS_SECRETS',
-    CLAXI_PAYMENTS_SECRETS.value(),
+    'PARAKLEO_PAYMENTS_SECRETS',
+    PARAKLEO_PAYMENTS_SECRETS.value(),
   );
   const secrets = {
     PAYSTACK_SECRET_KEY: String(groupedSecrets.PAYSTACK_SECRET_KEY || '').trim(),
   };
 
-  assertRequiredSecrets('CLAXI_PAYMENTS_SECRETS', secrets, ['PAYSTACK_SECRET_KEY']);
+  assertRequiredSecrets('PARAKLEO_PAYMENTS_SECRETS', secrets, ['PAYSTACK_SECRET_KEY']);
   return secrets;
 }
 
 function getEmailSecrets() {
-  const groupedSecrets = parseGroupedSecretJson('CLAXI_EMAIL_SECRETS', CLAXI_EMAIL_SECRETS.value());
+  const groupedSecrets = parseGroupedSecretJson('PARAKLEO_EMAIL_SECRETS', PARAKLEO_EMAIL_SECRETS.value());
   const secrets = {
     RESEND_API_KEY: String(groupedSecrets.RESEND_API_KEY || '').trim(),
     EMAIL_FROM: String(groupedSecrets.EMAIL_FROM || '').trim(),
   };
 
-  assertRequiredSecrets('CLAXI_EMAIL_SECRETS', secrets, ['RESEND_API_KEY', 'EMAIL_FROM']);
+  assertRequiredSecrets('PARAKLEO_EMAIL_SECRETS', secrets, ['RESEND_API_KEY', 'EMAIL_FROM']);
   return secrets;
 }
 
 function getRealtimeSecrets() {
   const groupedSecrets = parseGroupedSecretJson(
-    'CLAXI_REALTIME_SECRETS',
-    CLAXI_REALTIME_SECRETS.value(),
+    'PARAKLEO_REALTIME_SECRETS',
+    PARAKLEO_REALTIME_SECRETS.value(),
   );
   const secrets = {
     CLOUDFLARE_TURN_KEY_ID: String(groupedSecrets.CLOUDFLARE_TURN_KEY_ID || '').trim(),
@@ -2145,7 +2145,7 @@ function getRealtimeSecrets() {
     CLOUDFLARE_TURN_TTL_SECONDS: String(groupedSecrets.CLOUDFLARE_TURN_TTL_SECONDS || '').trim(),
   };
 
-  assertRequiredSecrets('CLAXI_REALTIME_SECRETS', secrets, [
+  assertRequiredSecrets('PARAKLEO_REALTIME_SECRETS', secrets, [
     'CLOUDFLARE_TURN_KEY_ID',
     'CLOUDFLARE_TURN_API_TOKEN',
   ]);
@@ -2153,7 +2153,7 @@ function getRealtimeSecrets() {
 }
 
 function getAiSecrets() {
-  const groupedSecrets = parseGroupedSecretJson('CLAXI_AI_KEYS', CLAXI_AI_KEYS.value());
+  const groupedSecrets = parseGroupedSecretJson('PARAKLEO_AI_KEYS', PARAKLEO_AI_KEYS.value());
   const secrets = {
     apiKey: groupedSecrets.FIREBASE_API_KEY || groupedSecrets.VITE_FIREBASE_API_KEY || '',
     authDomain: groupedSecrets.FIREBASE_AUTH_DOMAIN || groupedSecrets.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -2173,7 +2173,7 @@ function getAiSecrets() {
     OCR_PROVIDER_MODE: groupedSecrets.OCR_PROVIDER_MODE || '',
   };
 
-  assertRequiredSecrets('CLAXI_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
+  assertRequiredSecrets('PARAKLEO_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
   return secrets;
 }
 
@@ -2436,7 +2436,7 @@ exports.streamAttachmentAi = onRequest({ cors: true }, async (req, res) => {
 });
 
 /* Deprecated Gemini stream implementation retained below for reference.
-exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
+exports.streamAttachmentAi = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -2783,7 +2783,7 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] },
 });
 */
 
-exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS], memory: '512MiB', timeoutSeconds: 120 }, async (req, res) => {
+exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], memory: '512MiB', timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -2939,7 +2939,7 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS], memo
   }
 });
 
-exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
+exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3281,7 +3281,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
 exports.getIceConfig = onRequest(
   {
     cors: true,
-    secrets: [CLAXI_REALTIME_SECRETS],
+    secrets: [PARAKLEO_REALTIME_SECRETS],
   },
   async (req, res) => {
     if (req.method !== 'POST') {
@@ -3402,7 +3402,7 @@ exports.getIceConfig = onRequest(
   },
 );
 
-exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.verifyPaystack = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3692,7 +3692,7 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRET
   }
 });
 
-exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3800,7 +3800,7 @@ exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [CLAXI_PAYME
   }
 });
 
-exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'GET') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -3980,7 +3980,7 @@ async function verifyAndCreateTutorTransferRecipient({ paystackSecretKey, payout
       account_number: payout.accountNumber,
       bank_code: payout.bankCode,
       currency: 'ZAR',
-      description: `Claxi tutor payout recipient ${uid}`,
+      description: `Parakleo tutor payout recipient ${uid}`,
       metadata: {
         uid,
         email: email || '',
@@ -4025,7 +4025,7 @@ async function initiatePaystackTransfer({ paystackSecretKey, amount, recipientCo
   return payload?.data || {};
 }
 
-exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -4356,7 +4356,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [CLAXI_PAYMENT
   });
 });
 
-exports.payOutstandingBalance = onRequest({ cors: true, secrets: [CLAXI_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.payOutstandingBalance = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -4696,7 +4696,7 @@ async function syncBackendWeeklyPayoutRecords() {
 exports.processWeeklyTutorPayouts = onSchedule({
   schedule: '0 0 * * 1',
   timeZone: 'Africa/Johannesburg',
-  secrets: [CLAXI_PAYMENTS_SECRETS],
+  secrets: [PARAKLEO_PAYMENTS_SECRETS],
 }, async () => {
   let paymentsSecrets;
   try {
@@ -4850,7 +4850,7 @@ exports.processWeeklyTutorPayouts = onSchedule({
         paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
         amount,
         recipientCode,
-        reason: `Claxi tutor payout ${payout.weekKey}`,
+        reason: `Parakleo tutor payout ${payout.weekKey}`,
         reference,
       });
 
@@ -4970,7 +4970,7 @@ exports.processWeeklyTutorPayouts = onSchedule({
 exports.sendEmailFromQueue = onDocumentCreated(
   {
     document: 'emailEvents/{eventId}',
-    secrets: [CLAXI_EMAIL_SECRETS],
+    secrets: [PARAKLEO_EMAIL_SECRETS],
   },
   async (event) => {
     const data = event.data?.data();

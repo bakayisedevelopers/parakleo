@@ -205,7 +205,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
           );
         }) : (
           <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
-            Upload your school results so Claxi can verify which subjects you qualify to tutor.
+            Upload your school results so Parakleo can verify which subjects you qualify to tutor.
           </p>
         )}
       </div>

@@ -49,10 +49,10 @@ export default function Topbar({
           <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-2.5 py-2">
             <img
               src="/logo.png"
-              alt="Claxi logo"
+              alt="Parakleo logo"
               className="h-8 w-8 rounded-xl object-cover ring-1 ring-zinc-200"
             />
-            <p className="text-xs font-semibold text-zinc-700">{name || 'Claxi User'}</p>
+            <p className="text-xs font-semibold text-zinc-700">{name || 'Parakleo User'}</p>
           </div>
         </div>
       </div>

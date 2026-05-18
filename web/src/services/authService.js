@@ -2,8 +2,9 @@ import { getFirebaseClients } from '../firebase/config';
 import { syncStudentGrowth } from './studentGrowthService';
 import { deleteUserProfile, getUserProfile, upsertUserProfile } from './userService';
 
-const MOCK_USER_KEY = 'claxi_mock_user';
-const REMEMBER_ME_KEY = 'claxi_remember_me';
+const MOCK_USER_KEY = 'parakleo_mock_user';
+const REMEMBER_ME_KEY = 'parakleo_remember_me';
+const LEGACY_REMEMBER_ME_KEY = 'claxi_remember_me';
 
 function getStorage(type) {
   if (typeof window === 'undefined') return null;
@@ -13,7 +14,14 @@ function getStorage(type) {
 
 function readRememberMePreference() {
   const storage = getStorage('local');
-  return storage?.getItem(REMEMBER_ME_KEY) === 'true';
+  const currentValue = storage?.getItem(REMEMBER_ME_KEY);
+  if (currentValue != null) return currentValue === 'true';
+  const legacyValue = storage?.getItem(LEGACY_REMEMBER_ME_KEY);
+  if (legacyValue != null) {
+    storage?.setItem(REMEMBER_ME_KEY, legacyValue);
+    return legacyValue === 'true';
+  }
+  return false;
 }
 
 function persistRememberMePreference(rememberMe) {
@@ -25,6 +33,7 @@ function persistRememberMePreference(rememberMe) {
 function clearRememberMePreference() {
   const storage = getStorage('local');
   storage?.removeItem(REMEMBER_ME_KEY);
+  storage?.removeItem(LEGACY_REMEMBER_ME_KEY);
 }
 
 function getStoredMockUser() {
@@ -240,9 +249,9 @@ export async function deleteAccount(user) {
   if (!clients) {
     clearStoredMockUser();
     clearRememberMePreference();
-    localStorage.removeItem('claxi_mock_requests');
-    localStorage.removeItem('claxi_mock_sessions');
-    localStorage.removeItem('claxi_mock_notifications');
+    localStorage.removeItem('parakleo_mock_requests');
+    localStorage.removeItem('parakleo_mock_sessions');
+    localStorage.removeItem('parakleo_mock_notifications');
     return;
   }
 

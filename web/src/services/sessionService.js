@@ -7,8 +7,8 @@ import { createNotification } from './notificationService';
 import { getUserProfile, updateUserRatingSummary } from './userService';
 import { debugError, debugLog } from '../utils/devLogger';
 
-const MOCK_SESSIONS_KEY = 'claxi_mock_sessions';
-const MOCK_REQUESTS_KEY = 'claxi_mock_requests';
+const MOCK_SESSIONS_KEY = 'parakleo_mock_sessions';
+const MOCK_REQUESTS_KEY = 'parakleo_mock_requests';
 const FINALIZE_SESSION_BILLING_ENDPOINT = import.meta.env.VITE_FINALIZE_SESSION_BILLING_ENDPOINT || '/finalize-session-billing';
 const DEFAULT_RATING_STATUS = {
   student: 'pending',

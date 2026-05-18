@@ -2,7 +2,7 @@ import { getFirebaseClients } from '../firebase/config';
 import { DEFAULT_SUBJECTS } from '../constants/subjects';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
-const MOCK_USER_KEY = 'claxi_mock_user';
+const MOCK_USER_KEY = 'parakleo_mock_user';
 
 function buildReferralSlug() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

@@ -10,10 +10,10 @@ export default function Navbar() {
           <Link to="/" className="flex items-center gap-2 group">
             <img
               src="/logo.png"
-              alt="Claxi logo"
+              alt="Parakleo logo"
               className="h-10 w-10 rounded-xl object-cover ring-1 ring-zinc-200 transition-shadow group-hover:shadow-lg"
             />
-            <span className="text-xl font-black text-zinc-900 dark:text-white">Claxi</span>
+            <span className="text-xl font-black text-zinc-900 dark:text-white">Parakleo</span>
           </Link>
 
           {/* Navigation Links */}

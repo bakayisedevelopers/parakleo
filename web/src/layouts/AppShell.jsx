@@ -92,7 +92,7 @@ export default function AppShell() {
           <div className="relative z-10">
             {activeRole === 'tutor' && !isSessionRoute && !isTutorRestrictedMobile ? <TutorOfferOverlay /> : null}
             <Topbar
-              name={user?.fullName || user?.displayName || 'Claxi User'}
+              name={user?.fullName || user?.displayName || 'Parakleo User'}
               role={activeRole}
               referralSlug={user?.referralSlug || user?.referralCode}
               onOpenNav={() => {

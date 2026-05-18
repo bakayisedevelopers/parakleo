@@ -35,19 +35,19 @@ export default function StudentWalletPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Payment" description="Manage payment cards and settle any outstanding Claxi balance." />
+      <PageHeader title="Payment" description="Manage payment cards and settle any outstanding Parakleo balance." />
 
       <SectionCard title="Outstanding balance">
         <p className={`text-3xl font-black ${walletBalance < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>R{walletBalance.toFixed(2)}</p>
         {outstanding > 0 ? (
-          <p className="mt-2 text-sm text-amber-700">Outstanding amount owed to Claxi: R{outstanding.toFixed(2)}.</p>
+          <p className="mt-2 text-sm text-amber-700">Outstanding amount owed to Parakleo: R{outstanding.toFixed(2)}.</p>
         ) : (
           <p className="mt-2 text-sm text-zinc-600">No outstanding balance.</p>
         )}
       </SectionCard>
 
       {outstanding > 0 ? (
-        <SectionCard title={`Pay outstanding amount of R${outstanding.toFixed(2)}`} subtitle="Charge your selected saved card and clear your Claxi balance.">
+        <SectionCard title={`Pay outstanding amount of R${outstanding.toFixed(2)}`} subtitle="Charge your selected saved card and clear your Parakleo balance.">
           <form className="grid gap-4 md:grid-cols-2" onSubmit={payOutstanding}>
             <SelectField
               label="Payment Card"

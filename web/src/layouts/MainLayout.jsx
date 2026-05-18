@@ -46,14 +46,14 @@ export default function MainLayout({ children }) {
             </div>
           </div>
           <div className="flex items-center justify-between border-t border-zinc-200 pt-8">
-            <p className="text-sm text-zinc-600">&copy; 2026 Claxi. All rights reserved.</p>
+            <p className="text-sm text-zinc-600">&copy; 2026 Parakleo. All rights reserved.</p>
             <div className="flex items-center gap-2">
               <img
                 src="/logo.png"
-                alt="Claxi logo"
+                alt="Parakleo logo"
                 className="h-8 w-8 rounded-lg object-cover ring-1 ring-zinc-200"
               />
-              <span className="font-bold text-zinc-900">Claxi</span>
+              <span className="font-bold text-zinc-900">Parakleo</span>
             </div>
           </div>
         </div>

@@ -38,7 +38,7 @@ export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
   if (!qualifiedSubjects.length) {
     return (
       <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
-        No qualified subjects yet. Upload your results and Claxi will list subjects where your mark is at least 60%.
+        No qualified subjects yet. Upload your results and Parakleo will list subjects where your mark is at least 60%.
       </p>
     );
   }

@@ -148,7 +148,7 @@ export default function ProfilePage() {
 
       {isTutorRole ? (
         <>
-          <SectionCard title="Tutor verification" subtitle="Capture a live selfie and upload results so Claxi can verify your subject eligibility.">
+          <SectionCard title="Tutor verification" subtitle="Capture a live selfie and upload results so Parakleo can verify your subject eligibility.">
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
                 <h3 className="mb-2 text-sm font-bold text-zinc-800">Live selfie</h3>

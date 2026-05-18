@@ -295,7 +295,7 @@ export async function createWebRtcSessionController({
   };
 
   const updateScreenShareDocState = async (active) => {
-    debugLog('webrtcService', '[claxi:screen:tutor] updateScreenShareDocState write.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] updateScreenShareDocState write.', {
       active,
     });
     const sessionSnap = await getDoc(sessionRef);
@@ -323,7 +323,7 @@ export async function createWebRtcSessionController({
     const existing = sessionSnap.data()?.webrtc || {};
     const previousRevision = Number(existing.offerRevision || 0);
     const nextRevision = Number(existing.offerRevision || 0) + 1;
-    debugLog('webrtcService', '[claxi:screen:tutor] publishUpdatedOffer start.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] publishUpdatedOffer start.', {
       status,
       offerRevisionBefore: previousRevision,
       offerRevisionAfter: nextRevision,
@@ -358,7 +358,7 @@ export async function createWebRtcSessionController({
   const clearRemoteScreenStream = () => {
     const hadRemoteScreenStream =
       Boolean(remoteScreenStream) && remoteScreenStream.getTracks().length > 0;
-    debugLog('webrtcService', '[claxi:screen:student] clearRemoteScreenStream run.', {
+    debugLog('webrtcService', '[parakleo:screen:student] clearRemoteScreenStream run.', {
       hadRemoteScreenStream,
       lastKnownRemoteScreenTrackId: lastKnownRemoteScreenTrack?.id || null,
     });
@@ -374,7 +374,7 @@ export async function createWebRtcSessionController({
   };
 
   const attachRemoteScreenReceiverTrack = () => {
-    debugLog('webrtcService', '[claxi:screen:student] attachRemoteScreenReceiverTrack called.', {
+    debugLog('webrtcService', '[parakleo:screen:student] attachRemoteScreenReceiverTrack called.', {
       role,
       lastKnownRemoteScreenTrackId: lastKnownRemoteScreenTrack?.id || null,
       lastKnownRemoteScreenTrackMuted: lastKnownRemoteScreenTrack?.muted ?? null,
@@ -385,7 +385,7 @@ export async function createWebRtcSessionController({
 
     const receiverTrack = lastKnownRemoteScreenTrack;
     if (!receiverTrack) {
-      debugLog('webrtcService', '[claxi:screen:student] No last known remote screen track available yet.');
+      debugLog('webrtcService', '[parakleo:screen:student] No last known remote screen track available yet.');
       return;
     }
 
@@ -415,7 +415,7 @@ export async function createWebRtcSessionController({
         && videoTrack.readyState === 'live'
         && !receiverTrack.muted;
 
-      debugLog('webrtcService', '[claxi:screen:student] helper publishAttachedScreen.', {
+      debugLog('webrtcService', '[parakleo:screen:student] helper publishAttachedScreen.', {
         receiverTrackId: receiverTrack.id,
         receiverMuted: receiverTrack.muted,
         receiverReadyState: receiverTrack.readyState,
@@ -479,7 +479,7 @@ export async function createWebRtcSessionController({
     } else {
       debugLog(
         'webrtcService',
-        '[claxi:screen:student] helper attach deferred publish because receiver is muted.',
+        '[parakleo:screen:student] helper attach deferred publish because receiver is muted.',
         {
           receiverTrackId: receiverTrack.id,
           receiverReadyState: receiverTrack.readyState,
@@ -501,7 +501,7 @@ export async function createWebRtcSessionController({
       muted: incomingTrack.muted,
       readyState: incomingTrack.readyState,
     });
-    debugLog('webrtcService', '[claxi:screen:student] ontrack event.', {
+    debugLog('webrtcService', '[parakleo:screen:student] ontrack event.', {
       kind: incomingTrack.kind,
       trackId: incomingTrack.id,
       readyState: incomingTrack.readyState,
@@ -513,7 +513,7 @@ export async function createWebRtcSessionController({
     if (incomingTrack.kind !== 'video' && incomingTrack.kind !== 'audio') return;
 
     if (role === 'student' && incomingTrack.kind === 'video') {
-      debugLog('webrtcService', '[claxi:screen:student] ontrack video classification.', {
+      debugLog('webrtcService', '[parakleo:screen:student] ontrack video classification.', {
         treatedAsRemoteScreenTrack: true,
         trackId: incomingTrack.id,
       });
@@ -524,7 +524,7 @@ export async function createWebRtcSessionController({
       if (!alreadyExists) {
         const hadPreviousTrack = remoteScreenStream.getTracks().length > 0;
         if (hadPreviousTrack) {
-          debugLog('webrtcService', '[claxi:screen:student] replacing previous remote screen stream.', {
+          debugLog('webrtcService', '[parakleo:screen:student] replacing previous remote screen stream.', {
             previousTrackIds: remoteScreenStream.getTracks().map((track) => track.id),
             nextTrackId: incomingTrack.id,
           });
@@ -552,7 +552,7 @@ export async function createWebRtcSessionController({
         }
 
         isRemoteScreenSharing = hasUsableTrack;
-        debugLog('webrtcService', '[claxi:screen:student] onRemoteScreenStream call.', {
+        debugLog('webrtcService', '[parakleo:screen:student] onRemoteScreenStream call.', {
           value: hasUsableTrack ? 'stream' : 'null',
           trackId: incomingTrack.id,
           streamTrackIds: remoteScreenStream.getTracks().map((track) => track.id),
@@ -563,7 +563,7 @@ export async function createWebRtcSessionController({
       };
 
       incomingTrack.onunmute = () => {
-        debugLog('webrtcService', '[claxi:screen:student] track unmute.', {
+        debugLog('webrtcService', '[parakleo:screen:student] track unmute.', {
           id: incomingTrack.id,
           readyState: incomingTrack.readyState,
         });
@@ -571,12 +571,12 @@ export async function createWebRtcSessionController({
       };
 
       incomingTrack.onmute = () => {
-        debugLog('webrtcService', '[claxi:screen:student] track mute.', {
+        debugLog('webrtcService', '[parakleo:screen:student] track mute.', {
           id: incomingTrack.id,
           readyState: incomingTrack.readyState,
         });
         isRemoteScreenSharing = false;
-        debugLog('webrtcService', '[claxi:screen:student] onRemoteScreenStream call.', {
+        debugLog('webrtcService', '[parakleo:screen:student] onRemoteScreenStream call.', {
           value: 'null',
           trackId: incomingTrack.id,
         });
@@ -585,7 +585,7 @@ export async function createWebRtcSessionController({
       };
 
       incomingTrack.onended = () => {
-        debugLog('webrtcService', '[claxi:screen:student] track ended.', {
+        debugLog('webrtcService', '[parakleo:screen:student] track ended.', {
           id: incomingTrack.id,
           readyState: incomingTrack.readyState,
         });
@@ -602,7 +602,7 @@ export async function createWebRtcSessionController({
 
         currentRemoteScreenTrackId = null;
         isRemoteScreenSharing = false;
-        debugLog('webrtcService', '[claxi:screen:student] onRemoteScreenStream call.', {
+        debugLog('webrtcService', '[parakleo:screen:student] onRemoteScreenStream call.', {
           value: 'null',
           trackId: incomingTrack.id,
         });
@@ -839,17 +839,17 @@ export async function createWebRtcSessionController({
       const shouldHandleOffer = !pc.currentRemoteDescription || offerRevision > latestOfferRevision;
       if (!shouldHandleOffer) return;
 
-      debugLog('webrtcService', '[claxi:screen:student] offer handling.', {
+      debugLog('webrtcService', '[parakleo:screen:student] offer handling.', {
         firestoreOfferRevision: offerRevision,
         latestHandledOfferRevision: latestOfferRevision,
       });
       latestOfferRevision = offerRevision;
 
-      debugLog('webrtcService', '[claxi:screen:student] setRemoteDescription start.', {
+      debugLog('webrtcService', '[parakleo:screen:student] setRemoteDescription start.', {
         offerRevision,
       });
       await pc.setRemoteDescription(new RTCSessionDescription(webrtc.offer));
-      debugLog('webrtcService', '[claxi:screen:student] setRemoteDescription success.', {
+      debugLog('webrtcService', '[parakleo:screen:student] setRemoteDescription success.', {
         offerRevision,
       });
       if (webrtc?.screenShare?.active === true) {
@@ -861,11 +861,11 @@ export async function createWebRtcSessionController({
 
       await flushPendingRemoteCandidates();
 
-      debugLog('webrtcService', '[claxi:screen:student] createAnswer start.', {
+      debugLog('webrtcService', '[parakleo:screen:student] createAnswer start.', {
         offerRevision,
       });
       const answer = await pc.createAnswer();
-      debugLog('webrtcService', '[claxi:screen:student] createAnswer success.', {
+      debugLog('webrtcService', '[parakleo:screen:student] createAnswer success.', {
         offerRevision,
       });
       await pc.setLocalDescription(answer);
@@ -882,7 +882,7 @@ export async function createWebRtcSessionController({
         },
         { merge: true },
       );
-      debugLog('webrtcService', '[claxi:screen:student] answer written.', {
+      debugLog('webrtcService', '[parakleo:screen:student] answer written.', {
         offerRevision,
       });
 
@@ -943,30 +943,30 @@ export async function createWebRtcSessionController({
 
   const switchScreenTrack = async (nextTrack) => {
     const hasSender = Boolean(screenTransceiver?.sender);
-    debugLog('webrtcService', '[claxi:screen:tutor] switchScreenTrack.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] switchScreenTrack.', {
       nextTrackState: nextTrack ? 'live' : 'null',
       hasSender,
       hasTransceiver: Boolean(screenTransceiver),
     });
     if (!screenTransceiver?.sender) return;
     await screenTransceiver.sender.replaceTrack(nextTrack);
-    debugLog('webrtcService', '[claxi:screen:tutor] switchScreenTrack replaceTrack success.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] switchScreenTrack replaceTrack success.', {
       nextTrackState: nextTrack ? 'live' : 'null',
     });
   };
 
   const stopScreenShare = async () => {
-    debugLog('webrtcService', '[claxi:screen:tutor] stopScreenShare start.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] stopScreenShare start.', {
       hasActiveScreenStream: Boolean(activeScreenStream),
     });
     if (!activeScreenStream) return;
 
     const activeTrack = activeScreenStream.getVideoTracks()[0] || null;
-    debugLog('webrtcService', '[claxi:screen:tutor] stopScreenShare active track before stop.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] stopScreenShare active track before stop.', {
       activeScreenTrackId: activeTrack?.id || null,
     });
 
-    debugLog('webrtcService', '[claxi:screen:tutor] stopScreenShare replaceTrack(null).');
+    debugLog('webrtcService', '[parakleo:screen:tutor] stopScreenShare replaceTrack(null).');
     await switchScreenTrack(null);
 
     activeScreenStream.getTracks().forEach((track) => track.stop());
@@ -986,12 +986,12 @@ export async function createWebRtcSessionController({
       throw new Error('Only tutors can share screen.');
     }
 
-    debugLog('webrtcService', '[claxi:screen:tutor] startScreenShare getDisplayMedia start.');
+    debugLog('webrtcService', '[parakleo:screen:tutor] startScreenShare getDisplayMedia start.');
     const screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: false,
     });
-    debugLog('webrtcService', '[claxi:screen:tutor] startScreenShare getDisplayMedia success.');
+    debugLog('webrtcService', '[parakleo:screen:tutor] startScreenShare getDisplayMedia success.');
 
     const screenTrack = screenStream.getVideoTracks()[0];
     if (!screenTrack) {
@@ -1001,7 +1001,7 @@ export async function createWebRtcSessionController({
 
     activeScreenStream = screenStream;
 
-    debugLog('webrtcService', '[claxi:screen:tutor] startScreenShare about to replace existing sender track.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] startScreenShare about to replace existing sender track.', {
       newTrackId: screenTrack.id,
       newTrackReadyState: screenTrack.readyState,
       senderHasTrack: Boolean(screenTransceiver?.sender?.track),
@@ -1018,7 +1018,7 @@ export async function createWebRtcSessionController({
       readyState: screenTrack.readyState,
       label: screenTrack.label || null,
     });
-    debugLog('webrtcService', '[claxi:screen:tutor] startScreenShare track details.', {
+    debugLog('webrtcService', '[parakleo:screen:tutor] startScreenShare track details.', {
       id: screenTrack.id,
       kind: screenTrack.kind,
       readyState: screenTrack.readyState,

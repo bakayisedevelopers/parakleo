@@ -82,7 +82,7 @@ export function getTutorOnboardingStatus(user) {
       complete: false,
       step: TUTOR_PROFILE_STEPS.QUALIFICATIONS,
       title: 'Upload and pass qualification check',
-      message: 'Upload results so Claxi can verify subjects with marks of at least 60%.',
+      message: 'Upload results so Parakleo can verify subjects with marks of at least 60%.',
     };
   }
 
@@ -91,7 +91,7 @@ export function getTutorOnboardingStatus(user) {
       complete: false,
       step: TUTOR_PROFILE_STEPS.PAYOUT,
       title: 'Add payout details',
-      message: 'Add banking details so Claxi can send your 73% payout share.',
+      message: 'Add banking details so Parakleo can send your 73% payout share.',
     };
   }
 

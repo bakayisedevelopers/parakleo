@@ -1,7 +1,7 @@
 const ENABLED = import.meta.env.DEV || import.meta.env.VITE_DEBUG_LOGS === 'true';
 
 function format(scope) {
-  return `[claxi:${scope}]`;
+  return `[parakleo:${scope}]`;
 }
 
 export function debugLog(scope, message, payload) {

@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import 'tldraw/tldraw.css';
 import { debugError, debugLog } from '../../utils/devLogger';
 
-const TLDRAW_RELOAD_RETRY_KEY = 'claxi_tldraw_chunk_reload_retry';
+const TLDRAW_RELOAD_RETRY_KEY = 'parakleo_tldraw_chunk_reload_retry';
+const LEGACY_TLDRAW_RELOAD_RETRY_KEY = 'claxi_tldraw_chunk_reload_retry';
 
 export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
   const [TldrawComponent, setTldrawComponent] = useState(null);
   const [loadError, setLoadError] = useState('');
 
   const persistenceKey = useMemo(
-    () => `claxi-${roomId || 'session-board'}`,
+    () => `parakleo-${roomId || 'session-board'}`,
     [roomId]
   );
 
@@ -48,12 +49,14 @@ export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
         if (isChunkLoadFailure && !hasRetried && typeof window !== 'undefined') {
           debugLog('tldraw', 'Retrying once after dynamic import chunk load failure.');
           window.sessionStorage?.setItem(TLDRAW_RELOAD_RETRY_KEY, 'true');
+          window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
           window.location.reload();
           return;
         }
 
         if (typeof window !== 'undefined') {
           window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
+          window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
         }
         setLoadError(error?.message || 'Unable to load tldraw SDK.');
       }
@@ -69,6 +72,7 @@ export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
   useEffect(() => {
     if (!TldrawComponent || typeof window === 'undefined') return;
     window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
+    window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
   }, [TldrawComponent]);
 
   if (loadError) {

@@ -30,7 +30,7 @@ export default function ProtectedRoute({ children, allowedRoles, requireAdmin = 
   const location = useLocation();
 
   if (isInitializing || (requireAdmin && isLoadingAdmin)) {
-    return <LoadingState message="Loading Claxi..." fullPage />;
+    return <LoadingState message="Loading Parakleo..." fullPage />;
   }
 
   if (!isAuthenticated) {

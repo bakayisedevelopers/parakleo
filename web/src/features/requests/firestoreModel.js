@@ -1,4 +1,4 @@
-// Firestore collection blueprint for Claxi MVP.
+// Firestore collection blueprint for Parakleo MVP.
 // users/{uid}
 // {
 //   displayName: string,

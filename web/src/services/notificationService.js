@@ -1,7 +1,7 @@
 import { getFirebaseClients } from '../firebase/config';
 
-const MOCK_NOTIFICATIONS_KEY = 'claxi_mock_notifications';
-const BROWSER_NOTIFICATION_TITLE = 'Claxi';
+const MOCK_NOTIFICATIONS_KEY = 'parakleo_mock_notifications';
+const BROWSER_NOTIFICATION_TITLE = 'Parakleo';
 
 function getMockNotifications() {
   return JSON.parse(localStorage.getItem(MOCK_NOTIFICATIONS_KEY) || '[]');

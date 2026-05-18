@@ -1,8 +1,8 @@
-# Claxi Firebase Functions Secrets
+# Parakleo Firebase Functions Secrets
 
 Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager version count while keeping related credentials together.
 
-## CLAXI_PAYMENTS_SECRETS
+## PARAKLEO_PAYMENTS_SECRETS
 
 ```json
 {
@@ -10,7 +10,7 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
 }
 ```
 
-## CLAXI_EMAIL_SECRETS
+## PARAKLEO_EMAIL_SECRETS
 
 ```json
 {
@@ -19,7 +19,7 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
 }
 ```
 
-## CLAXI_REALTIME_SECRETS
+## PARAKLEO_REALTIME_SECRETS
 
 ```json
 {
@@ -29,7 +29,7 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
 }
 ```
 
-## CLAXI_AI_KEYS
+## PARAKLEO_AI_KEYS
 
 ```json
 {

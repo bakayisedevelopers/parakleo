@@ -4,7 +4,7 @@ import { useStudentSessions, useTutorSessions } from '../../hooks/useSessions';
 import { submitSessionRating } from '../../services/sessionService';
 import { SESSION_STATUS } from '../../constants/lifecycle';
 
-const HANDLED_KEY = 'claxi_handled_session_ratings';
+const HANDLED_KEY = 'parakleo_handled_session_ratings';
 const RATABLE_STATUSES = new Set([
   SESSION_STATUS.COMPLETED,
   SESSION_STATUS.CANCELED,

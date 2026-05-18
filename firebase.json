@@ -9,7 +9,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
-    "site": "claxi",
+    "site": "parakleo",
     "public": "web/dist",
     "ignore": [
       "firebase.json",

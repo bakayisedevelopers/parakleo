@@ -546,7 +546,7 @@ export default function SessionRoomPage() {
 
   useEffect(() => {
     const videoEl = remoteScreenVideoRef.current;
-    debugLog('sessionRoom', '[claxi:screen:ui] remote screen srcObject effect.', {
+    debugLog('sessionRoom', '[parakleo:screen:ui] remote screen srcObject effect.', {
       hasVideoElement: Boolean(videoEl),
       hasStream: Boolean(remoteScreenStreamObj),
       hadPreviousSrcObject: Boolean(videoEl?.srcObject),
@@ -556,13 +556,13 @@ export default function SessionRoomPage() {
     videoEl.srcObject = remoteScreenStreamObj || null;
 
     if (remoteScreenStreamObj) {
-      debugLog('sessionRoom', '[claxi:screen:ui] srcObject assigned.', {
+      debugLog('sessionRoom', '[parakleo:screen:ui] srcObject assigned.', {
         trackIds: remoteScreenStreamObj.getTracks().map((track) => track.id),
         videoTrackIds: remoteScreenStreamObj.getVideoTracks().map((track) => track.id),
       });
 
       const handleLoadedMetadata = async () => {
-        debugLog('sessionRoom', '[claxi:screen:ui] remote screen loadedmetadata.', {
+        debugLog('sessionRoom', '[parakleo:screen:ui] remote screen loadedmetadata.', {
           videoWidth: videoEl.videoWidth,
           videoHeight: videoEl.videoHeight,
           readyState: videoEl.readyState,
@@ -570,14 +570,14 @@ export default function SessionRoomPage() {
 
         try {
           await videoEl.play();
-          debugLog('sessionRoom', '[claxi:screen:ui] remote screen video play succeeded.', {
+          debugLog('sessionRoom', '[parakleo:screen:ui] remote screen video play succeeded.', {
             paused: videoEl.paused,
             readyState: videoEl.readyState,
             videoWidth: videoEl.videoWidth,
             videoHeight: videoEl.videoHeight,
           });
         } catch (error) {
-          debugLog('sessionRoom', '[claxi:screen:ui] remote screen video play failed.', {
+          debugLog('sessionRoom', '[parakleo:screen:ui] remote screen video play failed.', {
             message: error?.message || String(error),
           });
         }
@@ -586,7 +586,7 @@ export default function SessionRoomPage() {
       videoEl.onloadedmetadata = handleLoadedMetadata;
     } else {
       videoEl.onloadedmetadata = null;
-      debugLog('sessionRoom', '[claxi:screen:ui] srcObject cleared.');
+      debugLog('sessionRoom', '[parakleo:screen:ui] srcObject cleared.');
     }
 
     debugLog('sessionRoom', 'Attached remote screen stream to student video element.', {
@@ -719,7 +719,7 @@ export default function SessionRoomPage() {
         },
 
         onRemoteScreenStream: (stream) => {
-          debugLog('sessionRoom', '[claxi:screen:ui] onRemoteScreenStream callback.', {
+          debugLog('sessionRoom', '[parakleo:screen:ui] onRemoteScreenStream callback.', {
             hasStream: Boolean(stream),
             streamId: stream?.id || null,
             trackIds: stream?.getTracks?.().map((track) => track.id) || [],
@@ -728,7 +728,7 @@ export default function SessionRoomPage() {
         },
 
         onScreenShareStateChange: ({ local, remote }) => {
-          debugLog('sessionRoom', '[claxi:screen:ui] onScreenShareStateChange callback.', {
+          debugLog('sessionRoom', '[parakleo:screen:ui] onScreenShareStateChange callback.', {
             local: Boolean(local),
             remote: Boolean(remote),
           });
@@ -1071,7 +1071,7 @@ export default function SessionRoomPage() {
         }
       }}
     >
-      {debugLog('sessionRoom', '[claxi:screen:ui] renderStudentStage visibility.', {
+      {debugLog('sessionRoom', '[parakleo:screen:ui] renderStudentStage visibility.', {
         isRemoteScreenSharing,
         hasRemoteScreenStreamObj: Boolean(remoteScreenStreamObj),
       })}

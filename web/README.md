@@ -1,6 +1,6 @@
-# Claxi Web App
+# Parakleo Web App
 
-Claxi is an online-first tutoring marketplace where students request classes and tutors accept/manage them in real time.
+Parakleo is an online-first tutoring marketplace where students request classes and tutors accept/manage them in real time.
 
 ## Stack
 - React + Vite + Tailwind + React Router

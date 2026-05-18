@@ -1,4 +1,4 @@
-# Claxi Monorepo Structure
+# Parakleo Monorepo Structure
 
 This repository is organized with top-level folders for web, mobile, shared code, and Firebase functions:
 

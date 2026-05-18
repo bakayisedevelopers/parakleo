@@ -14,8 +14,8 @@ import { createNotification } from './notificationService';
 import { getTutorCandidatesForRequest } from './userService';
 import { debugError, debugLog } from '../utils/devLogger';
 
-const MOCK_REQUESTS_KEY = 'claxi_mock_requests';
-const MOCK_SESSIONS_KEY = 'claxi_mock_sessions';
+const MOCK_REQUESTS_KEY = 'parakleo_mock_requests';
+const MOCK_SESSIONS_KEY = 'parakleo_mock_sessions';
 const MATCHING_TIMEOUT_MS = 3 * 60 * 1000;
 const MATCHING_STATUS_DELAY_MS = 3000;
 const NO_TUTOR_STATUS_DELAY_MS = 3000;

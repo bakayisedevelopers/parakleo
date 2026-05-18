@@ -28,8 +28,8 @@ export default function ReferralShareButton({
   if (!referralLink) return null;
 
   const shareData = {
-    title: 'Join Claxi',
-    text: 'Use my Claxi referral link to sign up and start learning.',
+    title: 'Join Parakleo',
+    text: 'Use my Parakleo referral link to sign up and start learning.',
     url: referralLink,
   };
 

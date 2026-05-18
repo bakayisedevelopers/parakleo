@@ -49,7 +49,7 @@ function getFirebaseAiConfig(overrides = {}) {
 
   const missing = ['apiKey', 'projectId', 'appId'].filter((key) => !config[key]);
   if (missing.length) {
-    throw new Error(`CLAXI_AI_KEYS is missing Firebase AI Logic config field(s): ${missing.join(', ')}`);
+    throw new Error(`PARAKLEO_AI_KEYS is missing Firebase AI Logic config field(s): ${missing.join(', ')}`);
   }
 
   return config;
@@ -575,7 +575,7 @@ function buildClassificationResponseSchema(supportedSubjects = []) {
       },
       unsupportedSubject: {
         type: 'STRING',
-        description: 'Requested subject name when the subject is not offered by Claxi.',
+        description: 'Requested subject name when the subject is not offered by Parakleo.',
       },
       topic: {
         type: 'STRING',
