@@ -1,0 +1,27 @@
+[
+  {
+    "name": "maths_paper",
+    "text": "Mathematics Paper 1\nQuestion 1\nSolve the equation 2x + 3 = 11. (4 marks)\n1.1 Factorise x^2 - 5x + 6\nSECTION B\nQuestion 2\nDraw the graph of y = x^2",
+    "expectSubject": "mathematics"
+  },
+  {
+    "name": "english_comprehension",
+    "text": "English FAL\nRead the passage below and answer the questions that follow.\nQuestion 1\nWhy did the author leave home? (2)\nQuestion 2\nSummarise the main idea in your own words.",
+    "expectSubject": "english"
+  },
+  {
+    "name": "isizulu_task",
+    "text": "isiZulu HL\nFunda indaba bese uphendula imibuzo engezansi.\nUmbuzo 1\nChaza umlayezo oyinhloko.",
+    "expectSubject": "isizulu"
+  },
+  {
+    "name": "afrikaans_task",
+    "text": "Afrikaans FAL\nLees die teks en beantwoord die vrae.\nVraag 1\nVerduidelik die hoofgedagte.",
+    "expectSubject": "afrikaans"
+  },
+  {
+    "name": "unstructured_random",
+    "text": "photo screenshot blurry words line one maybe answer maybe table maybe figure no labels scattered content",
+    "expectNeedsReview": true
+  }
+]

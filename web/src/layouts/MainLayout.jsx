@@ -48,9 +48,11 @@ export default function MainLayout({ children }) {
           <div className="flex items-center justify-between border-t border-zinc-200 pt-8">
             <p className="text-sm text-zinc-600">&copy; 2026 Claxi. All rights reserved.</p>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center">
-                <span className="text-white font-black text-sm">C</span>
-              </div>
+              <img
+                src="/logo.png"
+                alt="Claxi logo"
+                className="h-8 w-8 rounded-lg object-cover ring-1 ring-zinc-200"
+              />
               <span className="font-bold text-zinc-900">Claxi</span>
             </div>
           </div>

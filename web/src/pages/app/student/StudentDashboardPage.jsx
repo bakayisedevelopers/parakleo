@@ -94,12 +94,6 @@ function getExtractionStatusLabel(status = '') {
   return 'Scanning...';
 }
 
-function formatProgressLabel(event) {
-  const label = String(event?.label || '').trim();
-  if (label) return label;
-  return 'Processing...';
-}
-
 async function loadPdfJsForPreview() {
   const pdfjs = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs');
   pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
@@ -381,11 +375,11 @@ export default function StudentDashboardPage() {
         if (loggedAiLogIdsRef.current.has(log.id)) return;
         loggedAiLogIdsRef.current.add(log.id);
         if (log.source === 'student_subject_classification') {
-          console.log(`=== STUDENT SUBJECT CLASSIFICATION AI PROMPT (${log.id}) ===`);
+          console.log(`=== STUDENT SUBJECT CLASSIFICATION DEBUG INPUT (${log.id}) ===`);
           if (log.prompt) console.log(log.prompt);
-          console.log(`=== STUDENT SUBJECT CLASSIFICATION AI OUTPUT (${log.id}) ===`);
+          console.log(`=== STUDENT SUBJECT CLASSIFICATION DEBUG OUTPUT (${log.id}) ===`);
           if (log.rawOutput) console.log(log.rawOutput);
-          if (log.error) console.log(`=== STUDENT SUBJECT CLASSIFICATION AI ERROR (${log.id}) ===`);
+          if (log.error) console.log(`=== STUDENT SUBJECT CLASSIFICATION DEBUG ERROR (${log.id}) ===`);
           if (log.error) console.log(log.error);
         }
       });
@@ -683,6 +677,21 @@ export default function StudentDashboardPage() {
       const attachmentExtractions = nextAttachments
         .map((file) => mergedExtractions[getAttachmentKey(file)])
         .filter(Boolean);
+
+      console.log('[studentRequestAI] extracted text from backend before classification', {
+        attachmentCount: attachmentExtractions.length,
+        extractedTextByAttachment: attachmentExtractions.map((entry, index) => ({
+          index,
+          fileName: entry?.fileName || '',
+          textLength: Number(entry?.textLength || String(entry?.extractedText || entry?.text || '').length || 0),
+          extractedText: String(entry?.extractedText || entry?.text || ''),
+          extractionMethod: entry?.extractionMethod || '',
+          provider: entry?.provider || '',
+          providerRoute: entry?.providerRoute || '',
+          providerReason: entry?.providerReason || '',
+          errorMessage: entry?.errorMessage || '',
+        })),
+      });
 
       const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
       const classificationInput = buildSubjectClassificationInput({
@@ -1629,19 +1638,6 @@ export default function StudentDashboardPage() {
                   Your file is big, scanning your file is taking long, please bear with us.
                 </p>
               ) : null}
-
-              <div className="mt-3 w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left">
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Live extraction status</p>
-                <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-                  {extractionStatusEvents.length ? extractionStatusEvents.map((event, idx) => (
-                    <p key={`${event.ts}-${idx}`} className={`text-xs ${event.level === 'error' ? 'text-rose-600' : event.level === 'warn' ? 'text-amber-700' : 'text-zinc-700'}`}>
-                      {formatProgressLabel(event)}
-                    </p>
-                  )) : (
-                    <p className="text-xs text-zinc-500">Waiting for status updates...</p>
-                  )}
-                </div>
-              </div>
 
               {extractionErrors.length ? (
                 <div className="mt-3 w-full rounded-2xl border border-rose-300 bg-rose-50 p-3 text-left">

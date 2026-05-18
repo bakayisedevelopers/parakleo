@@ -588,6 +588,7 @@ function buildExtractionResult({
   confidence = 0,
   structuredData = null,
   ppStructureVersion = '',
+  errorMessage = '',
 }) {
   return {
     fileName: file?.name || 'unknown-file',
@@ -614,6 +615,7 @@ function buildExtractionResult({
     confidence: Number(confidence || 0),
     structuredData: structuredData && typeof structuredData === 'object' ? structuredData : null,
     ppStructureVersion: String(ppStructureVersion || structuredData?.ppStructureVersion || ''),
+    errorMessage: String(errorMessage || ''),
   };
 }
 
@@ -671,6 +673,7 @@ export async function extractSingleAttachment(file, options = {}) {
         confidence: Number(imageResult.confidence || 0),
         structuredData: imageResult.structuredData || null,
         ppStructureVersion: imageResult.ppStructureVersion || '',
+        errorMessage: imageResult.errorMessage || '',
       });
     } catch (error) {
       console.debug('[attachmentExtraction] image OCR failed', { fileName: file.name, error: error?.message });
@@ -690,6 +693,7 @@ export async function extractSingleAttachment(file, options = {}) {
         textLength: 0,
         extractionQuality: 'failed',
         success: false,
+        errorMessage: error?.message || 'OCR extraction failed',
       });
     }
   }

@@ -23,6 +23,9 @@ const { classifySubjectLocally } = require('./extraction/localSubjectClassifier'
 const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
 const { estimateMinutesLocally, clampMinutes } = require('./extraction/minutesEstimator');
 const { classifyWithLocalMl } = require('./extraction/localMlClassifier');
+const { extractDocumentText } = require('./academicBrain/extraction');
+const { runAcademicBrainMini } = require('./academicBrain/engine');
+const { saveAcademicBrainFeedback } = require('./academicBrain/feedback');
 const { AcademicBrain, SUBJECTS } = require('./ai/AcademicBrain');
 const { TrainingPipeline } = require('./ai/TrainingPipeline');
 
@@ -30,6 +33,7 @@ let aiSubjectExtractionModule = null;
 let geminiExtractionModule = null;
 let ocrProviderRouterModule = null;
 let academicBrainPromise = null;
+const ENABLE_ACADEMIC_BRAIN = String(process.env.ENABLE_ACADEMICBRAIN_MINI || 'true').toLowerCase() !== 'false';
 
 function getAiSubjectExtractionModule() {
   if (!aiSubjectExtractionModule) {
@@ -2057,49 +2061,12 @@ async function runVisionOcrOnBuffer(imageBuffer) {
 }
 
 async function runPdfVisionOcr(pdfBuffer) {
-  const images = await getAiSubjectExtractionModule().convertPdfToImages(pdfBuffer, {});
-  const pages = [];
-
-  for (let index = 0; index < images.length; index += 1) {
-    const ocrResult = await runVisionOcrOnBuffer(images[index]);
-    pages.push({
-      pageNumber: index + 1,
-      extractionMethod: 'vision_ocr',
-      text: ocrResult.extractedText,
-      extractedText: ocrResult.extractedText,
-      textLength: ocrResult.textLength,
-      extractionQuality: ocrResult.textLength > 0 ? 'good' : 'failed',
-      success: ocrResult.textLength > 0,
-      status: ocrResult.textLength > 0 ? 'complete' : 'failed',
-    });
-  }
-
-  const extractedText = pages
-    .map((page) => page.extractedText)
-    .filter(Boolean)
-    .join('\n\n')
-    .trim();
-  const failedPageCount = pages.filter((page) => !page.success).length;
-
-  return {
-    success: extractedText.length > 0,
-    extractedText,
-    text: extractedText,
-    textLength: extractedText.length,
-    extractionMethod: 'pdf_ocr',
-    provider: 'google-vision',
-    fileType: 'pdf',
-    extractionQuality: extractedText.length > 0 ? (failedPageCount ? 'poor' : 'good') : 'failed',
-    scannedPdfDetected: true,
-    ocrStatus: failedPageCount ? (extractedText.length > 0 ? 'partial' : 'failed') : 'complete',
-    pageCount: pages.length,
-    selectedPages: pages.map((page) => page.pageNumber),
-    pages,
-    failedPageCount,
-    partialSuccess: failedPageCount > 0 && extractedText.length > 0,
-    extractedImages: [],
-    source: 'pdf',
-  };
+  return extractDocumentText({
+    mimeType: 'application/pdf',
+    imageBuffer: pdfBuffer,
+    runVisionOcrOnBuffer,
+    convertPdfToImages: (...args) => getAiSubjectExtractionModule().convertPdfToImages(...args),
+  });
 }
 
 async function getGlobalSubjectOptions() {
@@ -2402,7 +2369,12 @@ async function extractAttachmentGemini(req, res) {
   }
 }
 
-exports.extractAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, extractAttachmentGemini);
+exports.extractAttachmentAi = onRequest({ cors: true }, async (_req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'extractAttachmentAi is deprecated. Use /image-ocr and Academic Brain classification.',
+  });
+});
 
 const BOARD_EXTRACTION_MODE = 'gemini_2_5_flash_stream';
 
@@ -2455,6 +2427,15 @@ function normalizeVisualRegion(region = {}) {
   };
 }
 
+exports.streamAttachmentAi = onRequest({ cors: true }, async (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'streamAttachmentAi is deprecated. Use the Academic Brain extraction flow.',
+  });
+  return;
+});
+
+/* Deprecated Gemini stream implementation retained below for reference.
 exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
@@ -2800,8 +2781,9 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] },
     res.end();
   }
 });
+*/
 
-exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, async (req, res) => {
+exports.extractImageOcr = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS], memory: '512MiB', timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -2988,6 +2970,21 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
   try {
     const startedAt = Date.now();
     supportedSubjects = await getGlobalSubjectOptions();
+    const attachmentSummaries = Array.isArray(inputPayload?.attachmentSummaries)
+      ? inputPayload.attachmentSummaries
+      : [];
+    const extractedMarksCount = attachmentSummaries.reduce((total, entry) => (
+      total + Number(entry?.extractedMarksCount || 0)
+    ), 0);
+    const tableCount = attachmentSummaries.reduce((total, entry) => (
+      total + Number(entry?.tableCount || 0)
+    ), 0);
+    const figureCount = attachmentSummaries.reduce((total, entry) => (
+      total + Number(entry?.figureCount || 0)
+    ), 0);
+    const formulaCount = attachmentSummaries.reduce((total, entry) => (
+      total + Number(entry?.formulaCount || 0)
+    ), 0);
     console.debug('[studentRequestAI] classification request received', {
       uid: decoded.uid,
       inputLength: inputText.length,
@@ -3003,39 +3000,47 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       inputPayload,
     });
 
-    const brain = await getAcademicBrain();
-    const brainResult = await brain.classify(inputText);
-
     const localSubject = classifySubjectLocally({ text: inputText, supportedSubjects });
     const localTopic = detectTopicsLocally({ text: inputText, subject: localSubject.subject || '' });
     const localMinutes = estimateMinutesLocally({ text: inputText });
     const localMl = classifyWithLocalMl({ text: inputText, supportedSubjects });
 
     const normalizedSupported = new Set((supportedSubjects || []).map((item) => String(item?.value || item || '').trim()).filter(Boolean));
-    const modelSubject = normalizeSubjectName(String(brainResult.subject || '').trim()) || '';
+    const academicBrain = ENABLE_ACADEMIC_BRAIN
+      ? runAcademicBrainMini({
+        extractedText: inputText,
+        ocrBlocks: Array.isArray(inputPayload?.ocrBlocks) ? inputPayload.ocrBlocks : [],
+        country: String(inputPayload?.country || 'ZA'),
+        grade: String(inputPayload?.grade || ''),
+      })
+      : null;
+    const modelSubject = normalizeSubjectName(String(academicBrain?.subject?.displayName || '').trim()) || '';
     const supportedSubject = normalizedSupported.has(modelSubject) ? modelSubject : '';
     const fallbackSubject = localSubject.subject || '';
     const subject = supportedSubject || fallbackSubject;
-    const topics = Array.isArray(brainResult.topics) && brainResult.topics.length
-      ? brainResult.topics
+    const topics = Array.isArray(academicBrain?.topics) && academicBrain.topics.length
+      ? academicBrain.topics.map((entry) => entry.label)
       : (localTopic.topics || []);
     const classification = {
       subject,
       unsupportedSubject: '',
       topic: topics[0] || localTopic.topic || '',
       topics,
-      estimatedMinutes: clampMinutes(brainResult.estimatedMinutes || localMinutes.estimatedMinutes || 10),
-      subjectConfidence: subject ? 'high' : 'unknown',
-      needsManualSubjectSelection: !subject,
+      estimatedMinutes: clampMinutes(academicBrain?.estimatedMinutes || localMinutes.estimatedMinutes || 10),
+      subjectConfidence: subject
+        ? ((academicBrain?.subject?.confidence || 0) >= 0.7 ? 'high' : 'low')
+        : 'unknown',
+      needsManualSubjectSelection: !subject || Boolean(academicBrain?.needsReview),
       unsupportedSubjectRequested: false,
       unsupportedSubjectRecorded: false,
       topicConfidence: topics.length ? 'high' : (localTopic.topicConfidence || 'unknown'),
-      topicMethod: 'academic_brain_tfidf',
-      minutesMethod: 'academic_brain_tfjs',
+      topicMethod: 'academic_brain_rules',
+      minutesMethod: 'academic_brain_rules',
       minutesConfidence: 'high',
       minutesSignalsUsed: localMinutes.signalsUsed,
-      subjectMethod: subject === supportedSubject ? 'academic_brain_tfidf' : 'local_rules_fallback',
-      classificationPipeline: 'academic_brain_tfidf->academic_brain_tfjs',
+      subjectMethod: subject === supportedSubject ? 'academic_brain_rules' : 'local_rules_fallback',
+      classificationPipeline: 'academic_brain_rules->local_fallback',
+      academicBrainOutput: academicBrain,
     };
     const unsupportedSubjectRecorded = Boolean(classification?.unsupportedSubjectRequested && classification?.unsupportedSubject);
     if (unsupportedSubjectRecorded) {
@@ -3082,6 +3087,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       figureCount,
       formulaCount,
       classification,
+      academicBrain,
       localMl,
       localSubject,
       localTopic,
@@ -3107,7 +3113,27 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
     console.debug('[studentRequestAI] classification response sent', {
       uid: decoded.uid,
       classification,
+      academicBrain,
     });
+
+    if (academicBrain) {
+      await saveAcademicBrainFeedback(db, {
+        userId: decoded.uid,
+        role: 'student',
+        country: String(inputPayload?.country || 'ZA'),
+        grade: String(inputPayload?.grade || ''),
+        selectedSubjectId: String(classification.subject || ''),
+        originalOcrText: inputText,
+        originalOcrBlocks: Array.isArray(inputPayload?.ocrBlocks) ? inputPayload.ocrBlocks : [],
+        predictedOutput: academicBrain,
+        correctedOutput: null,
+        correctionType: 'prediction',
+        engineVersion: String(academicBrain?.engine?.version || '1.0.0'),
+        subjectPackVersions: Array.isArray(academicBrain?.engine?.subjectPackVersions) ? academicBrain.engine.subjectPackVersions : [],
+        uploadId: String(inputPayload?.uploadId || ''),
+        sessionId: String(inputPayload?.sessionId || ''),
+      }).catch(() => null);
+    }
 
       res.status(200).json({
         success: true,
@@ -3151,6 +3177,35 @@ exports.classifySubject = onRequest({ cors: true, secrets: [CLAXI_AI_KEYS] }, as
       aiError: error.message || 'Subject classification failed.',
       unsupportedSubjectRecorded: false,
     });
+  }
+});
+
+exports.saveAcademicBrainFeedback = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  try {
+    const feedback = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = await saveAcademicBrainFeedback(db, {
+      ...feedback,
+      userId: decoded.uid,
+    });
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.message || 'Failed to save feedback.' });
   }
 });
 

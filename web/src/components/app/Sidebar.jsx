@@ -1,5 +1,5 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { GraduationCap, LogOut, ShieldCheck, UserCircle2, X } from 'lucide-react';
+import { LogOut, ShieldCheck, UserCircle2, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAdmin } from '../../hooks/useAdmin';
 import { getRoleNavigation } from '../../constants/navigation';
@@ -23,9 +23,11 @@ export default function Sidebar({ role, onNavigate, mobile = false }) {
     <aside className="flex h-full w-full flex-col rounded-[2rem] border border-zinc-200 bg-white/95 p-4 shadow-[0_28px_60px_rgba(15,23,42,0.08)] backdrop-blur">
       <div className="mb-6 flex items-center justify-between px-2 pt-1">
         <Link to="/app" onClick={onNavigate} className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand text-white shadow-sm">
-            <GraduationCap className="h-5 w-5" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Claxi logo"
+            className="h-10 w-10 rounded-2xl object-cover shadow-sm ring-1 ring-zinc-200"
+          />
           <div>
             <p className="text-sm font-bold tracking-tight text-zinc-900">Claxi</p>
             <div className="flex items-center gap-2">

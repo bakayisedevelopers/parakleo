@@ -250,6 +250,7 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       needsManualSubjectSelection,
       unsupportedSubjectRequested: Boolean(parsed?.unsupportedSubjectRequested || parsed?.unsupportedSubject),
       unsupportedSubjectRecorded: Boolean(payload?.unsupportedSubjectRecorded),
+      academicBrainOutput: parsed?.academicBrainOutput || null,
       isFallback: false,
     };
   } catch (error) {

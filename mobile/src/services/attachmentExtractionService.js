@@ -53,21 +53,34 @@ export async function extractSingleAttachment(attachment) {
     throw new Error('You must be signed in before extracting attachment text.');
   }
 
-  const response = await fetch(IMAGE_OCR_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      imageBase64: getBase64Payload(attachment?.dataUrl),
-      mimeType: attachment?.type || 'application/octet-stream',
-      fileName: attachment?.name || 'attachment',
-    }),
-  });
+  const body = {
+    imageBase64: getBase64Payload(attachment?.dataUrl),
+    mimeType: attachment?.type || 'application/octet-stream',
+    fileName: attachment?.name || 'attachment',
+  };
+  let response = null;
+  let payload = {};
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetch(IMAGE_OCR_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(body),
+    }).catch(() => null);
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
+    if (!response) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      continue;
+    }
+
+    payload = await response.json().catch(() => ({}));
+    if (response.ok || response.status < 500) break;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+
+  if (!response || !response.ok) {
     return buildExtractionResult(attachment, payload, {
       fileType: getAttachmentFileType(attachment),
       extractionMethod: 'fallback',

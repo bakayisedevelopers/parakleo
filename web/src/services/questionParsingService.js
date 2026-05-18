@@ -109,13 +109,19 @@ function normalizeFileAttachment(item) {
   if (!item || typeof item === 'string') return null;
 
   const url = item?.downloadUrl || item?.src || item?.url || '';
+  const mimeType = String(item?.contentType || item?.mimeType || item?.type || '').toLowerCase();
+  const fileName = String(item?.fileName || item?.name || '').toLowerCase();
+  const isImageOrPdf = mimeType.startsWith('image/')
+    || mimeType === 'application/pdf'
+    || /\.(png|jpe?g|webp|bmp|gif|tiff?|pdf)$/.test(fileName);
   if (!url) return null;
+  if (isImageOrPdf) return null;
 
   return {
     type: 'file',
     url,
     fileName: item?.fileName || item?.name || 'Uploaded file',
-    mimeType: item?.contentType || item?.mimeType || item?.type || '',
+    mimeType,
     id: item?.id || item?.path || '',
     size: Number(item?.size || 0) || undefined,
   };

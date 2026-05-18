@@ -27,7 +27,7 @@ function estimateMinutesLocally({
 
   const score = 10
     + Math.round(words / 55)
-    + (questionCount * 4)
+    + (questionCount * 10)
     + (Number(marksCount || 0) * 0.35)
     + (Number(tableCount || 0) * 4)
     + (Number(figureCount || 0) * 3)

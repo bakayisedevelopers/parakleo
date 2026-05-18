@@ -31,22 +31,55 @@ export async function extractImageTextWithVision(file) {
     source: 'image-base64',
   });
 
-  const response = await fetch(IMAGE_OCR_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      imageBase64,
-      mimeType: file?.type || 'application/octet-stream',
-      fileName: file?.name || 'unknown-image',
-    }),
-  });
+  const requestBody = {
+    imageBase64,
+    mimeType: file?.type || 'application/octet-stream',
+    fileName: file?.name || 'unknown-image',
+  };
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload || payload.success !== true) {
-    throw new Error(payload?.message || 'Unable to extract text from image right now.');
+  let response = null;
+  let payload = {};
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await fetch(IMAGE_OCR_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+      payload = await response.json().catch(() => ({}));
+      const isRetriableHttp = !response.ok && response.status >= 500;
+      if (!isRetriableHttp) break;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+
+  if (!response || !response.ok || !payload) {
+    console.error('[attachmentExtraction][ocr] image-ocr backend returned failure', {
+      endpoint: IMAGE_OCR_ENDPOINT,
+      httpStatus: response?.status || null,
+      ok: Boolean(response?.ok),
+      payload,
+      fileName: file?.name || '',
+      mimeType: file?.type || '',
+    });
+    const fallbackMessage = lastError?.message || 'Unable to extract text from image right now.';
+    throw new Error(payload?.message || fallbackMessage);
+  }
+
+  if (payload.success !== true) {
+    console.warn('[attachmentExtraction][ocr] image-ocr returned success:false', {
+      endpoint: IMAGE_OCR_ENDPOINT,
+      httpStatus: response.status,
+      payload,
+      fileName: file?.name || '',
+      mimeType: file?.type || '',
+    });
   }
 
   return {
@@ -76,5 +109,6 @@ export async function extractImageTextWithVision(file) {
     geminiTopics: Array.isArray(payload?.structuredData?.geminiTopics) ? payload.structuredData.geminiTopics : [],
     geminiEstimatedMinutes: Number(payload?.structuredData?.geminiEstimatedMinutes || 0) || 0,
     geminiVisualRegionCount: Number(payload?.structuredData?.geminiVisualRegionCount || 0) || 0,
+    errorMessage: String(payload?.message || ''),
   };
 }

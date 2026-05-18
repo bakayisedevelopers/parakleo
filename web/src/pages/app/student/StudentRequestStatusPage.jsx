@@ -208,14 +208,24 @@ export default function StudentRequestStatusPage() {
   const submitCancel = async () => {
     if (!request?.id || !cancelReason.trim()) return;
     setIsCanceling(true);
-    setShowCancelModal(false);
     try {
       await cancelClassRequest({ requestId: request.id, canceledBy: 'student', reason: cancelReason });
+      setShowCancelModal(false);
+      navigate('/app/student/requests', { replace: true });
     } finally {
+      setShowCancelModal(false);
       setIsCanceling(false);
       setCancelReason('');
     }
   };
+
+  useEffect(() => {
+    if (!currentStatus) return;
+    if ([REQUEST_STATUSES.CANCELED, REQUEST_STATUSES.CANCELED_DURING].includes(currentStatus)) {
+      setShowCancelModal(false);
+      setIsCanceling(false);
+    }
+  }, [currentStatus]);
 
   return (
     <div className="space-y-6">

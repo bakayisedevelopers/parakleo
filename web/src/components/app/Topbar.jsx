@@ -1,4 +1,4 @@
-import { Bell, Menu, UserCircle2 } from 'lucide-react';
+import { Bell, Menu } from 'lucide-react';
 import ReferralShareButton from './ReferralShareButton';
 
 export default function Topbar({
@@ -47,9 +47,11 @@ export default function Topbar({
             ) : null}
           </button>
           <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-2.5 py-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-dark text-white shadow-sm">
-              <UserCircle2 className="h-4 w-4" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="Claxi logo"
+              className="h-8 w-8 rounded-xl object-cover ring-1 ring-zinc-200"
+            />
             <p className="text-xs font-semibold text-zinc-700">{name || 'Claxi User'}</p>
           </div>
         </div>

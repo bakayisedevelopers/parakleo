@@ -8,9 +8,11 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 rounded-xl bg-brand flex items-center justify-center group-hover:shadow-lg group-hover:shadow-brand/40 transition-shadow">
-              <span className="text-white font-black text-lg">C</span>
-            </div>
+            <img
+              src="/logo.png"
+              alt="Claxi logo"
+              className="h-10 w-10 rounded-xl object-cover ring-1 ring-zinc-200 transition-shadow group-hover:shadow-lg"
+            />
             <span className="text-xl font-black text-zinc-900 dark:text-white">Claxi</span>
           </Link>
 
