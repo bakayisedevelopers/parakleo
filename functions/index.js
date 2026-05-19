@@ -2036,6 +2036,12 @@ function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
 
+function capitalizeTopic(value = '') {
+  const normalized = normalizeExtractedText(value);
+  if (!normalized) return '';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function isPdfAttachmentBuffer(buffer) {
   return Buffer.isBuffer(buffer) && buffer.slice(0, 5).toString('utf8') === '%PDF-';
 }
@@ -3019,15 +3025,17 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
     const supportedSubject = normalizedSupported.has(modelSubject) ? modelSubject : '';
     const fallbackSubject = localSubject.subject || '';
     const subject = supportedSubject || fallbackSubject;
-    const topics = Array.isArray(academicBrain?.topics) && academicBrain.topics.length
+    const topics = (Array.isArray(academicBrain?.topics) && academicBrain.topics.length
       ? academicBrain.topics.map((entry) => entry.label)
-      : (localTopic.topics || []);
+      : (localTopic.topics || []))
+      .map((topic) => capitalizeTopic(topic))
+      .filter(Boolean);
     const classification = {
       subject,
       unsupportedSubject: '',
-      topic: topics[0] || localTopic.topic || '',
+      topic: topics[0] || capitalizeTopic(localTopic.topic || ''),
       topics,
-      estimatedMinutes: clampMinutes(academicBrain?.estimatedMinutes || localMinutes.estimatedMinutes || 10),
+      estimatedMinutes: clampMinutes(academicBrain?.estimatedMinutes || 10),
       subjectConfidence: subject
         ? ((academicBrain?.subject?.confidence || 0) >= 0.7 ? 'high' : 'low')
         : 'unknown',
@@ -3037,8 +3045,8 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
       topicConfidence: topics.length ? 'high' : (localTopic.topicConfidence || 'unknown'),
       topicMethod: 'academic_brain_rules',
       minutesMethod: 'academic_brain_rules',
-      minutesConfidence: 'high',
-      minutesSignalsUsed: localMinutes.signalsUsed,
+      minutesConfidence: academicBrain?.estimatedMinutes ? 'high' : 'unknown',
+      minutesSignalsUsed: Array.isArray(academicBrain?.signalsUsed) ? academicBrain.signalsUsed : [],
       subjectMethod: subject === supportedSubject ? 'academic_brain_rules' : 'local_rules_fallback',
       classificationPipeline: 'academic_brain_rules->local_fallback',
       academicBrainOutput: academicBrain,
@@ -3155,7 +3163,30 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
       error: error.message,
     });
 
-    const fallbackClassification = getAiSubjectExtractionModule().validateSubjectClassification(null, supportedSubjects);
+    const localFallbackSubject = classifySubjectLocally({ text: inputText, supportedSubjects });
+    const localFallbackTopic = detectTopicsLocally({
+      text: inputText,
+      subject: localFallbackSubject.subject || '',
+    });
+    const fallbackClassification = {
+      subject: localFallbackSubject.subject || '',
+      unsupportedSubject: '',
+      topic: capitalizeTopic(localFallbackTopic.topic || ''),
+      topics: (localFallbackTopic.topics || []).map((topic) => capitalizeTopic(topic)).filter(Boolean),
+      estimatedMinutes: clampMinutes(10),
+      subjectConfidence: 'unknown',
+      needsManualSubjectSelection: true,
+      unsupportedSubjectRequested: false,
+      unsupportedSubjectRecorded: false,
+      topicConfidence: localFallbackTopic.topicConfidence || 'unknown',
+      topicMethod: 'local_rules_fallback',
+      minutesMethod: 'academic_brain_rules',
+      minutesConfidence: 'unknown',
+      minutesSignalsUsed: [],
+      subjectMethod: 'local_rules_fallback',
+      classificationPipeline: 'academic_brain_rules->local_fallback',
+      academicBrainOutput: null,
+    };
     await writeAiLog({
       userId: decoded.uid,
       source: 'student_subject_classification',
@@ -3172,7 +3203,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
     res.status(200).json({
       success: true,
       classification: fallbackClassification,
-      provider: 'firebase-ai-logic',
+      provider: 'local',
       aiPrompt: '',
       aiRawOutput: '',
       aiError: error.message || 'Subject classification failed.',
@@ -3858,8 +3889,8 @@ exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [PARAKLEO_PAYMEN
 });
 
 const BILLING_RULES = {
-  PLATFORM_FEE_RATE: 0.3,
-  TUTOR_PAYOUT_RATE: 0.7,
+  PLATFORM_FEE_RATE: 0.27,
+  TUTOR_PAYOUT_RATE: 0.73,
 };
 
 async function chargeAuthorizationWithPaystack({ paystackSecretKey, email, amount, authorizationCode }) {
