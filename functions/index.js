@@ -1462,9 +1462,9 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
       await writeAiLog({
         userId: data.uid,
         source: 'tutor_results_extraction',
-        step: 'subjects_rejected',
-        status: 'failed',
-        message: 'Tutor subjects outside the Grade 1-12 allowlist were detected.',
+        step: 'unsupported_subjects_ignored',
+        status: 'info',
+        message: 'Unsupported tutor subjects were ignored; continuing with supported subjects.',
         details: {
           docId,
           filePath: data.filePath,
@@ -1472,20 +1472,9 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
           allowedSubjects,
         },
       });
-      if (!(await docRef.get()).exists) return;
-      await docRef.set({
-        extractedSubjects,
-        qualifiedSubjects: [],
-        status: 'FAILED',
-        error: `Unsupported subject(s): ${unsupportedSubjects.join(', ')}`,
-        aiPrompt,
-        aiRawOutput,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-      return;
     }
 
-    if (!extractedSubjects.length) {
+    if (!allowedSubjects.length) {
       console.debug('[tutorResultsAI] no subjects detected in document', {
         docId,
         uid: data.uid,
@@ -1501,6 +1490,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
           docId,
           filePath: data.filePath,
           extractedSubjectCount: 0,
+          unsupportedSubjectCount: unsupportedSubjects.length,
           reasoning: aiReasoning,
         },
       });
@@ -1509,7 +1499,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
         extractedSubjects: [],
         qualifiedSubjects: [],
         status: 'FAILED',
-        error: 'No subjects detected',
+        error: 'No supported Grade 1-12 subjects detected',
         aiPrompt,
         aiRawOutput,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1539,7 +1529,7 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
 
     if (!(await docRef.get()).exists) return;
     await docRef.set({
-      extractedSubjects,
+      extractedSubjects: allowedSubjects,
       qualifiedSubjects,
       status: 'VERIFIED',
       error: null,
