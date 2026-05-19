@@ -1637,6 +1637,8 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
 exports.processTutorDocument = onDocumentCreated({
   document: 'tutorDocuments/{docId}',
   secrets: [PARAKLEO_AI_KEYS],
+  memory: '1GiB',
+  timeoutSeconds: 300,
 }, async (event) => {
   const docId = event.params.docId;
   const data = event.data?.data() || {};
@@ -1646,6 +1648,8 @@ exports.processTutorDocument = onDocumentCreated({
 exports.retryTutorDocumentProcessing = onDocumentWritten({
   document: 'tutorDocuments/{docId}',
   secrets: [PARAKLEO_AI_KEYS],
+  memory: '1GiB',
+  timeoutSeconds: 300,
 }, async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
@@ -2923,10 +2927,14 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       processingTrace,
     });
   } catch (error) {
+    const normalizedMessage = String(error?.message || 'unknown_error');
+    const isVisionApiDisabled = normalizedMessage.includes('vision.googleapis.com')
+      && normalizedMessage.toLowerCase().includes('disabled');
+
       logger.error('image_ocr_failed', {
         uid: decoded.uid,
         source: sourceLabel,
-      error: error?.message || 'unknown_error',
+      error: normalizedMessage,
     });
     res.status(500).json({
       success: false,
@@ -2934,7 +2942,10 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       textLength: 0,
       extractionMethod: 'ocr',
       provider: 'google-vision',
-      message: 'Image OCR failed.',
+      message: isVisionApiDisabled
+        ? 'Image OCR failed: Cloud Vision API is disabled for this project.'
+        : 'Image OCR failed.',
+      error: normalizedMessage,
     });
   }
 });

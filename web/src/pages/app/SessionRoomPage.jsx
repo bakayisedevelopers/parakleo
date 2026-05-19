@@ -135,6 +135,114 @@ function HiddenMediaMounts({ localVideoRef, remoteVideoRef, remoteScreenVideoRef
   );
 }
 
+const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+let cachedBoardPdfJs = null;
+
+async function loadPdfJsForBoard() {
+  if (cachedBoardPdfJs) return cachedBoardPdfJs;
+  cachedBoardPdfJs = await import(/* @vite-ignore */ PDFJS_CDN_URL);
+  cachedBoardPdfJs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN_URL;
+  return cachedBoardPdfJs;
+}
+
+function getAttachmentType(attachment = {}) {
+  const mimeType = String(attachment?.contentType || attachment?.mimeType || '').toLowerCase();
+  const fileName = String(attachment?.fileName || '').toLowerCase();
+  if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) return 'pdf';
+  if (mimeType.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif|tiff?)$/.test(fileName)) return 'image';
+  return '';
+}
+
+async function renderPdfFromUrlToImageRefs(attachment, attachmentIndex = 0) {
+  const url = String(attachment?.downloadUrl || attachment?.src || attachment?.url || '').trim();
+  if (!url) return [];
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`PDF download failed with status ${response.status}`);
+  }
+
+  const pdfBytes = await response.arrayBuffer();
+  const pdfjs = await loadPdfJsForBoard();
+  const document = await pdfjs.getDocument({ data: pdfBytes }).promise;
+  const imageRefs = [];
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.35 });
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) continue;
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+    imageRefs.push({
+      id: `attachment-${attachmentIndex}-pdf-page-${pageNumber}`,
+      src: canvas.toDataURL('image/png'),
+      mimeType: 'image/png',
+      fileName: `${attachment?.fileName || 'attachment.pdf'} page ${pageNumber}`,
+      width: canvas.width,
+      height: canvas.height,
+      pageNumber,
+    });
+  }
+
+  return imageRefs;
+}
+
+async function buildBoardImageReferences({ attachments = [], attachmentExtractions = [], ocrImageReferences = [] } = {}) {
+  const refs = [];
+  const seen = new Set();
+
+  const pushRef = (candidate) => {
+    const src = String(candidate?.src || candidate?.downloadUrl || candidate?.url || '').trim();
+    if (!src || seen.has(src)) return;
+    seen.add(src);
+    refs.push({
+      id: String(candidate?.id || ''),
+      src,
+      mimeType: String(candidate?.mimeType || candidate?.contentType || 'image/png'),
+      fileName: String(candidate?.fileName || ''),
+      width: Number(candidate?.width || 0) || undefined,
+      height: Number(candidate?.height || 0) || undefined,
+      pageNumber: Number(candidate?.pageNumber || 0) || undefined,
+    });
+  };
+
+  (ocrImageReferences || []).forEach(pushRef);
+  (attachmentExtractions || []).forEach((entry) => {
+    (entry?.extractedImages || []).forEach(pushRef);
+    (entry?.pages || []).forEach((page) => (page?.images || []).forEach(pushRef));
+  });
+
+  for (let index = 0; index < attachments.length; index += 1) {
+    const attachment = attachments[index] || {};
+    const type = getAttachmentType(attachment);
+    if (type === 'image') {
+      pushRef({
+        id: `attachment-${index}-image`,
+        src: attachment?.downloadUrl || attachment?.src || attachment?.url || '',
+        mimeType: attachment?.contentType || attachment?.mimeType || 'image/png',
+        fileName: attachment?.fileName || `attachment-${index + 1}`,
+      });
+      continue;
+    }
+    if (type === 'pdf') {
+      try {
+        const pdfRefs = await renderPdfFromUrlToImageRefs(attachment, index);
+        pdfRefs.forEach(pushRef);
+      } catch (error) {
+        debugLog('sessionRoom', '[whiteboardPreparation] failed to hydrate PDF pages for board injection.', {
+          fileName: attachment?.fileName || '',
+          message: error?.message,
+        });
+      }
+    }
+  }
+
+  return refs;
+}
+
 export default function SessionRoomPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -319,6 +427,12 @@ export default function SessionRoomPage() {
 
     try {
       const { AssetRecordType, createShapeId, toRichText } = await import('tldraw');
+      const hydratedImageReferences = await buildBoardImageReferences({
+        attachments,
+        attachmentExtractions,
+        ocrImageReferences,
+      });
+
       const parsedQuestions = gptExtraction
         ? parseQuestionsFromGptExtraction({
             gptExtraction,
@@ -328,7 +442,7 @@ export default function SessionRoomPage() {
             extractedText,
             attachments,
             attachmentExtractions,
-            ocrImageReferences,
+            ocrImageReferences: hydratedImageReferences,
           });
       const layout = prepareWhiteboardLayout(parsedQuestions);
 

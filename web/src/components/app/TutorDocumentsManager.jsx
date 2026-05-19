@@ -177,7 +177,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
                   <button
                     type="button"
                     onClick={() => handleRetry(document.id)}
-                    disabled={status === 'PROCESSING' || retryingDocumentId === document.id}
+                    disabled={retryingDocumentId === document.id}
                     className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Retry subject and mark detection"
                   >

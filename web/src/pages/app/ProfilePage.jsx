@@ -77,19 +77,23 @@ export default function ProfilePage() {
 
     setIsSaving(true);
     setMessage('');
-    const updates = {
-      fullName: form.fullName,
-      displayName: form.fullName,
-      phoneNumber: form.phoneNumber,
-      bio: form.bio,
-      availability: form.availability,
-    };
+    try {
+      const updates = {
+        fullName: form.fullName,
+        displayName: form.fullName,
+        phoneNumber: form.phoneNumber,
+        bio: form.bio,
+        availability: form.availability,
+      };
 
-    const profile = await updateUserProfile(user.uid, updates);
-
-    setUser((prev) => ({ ...prev, ...profile }));
-    setMessage('Profile details saved.');
-    setIsSaving(false);
+      const profile = await updateUserProfile(user.uid, updates);
+      setUser((prev) => ({ ...prev, ...profile }));
+      setMessage('Profile details saved.');
+    } catch (error) {
+      setMessage(error.message || 'Unable to save profile right now.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';

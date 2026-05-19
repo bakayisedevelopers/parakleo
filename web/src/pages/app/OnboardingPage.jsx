@@ -73,30 +73,48 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [role, selectedPayoutBankCode, user?.uid]);
+  }, [role, user?.uid]);
+
+  useEffect(() => {
+    if (role !== 'tutor') return;
+    if (selectedPayoutBankCode) return;
+    const existingBankCode = String(currentUser?.tutorProfile?.payout?.bankCode || '').trim();
+    if (existingBankCode) {
+      setSelectedPayoutBankCode(existingBankCode);
+    }
+  }, [currentUser?.tutorProfile?.payout?.bankCode, role, selectedPayoutBankCode]);
 
   const saveStudentProfile = async (event) => {
     event.preventDefault();
+    if (!user?.uid) return;
     const formData = new FormData(event.currentTarget);
+    try {
+      const profile = await updateUserProfile(user.uid, {
+        studentProfile: {
+          grade: Number(formData.get('grade')) || null,
+          curriculum: formData.get('curriculum')?.toString().trim() || '',
+          discoverySource: formData.get('discoverySource')?.toString().trim() || '',
+        },
+      });
+      const syncedProfile = await syncStudentGrowth().catch(() => null);
 
-    const profile = await updateUserProfile(user.uid, {
-      studentProfile: {
-        grade: Number(formData.get('grade')) || null,
-        curriculum: formData.get('curriculum')?.toString().trim() || '',
-        discoverySource: formData.get('discoverySource')?.toString().trim() || '',
-      },
-    });
-    const syncedProfile = await syncStudentGrowth().catch(() => null);
-
-    setUser((prev) => ({ ...prev, ...profile, ...(syncedProfile || {}) }));
-    setStatusMessage('Student profile details saved.');
+      setUser((prev) => ({ ...prev, ...profile, ...(syncedProfile || {}) }));
+      setStatusMessage('Student profile details saved.');
+    } catch (error) {
+      setStatusMessage(error.message || 'Unable to save student profile.');
+    }
   };
 
   const saveTutorProfile = async (event) => {
     event.preventDefault();
+    if (!user?.uid) return;
     const formData = new FormData(event.currentTarget);
     if (!currentUser?.selfieVerified || !currentUser?.selfieUrl) {
       setStatusMessage('Please capture and save a live selfie before saving tutor setup.');
+      return;
+    }
+    if (!selectedPayoutBank?.code || !selectedPayoutBank?.name) {
+      setStatusMessage('Please select a payout bank before saving tutor profile.');
       return;
     }
 
@@ -116,7 +134,7 @@ export default function OnboardingPage() {
 
       const profile = await updateUserProfile(user.uid, {
         tutorProfile: {
-          ...(user?.tutorProfile || {}),
+          ...(currentUser?.tutorProfile || {}),
           gradesToTutor: (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean),
           verificationStatus: (currentUser?.qualifiedSubjects || []).length ? TUTOR_VERIFICATION_STATUSES.VERIFIED : TUTOR_VERIFICATION_STATUSES.PENDING,
           payout: verifiedPayout,
