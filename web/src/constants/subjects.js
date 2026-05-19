@@ -26,6 +26,35 @@ export const SOUTH_AFRICAN_SUBJECTS = [
   'Life Orientation',
 ];
 
+export const SUPPORTED_TUTOR_SUBJECTS = [
+  ...SOUTH_AFRICAN_SUBJECTS,
+  'Sesotho',
+  'Sepedi',
+  'Setswana',
+  'Siswati',
+  'Tshivenda',
+  'Xitsonga',
+  'Ndebele',
+  'French',
+  'German',
+  'Portuguese',
+  'Latin',
+  'Arabic',
+  'Music',
+  'Dance Studies',
+  'Dramatic Arts',
+  'Visual Arts',
+  'Religion Studies',
+  'Technology',
+  'Natural Sciences',
+  'Social Sciences',
+  'Economic and Management Sciences',
+  'Creative Arts',
+  'Life Skills',
+  'Electrical Technology',
+  'Engineering Graphics and Design',
+];
+
 export const SUBJECT_OPTIONS = FALLBACK_SUBJECTS.map((subject) => ({
   value: subject,
   label: subject,

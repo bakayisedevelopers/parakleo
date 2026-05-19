@@ -133,6 +133,54 @@ export async function updateTutorActiveSubjects(uid, activeSubjects, qualifiedSu
   return { activeSubjects: safeSubjects, subjects: safeSubjects };
 }
 
+function sanitizeQualifiedSubjects(values = []) {
+  const bySubject = new Map();
+  (values || []).forEach((item) => {
+    const subject = String(item?.subject || item || '').trim();
+    const numericMark = Number(item?.mark);
+    if (!subject) return;
+    if (!Number.isFinite(numericMark)) return;
+    const mark = Math.max(0, Math.min(100, Math.round(numericMark)));
+    const existing = bySubject.get(subject);
+    if (!existing || mark > Number(existing.mark || 0)) {
+      bySubject.set(subject, { subject, mark });
+    }
+  });
+  return [...bySubject.values()];
+}
+
+export async function updateTutorQualifiedSubjectsAndActiveSubjects(uid, qualifiedSubjects = [], activeSubjects = []) {
+  if (!uid) throw new Error('Missing tutor id.');
+
+  const safeQualified = sanitizeQualifiedSubjects(qualifiedSubjects);
+  const allowedSubjects = new Set(safeQualified.map((item) => item.subject));
+  const safeActive = normalizeSubjectList(activeSubjects).filter((subject) => allowedSubjects.has(subject));
+
+  const clients = await getFirebaseClients();
+  if (!clients) {
+    return {
+      qualifiedSubjects: safeQualified,
+      activeSubjects: safeActive,
+      subjects: safeActive,
+    };
+  }
+
+  const { db, firestoreModule } = clients;
+  const { doc, serverTimestamp, updateDoc } = firestoreModule;
+  await updateDoc(doc(db, 'users', uid), {
+    qualifiedSubjects: safeQualified,
+    activeSubjects: safeActive,
+    subjects: safeActive,
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    qualifiedSubjects: safeQualified,
+    activeSubjects: safeActive,
+    subjects: safeActive,
+  };
+}
+
 export function normalizeDocumentStatus(status) {
   const normalized = String(status || '').toUpperCase();
   return DOCUMENT_STATUSES.has(normalized) ? normalized : 'UPLOADED';
