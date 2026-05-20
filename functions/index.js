@@ -1420,7 +1420,6 @@ async function processTutorDocumentRecord({ docId, data = {} }) {
         uid: data.uid,
       },
       firebaseConfig: aiConfig,
-      model: 'gemini-2.5-flash',
     });
     const extractedSubjects = aiResult.validated;
     const aiPrompt = aiResult.prompt;

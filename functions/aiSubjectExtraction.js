@@ -315,7 +315,7 @@ async function callGeminiForTutorResults(images, options = {}) {
   const request = buildVisionPromptContent(images);
   const { prompt, ...geminiRequest } = request;
   const config = getGeminiConfig(options.firebaseConfig || {});
-  const model = options.model || TUTOR_RESULTS_GEMINI_MODEL;
+  const model = options.model || config.visionModel || config.model || TUTOR_RESULTS_GEMINI_MODEL;
 
   console.log("=== TUTOR RESULTS GEMINI PROMPT (TEXT) ===");
   console.log(prompt);
@@ -360,7 +360,7 @@ async function extractTutorResultsWithGemini25Flash(images, options = {}) {
   const logger = options.logger || console;
   const logContext = options.logContext || {};
   const config = getGeminiConfig(options.firebaseConfig || {});
-  const model = options.model || TUTOR_RESULTS_GEMINI_MODEL;
+  const model = options.model || config.visionModel || config.model || TUTOR_RESULTS_GEMINI_MODEL;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const startedAt = Date.now();
