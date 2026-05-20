@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const functionsEmulatorTarget = 'http://localhost:5001/claxi-bakayise/us-central1'
+const functionsEmulatorTarget = 'http://localhost:5001/parakleo/us-central1'
 
 export default defineConfig({
   plugins: [react()],

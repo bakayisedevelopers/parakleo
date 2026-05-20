@@ -14,7 +14,7 @@ Proposed Plan
   1. Create migration control file and baseline inventory
 
   - Create claxi-to-parakleo.md in repo root with a checkbox tracker for all steps below.
-  - Freeze a baseline by recording current values: Firebase project id (claxi-bakayise), Hosting site (claxi), Cloud Run service (claxi-paddle-
+  - Freeze a baseline by recording current values: Firebase project id (parakleo), Hosting site (claxi), Cloud Run service (claxi-paddle-
     ocr), Functions secret names (CLAXI_*), mobile package (com.anonymous.claximobile), deep link scheme (claxi), current domains/emails.
   - Add a “rollback references” section in the same file with old IDs/URLs for emergency restore.
 
@@ -42,7 +42,7 @@ Proposed Plan
   - Update web env examples and active env files referencing Firebase project/auth/storage/function endpoints.
   - Update emulator target and cloud function endpoint URLs.
   - Update Firebase config files (firebase.json, .firebaserc) once target project/site names are finalized.
-  - Validate all deployed endpoint URLs that currently include claxi-bakayise.
+  - Validate all deployed endpoint URLs that currently include parakleo.
 
   6. Functions + secret contract migration
 
@@ -81,7 +81,7 @@ Proposed Plan
 
   - Deep link scheme: claxi://... → parakleo://....
   - Mobile app package/namespace: current com.anonymous.claximobile to new package (final value to be chosen before implementation).
-  - Firebase/Cloud endpoint hostnames and function URLs currently containing claxi-bakayise will change.
+  - Firebase/Cloud endpoint hostnames and function URLs currently containing parakleo will change.
   - Cloud Run OCR service name and URL will change from claxi-paddle-ocr....
   - Secret names contract: CLAXI_PAYMENTS_SECRETS, CLAXI_EMAIL_SECRETS, CLAXI_REALTIME_SECRETS, CLAXI_AI_KEYS → PARAKLEO_* equivalents.
   - Storage/debug keys prefixed with claxi_ change to parakleo_ (with optional one-time migration for client continuity).

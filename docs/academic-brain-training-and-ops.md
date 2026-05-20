@@ -2,7 +2,7 @@
 
 ## 1) Current production state
 - Hosting deployed: `https://claxi.web.app`
-- Functions deployed: project `claxi-bakayise`
+- Functions deployed: project `parakleo`
 - Runtime OCR extraction is now simple OCR only (no Paddle, no Gemini fallback in extraction runtime).
 - Runtime subject/topic/minutes uses local trainable backend model (`AcademicBrain`) plus local rule fallback.
 - Gemini is reserved for training enrichment only (not runtime extraction).
