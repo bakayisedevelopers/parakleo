@@ -3820,6 +3820,31 @@ exports.verifyTutorPayoutAccount = onRequest({ cors: true, secrets: [PARAKLEO_PA
       payout: verifiedPayout,
     });
   } catch (error) {
+    try {
+      const userRef = db.collection('users').doc(decoded.uid);
+      const userSnap = await userRef.get();
+      const existing = userSnap.exists ? (userSnap.data() || {}) : {};
+      await userRef.set({
+        tutorProfile: {
+          ...(existing.tutorProfile || {}),
+          payout: {
+            ...(existing.tutorProfile?.payout || {}),
+            ...payout,
+            verified: false,
+            verificationStatus: 'unverified',
+            verificationMessage: error.message || 'Unable to verify payout account.',
+            verificationCheckedAt: new Date().toISOString(),
+          },
+        },
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (persistError) {
+      logger.warn('Failed to persist payout verification failure status.', {
+        uid: decoded.uid,
+        error: persistError.message,
+      });
+    }
+
     logger.warn('tutor_payout_account_verification_failed', {
       uid: decoded.uid,
       error: error.message,
@@ -4028,7 +4053,10 @@ async function verifyAndCreateTutorTransferRecipient({ paystackSecretKey, payout
     paystackRecipientCode: recipient?.data?.recipient_code || '',
     paystackRecipientId: recipient?.data?.id ? String(recipient.data.id) : '',
     verified: true,
+    verificationStatus: 'verified',
     verifiedAt: new Date().toISOString(),
+    verificationCheckedAt: new Date().toISOString(),
+    verificationMessage: validationData.verificationMessage || validation?.message || 'Account validated.',
     validationMessage: validationData.verificationMessage || validation?.message || 'Account validated.',
     validationChecks: {
       accountAcceptsCredits: validationData.accountAcceptsCredits === true,
@@ -4803,11 +4831,16 @@ exports.processWeeklyTutorPayouts = onSchedule({
     const tutorData = tutorSnap.exists ? (tutorSnap.data() || {}) : {};
     const payoutDetails = tutorData?.tutorProfile?.payout || {};
     const recipientCode = payoutDetails.paystackRecipientCode || '';
-    if (!recipientCode || payoutDetails.verified !== true) {
+    const payoutVerificationStatus = String(payoutDetails.verificationStatus || '').toLowerCase();
+    const isPayoutVerified = payoutVerificationStatus
+      ? payoutVerificationStatus === 'verified'
+      : payoutDetails.verified === true;
+    const nextTransferAttempt = Number(payout.transferAttempts || 0) + 1;
+    if (!recipientCode || !isPayoutVerified) {
       await db.collection(PAYOUT_COLLECTION).doc(payout.id).set({
         status: 'unsuccessful',
         failureReason: 'Tutor payout account is not verified.',
-        transferAttempts: Number(payout.transferAttempts || 0) + 1,
+        transferAttempts: nextTransferAttempt,
         lastTransferAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
@@ -4826,7 +4859,7 @@ exports.processWeeklyTutorPayouts = onSchedule({
       });
       try {
         await queueEmailEventOnce({
-          eventId: buildEmailEventId('tutor-payout', payout.id, 'unsuccessful', 'unverified_account'),
+          eventId: buildEmailEventId('tutor-payout', payout.id, 'unsuccessful', 'unverified_account', `attempt_${nextTransferAttempt}`),
           eventType: 'tutor_payout_status',
           payload: {
             email: payout.tutorEmail || tutorData.email || '',
@@ -4841,6 +4874,7 @@ exports.processWeeklyTutorPayouts = onSchedule({
             platformFeeRate: Number(BILLING_RULES.PLATFORM_FEE_RATE),
             platformAmount: Number(payout.platformAmount || 0),
             failureReason: 'Tutor payout account is not verified.',
+            payoutVerificationStatus: payoutVerificationStatus || (payoutDetails.verified === true ? 'verified' : 'unverified'),
           },
           source: 'processWeeklyTutorPayouts',
         });

@@ -51,6 +51,8 @@ export default function OnboardingPage() {
       }
       : null);
   const payoutDocumentNumberLabel = payoutDocumentType === 'passportNumber' ? 'Passport number' : 'South African ID number';
+  const payoutVerificationState = String(currentUser?.tutorProfile?.payout?.verificationStatus || '').trim().toLowerCase();
+  const payoutVerificationMessage = currentUser?.tutorProfile?.payout?.verificationMessage || '';
 
   useEffect(() => {
     if (role !== 'tutor' || !user?.uid) return undefined;
@@ -113,38 +115,104 @@ export default function OnboardingPage() {
       setStatusMessage('Please capture and save a live selfie before saving tutor setup.');
       return;
     }
-    if (!selectedPayoutBank?.code || !selectedPayoutBank?.name) {
-      setStatusMessage('Please select a payout bank before saving tutor profile.');
-      return;
-    }
-
     try {
       setIsSavingTutorProfile(true);
-      setStatusMessage('Verifying payout account details...');
+      setStatusMessage('Saving tutor profile details...');
 
-      const verifiedPayout = await verifyTutorPayoutAccount({
-        bankName: selectedPayoutBank?.name || '',
-        bankCode: selectedPayoutBank?.code || '',
+      const gradesToTutor = (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean);
+      const verificationStatus = (currentUser?.qualifiedSubjects || []).length
+        ? TUTOR_VERIFICATION_STATUSES.VERIFIED
+        : TUTOR_VERIFICATION_STATUSES.PENDING;
+      const existingTutorProfile = currentUser?.tutorProfile || {};
+      const existingPayout = existingTutorProfile?.payout || {};
+      const payoutInput = {
+        bankName: selectedPayoutBank?.name || existingPayout.bankName || '',
+        bankCode: selectedPayoutBank?.code || existingPayout.bankCode || '',
         accountNumber: formData.get('accountNumber')?.toString().trim() || '',
         accountHolder: formData.get('accountHolder')?.toString().trim() || '',
         accountType: formData.get('accountType')?.toString().trim() || 'personal',
         documentType: payoutDocumentType,
         documentNumber: formData.get('documentNumber')?.toString().trim() || '',
-      });
+      };
+      const nowIso = new Date().toISOString();
 
       const profile = await updateUserProfile(user.uid, {
         tutorProfile: {
-          ...(currentUser?.tutorProfile || {}),
-          gradesToTutor: (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean),
-          verificationStatus: (currentUser?.qualifiedSubjects || []).length ? TUTOR_VERIFICATION_STATUSES.VERIFIED : TUTOR_VERIFICATION_STATUSES.PENDING,
-          payout: verifiedPayout,
+          ...existingTutorProfile,
+          gradesToTutor,
+          verificationStatus,
+          payout: {
+            ...existingPayout,
+            ...payoutInput,
+            verified: false,
+            verificationStatus: 'pending',
+            verificationMessage: 'Verification in progress.',
+            verificationCheckedAt: nowIso,
+          },
         },
       });
 
       setUser((prev) => ({ ...prev, ...profile }));
-      setStatusMessage('Tutor profile details saved and payout account verified.');
+
+      if (!payoutInput.bankCode || !payoutInput.bankName) {
+        const profileWithoutBankVerification = await updateUserProfile(user.uid, {
+          tutorProfile: {
+            ...((profile?.tutorProfile) || existingTutorProfile),
+            payout: {
+              ...((((profile?.tutorProfile) || existingTutorProfile)?.payout) || {}),
+              verificationStatus: 'unverified',
+              verificationMessage: 'Select a bank and re-save to verify payout details.',
+              verificationCheckedAt: new Date().toISOString(),
+            },
+          },
+        });
+        setUser((prev) => ({ ...prev, ...profileWithoutBankVerification }));
+        setStatusMessage('Tutor profile and bank details saved. Select a payout bank to run verification.');
+        return;
+      }
+
+      setStatusMessage('Tutor profile and bank details saved. Verifying payout account details...');
+
+      try {
+        const verifiedPayout = await verifyTutorPayoutAccount(payoutInput);
+        const profileWithPayout = await updateUserProfile(user.uid, {
+          tutorProfile: {
+            ...(profile?.tutorProfile || existingTutorProfile),
+            gradesToTutor,
+            verificationStatus,
+            payout: {
+              ...verifiedPayout,
+              verificationStatus: verifiedPayout?.verified ? 'verified' : 'unverified',
+              verificationMessage: verifiedPayout?.validationMessage || 'Payout details verified successfully.',
+              verificationCheckedAt: new Date().toISOString(),
+            },
+          },
+        });
+        setUser((prev) => ({ ...prev, ...profileWithPayout }));
+        setStatusMessage('Tutor profile and bank details saved. Payout account verified.');
+      } catch (verificationError) {
+        const profileWithVerificationFailure = await updateUserProfile(user.uid, {
+          tutorProfile: {
+            ...(profile?.tutorProfile || existingTutorProfile),
+            gradesToTutor,
+            verificationStatus,
+            payout: {
+              ...((((profile?.tutorProfile) || existingTutorProfile)?.payout) || {}),
+              verified: false,
+              verificationStatus: 'unverified',
+              verificationMessage: verificationError.message || 'Unable to verify payout account.',
+              verificationCheckedAt: new Date().toISOString(),
+            },
+          },
+        });
+        setUser((prev) => ({ ...prev, ...profileWithVerificationFailure }));
+        setStatusMessage(
+          verificationError.message
+            || 'Tutor profile and banking details saved, but verification failed.',
+        );
+      }
     } catch (error) {
-      setStatusMessage(error.message || 'Unable to upload documents and save tutor profile.');
+      setStatusMessage(error.message || 'Unable to save tutor profile.');
     } finally {
       setIsSavingTutorProfile(false);
     }
@@ -224,6 +292,13 @@ export default function OnboardingPage() {
               required
             />
             <FormField label={payoutDocumentNumberLabel} name="documentNumber" defaultValue={currentUser?.tutorProfile?.payout?.documentNumber || ''} required />
+            <div className="md:col-span-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              <span className="font-semibold">Payout verification status:</span>{' '}
+              {payoutVerificationState === 'verified' ? 'Verified' : (payoutVerificationState || 'unverified')}
+              {payoutVerificationMessage ? (
+                <p className="mt-1 text-xs text-zinc-600">{payoutVerificationMessage}</p>
+              ) : null}
+            </div>
             <div className="md:col-span-2">
               <button type="submit" disabled={isSavingTutorProfile} className="rounded-2xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
                 {isSavingTutorProfile ? 'Verifying payout details...' : 'Save tutor profile'}

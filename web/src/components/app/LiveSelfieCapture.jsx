@@ -42,6 +42,12 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!capturedFile && user?.selfieUrl) {
+      setCapturedUrl(user.selfieUrl);
+    }
+  }, [capturedFile, user?.selfieUrl]);
+
   const captureSelfie = async () => {
     const video = videoRef.current;
     if (!video?.videoWidth || !video?.videoHeight) {
@@ -63,8 +69,10 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
 
     const file = new File([blob], `selfie-${Date.now()}.jpg`, { type: 'image/jpeg' });
     setCapturedFile(file);
-    setCapturedUrl(URL.createObjectURL(file));
+    const localPreviewUrl = URL.createObjectURL(file);
+    setCapturedUrl(localPreviewUrl);
     stopCamera();
+    saveSelfie(file);
   };
 
   const retake = () => {
@@ -82,14 +90,14 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
     }
   }, [capturedUrl]);
 
-  const saveSelfie = async () => {
-    if (!capturedFile || !user?.uid) return;
+  const saveSelfie = async (fileToSave = capturedFile) => {
+    if (!fileToSave || !user?.uid) return;
     setIsSaving(true);
     setCameraError('');
     try {
       const upload = await uploadUserFile({
         userId: user.uid,
-        file: capturedFile,
+        file: fileToSave,
         pathPrefix: 'tutorSelfies',
         objectPath: `tutorSelfies/${user.uid}/${Date.now()}.jpg`,
       });

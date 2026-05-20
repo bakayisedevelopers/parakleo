@@ -64,7 +64,7 @@ export function getTutorOnboardingStatus(user) {
     && tutorProfile.payout?.accountHolder
     && tutorProfile.payout?.bankCode
     && tutorProfile.payout?.paystackRecipientCode
-    && tutorProfile.payout?.verified,
+    && (tutorProfile.payout?.verificationStatus === 'verified' || tutorProfile.payout?.verified === true),
   );
   const hasProfile = Boolean(user?.selfieVerified && user?.selfieUrl && tutorProfile.gradesToTutor?.length && activeSubjects.length);
   if (qualified && hasPayout && hasProfile) {

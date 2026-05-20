@@ -1,0 +1,130 @@
+[debug] [2026-05-18T15:38:17.683Z] ----------------------------------------------------------------------
+[debug] [2026-05-18T15:38:17.686Z] Command:       /usr/local/share/nvm/versions/node/v24.14.0/bin/node /home/codespace/nvm/current/bin/firebase deploy --only functions
+[debug] [2026-05-18T15:38:17.686Z] CLI Version:   15.16.0
+[debug] [2026-05-18T15:38:17.686Z] Platform:      linux
+[debug] [2026-05-18T15:38:17.686Z] Node Version:  v24.14.0
+[debug] [2026-05-18T15:38:17.686Z] Time:          Mon May 18 2026 15:38:17 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-05-18T15:38:17.687Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-18T15:38:20.142Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-18T15:38:20.143Z] > authorizing via signed-in user (bakayise.developers@gmail.com)
+[debug] [2026-05-18T15:38:20.143Z] [iam] checking project claxi-bakayise for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-05-18T15:38:20.144Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.144Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.145Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions [none]
+[debug] [2026-05-18T15:38:20.145Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions  x-goog-user-project=claxi-bakayise
+[debug] [2026-05-18T15:38:20.145Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-05-18T15:38:20.330Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions 200
+[debug] [2026-05-18T15:38:20.330Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-05-18T15:38:20.331Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.331Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.331Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-05-18T15:38:20.331Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-05-18T15:38:20.464Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions 404
+[debug] [2026-05-18T15:38:20.464Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions {"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}}
+[debug] [2026-05-18T15:38:20.465Z] [functions] service account IAM check errored, deploy may fail: Request to https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account {"name":"FirebaseError","children":[],"context":{"body":{"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}},"response":{"statusCode":404}},"exit":1,"message":"Request to https://iam.googleapis.com/v1/projects/claxi-bakayise/serviceAccounts/claxi-bakayise@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account","status":404}
+[info] 
+[info] === Deploying to 'claxi-bakayise'...
+[info] 
+[info] i  deploying functions 
+[debug] [2026-05-18T15:38:20.482Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.482Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.482Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise [none]
+[debug] [2026-05-18T15:38:20.817Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise 200
+[debug] [2026-05-18T15:38:20.817Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise {"projectNumber":"1061720623518","projectId":"claxi-bakayise","lifecycleState":"ACTIVE","name":"Claxi","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2026-03-29T05:09:51.408Z"}
+[info] i  functions: preparing codebase default for deployment 
+[info] i  functions: ensuring required API cloudfunctions.googleapis.com is enabled... 
+[info] i  functions: ensuring required API cloudbuild.googleapis.com is enabled... 
+[info] i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled... 
+[debug] [2026-05-18T15:38:20.819Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.819Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:20.820Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig [none]
+[debug] [2026-05-18T15:38:21.717Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig 200
+[debug] [2026-05-18T15:38:21.719Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/claxi-bakayise/adminSdkConfig {"projectId":"claxi-bakayise","storageBucket":"claxi-bakayise.firebasestorage.app"}
+[debug] [2026-05-18T15:38:21.720Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:21.720Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:21.720Z] >>> [apiv2][query] GET https://runtimeconfig.googleapis.com/v1beta1/projects/claxi-bakayise/configs [none]
+[debug] [2026-05-18T15:38:21.991Z] <<< [apiv2][status] GET https://runtimeconfig.googleapis.com/v1beta1/projects/claxi-bakayise/configs 200
+[debug] [2026-05-18T15:38:21.991Z] <<< [apiv2][body] GET https://runtimeconfig.googleapis.com/v1beta1/projects/claxi-bakayise/configs {}
+[debug] [2026-05-18T15:38:21.993Z] Validating nodejs source
+[warn] ⚠  functions: Runtime Node.js 20 was deprecated on 2026-04-30 and will be decommissioned on 2026-10-30, after which you will not be able to deploy without upgrading. Consider upgrading now to avoid disruption. See https://cloud.google.com/functions/docs/runtime-support for full details on the lifecycle policy 
+[debug] [2026-05-18T15:38:22.760Z] > [functions] package.json contents: {
+  "name": "claxi-functions",
+  "private": true,
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.8.0",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@google-cloud/vision": "^5.2.0",
+    "gaxios": "7.1.4",
+    "gcp-metadata": "7.0.1",
+    "firebase": "^12.12.1",
+    "firebase-admin": "^12.1.1",
+    "firebase-functions": "^7.2.5",
+    "google-logging-utils": "1.1.3",
+    "natural": "^8.1.0",
+    "node-fetch": "3.3.2",
+    "pdf-parse": "^1.1.1",
+    "pdf-to-png-converter": "^3.18.0",
+    "resend": "^4.1.2",
+    "zod": "^3.23.8"
+  }
+}
+[debug] [2026-05-18T15:38:22.760Z] Building nodejs source
+[info] i  functions: Loading and analyzing source code for codebase default to determine what to deploy 
+[debug] [2026-05-18T15:38:22.762Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-05-18T15:38:22.766Z] Found firebase-functions binary at '/workspaces/claxi/functions/node_modules/.bin/firebase-functions'
+[info] Serving at port 8846
+
+[info] ◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+
+[info] ◇ injected env (0) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+
+[info] ◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+
+[info] ◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+
+[info] ◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+
+[debug] [2026-05-18T15:38:27.147Z] Got response from /__/functions.yaml {"endpoints":{"syncClassRequestLifecycle":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"classRequests/{requestId}"},"retry":false},"entryPoint":"syncClassRequestLifecycle"},"trackTutorRequestStats":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"classRequests/{requestId}"},"retry":false},"entryPoint":"trackTutorRequestStats"},"trackTutorSessionStats":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"sessions/{sessionId}"},"retry":false},"entryPoint":"trackTutorSessionStats"},"processTutorDocument":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_AI_KEYS"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.created","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"tutorDocuments/{docId}"},"retry":false},"entryPoint":"processTutorDocument"},"retryTutorDocumentProcessing":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_AI_KEYS"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"tutorDocuments/{docId}"},"retry":false},"entryPoint":"retryTutorDocumentProcessing"},"updateGlobalSubjects":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"updateGlobalSubjects"},"refreshGlobalSubjectsOnTutorChange":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"refreshGlobalSubjectsOnTutorChange"},"syncStudentReferralRewardsOnUserWrite":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"syncStudentReferralRewardsOnUserWrite"},"notifyTutorProfileCompletion":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.written","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"notifyTutorProfileCompletion"},"sendWelcomeEmailOnUserCreate":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.created","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"users/{uid}"},"retry":false},"entryPoint":"sendWelcomeEmailOnUserCreate"},"getPricingQuote":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"getPricingQuote"},"extractAttachmentAi":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"extractAttachmentAi"},"streamAttachmentAi":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"streamAttachmentAi"},"extractImageOcr":{"availableMemoryMb":512,"timeoutSeconds":120,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_AI_KEYS"}],"labels":{},"httpsTrigger":{},"entryPoint":"extractImageOcr"},"classifySubject":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_AI_KEYS"}],"labels":{},"httpsTrigger":{},"entryPoint":"classifySubject"},"saveAcademicBrainFeedback":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"saveAcademicBrainFeedback"},"syncStudentGrowth":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"syncStudentGrowth"},"getIceConfig":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_REALTIME_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"getIceConfig"},"verifyPaystack":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"verifyPaystack"},"verifyTutorPayoutAccount":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"verifyTutorPayoutAccount"},"listTutorPayoutBanks":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"listTutorPayoutBanks"},"finalizeSessionBilling":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"finalizeSessionBilling"},"payOutstandingBalance":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"httpsTrigger":{},"entryPoint":"payOutstandingBalance"},"deletePaymentMethod":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"httpsTrigger":{},"entryPoint":"deletePaymentMethod"},"deleteCompletedClassUploads":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"every 60 minutes","retryConfig":{"retryCount":null,"maxDoublings":null,"maxRetrySeconds":null,"minBackoffSeconds":null,"maxBackoffSeconds":null},"timeZone":null},"entryPoint":"deleteCompletedClassUploads"},"processWeeklyTutorPayouts":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_PAYMENTS_SECRETS"}],"labels":{},"scheduleTrigger":{"schedule":"0 0 * * 1","retryConfig":{},"timeZone":"Africa/Johannesburg"},"entryPoint":"processWeeklyTutorPayouts"},"sendEmailFromQueue":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","secretEnvironmentVariables":[{"key":"PARAKLEO_EMAIL_SECRETS"}],"labels":{},"eventTrigger":{"eventType":"google.cloud.firestore.document.v1.created","eventFilters":{"database":"(default)","namespace":"(default)"},"eventFilterPathPatterns":{"document":"emailEvents/{eventId}"},"retry":false},"entryPoint":"sendEmailFromQueue"}},"specVersion":"v1alpha1","requiredAPIs":[{"api":"cloudscheduler.googleapis.com","reason":"Needed for scheduled functions."}],"extensions":{},"params":[{"type":"secret","name":"PARAKLEO_PAYMENTS_SECRETS"},{"type":"secret","name":"PARAKLEO_EMAIL_SECRETS"},{"type":"secret","name":"PARAKLEO_REALTIME_SECRETS"},{"type":"secret","name":"PARAKLEO_AI_KEYS"}]}
+[info] i  extensions: ensuring required API firebaseextensions.googleapis.com is enabled... 
+[debug] [2026-05-18T15:38:31.239Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-18T15:38:31.239Z] > authorizing via signed-in user (bakayise.developers@gmail.com)
+[debug] [2026-05-18T15:38:31.240Z] [iam] checking project claxi-bakayise for permissions ["firebase.projects.get","firebaseextensions.instances.list"]
+[debug] [2026-05-18T15:38:31.240Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:31.240Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:31.240Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions [none]
+[debug] [2026-05-18T15:38:31.240Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions  x-goog-user-project=claxi-bakayise
+[debug] [2026-05-18T15:38:31.240Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["firebase.projects.get","firebaseextensions.instances.list"]}
+[debug] [2026-05-18T15:38:31.393Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions 200
+[debug] [2026-05-18T15:38:31.393Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/claxi-bakayise:testIamPermissions {"permissions":["firebase.projects.get","firebaseextensions.instances.list"]}
+[debug] [2026-05-18T15:38:31.393Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:31.394Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:31.394Z] >>> [apiv2][query] GET https://firebaseextensions.googleapis.com/v1beta/projects/claxi-bakayise/instances pageSize=100&pageToken=
+[debug] [2026-05-18T15:38:32.181Z] <<< [apiv2][status] GET https://firebaseextensions.googleapis.com/v1beta/projects/claxi-bakayise/instances 200
+[debug] [2026-05-18T15:38:32.181Z] <<< [apiv2][body] GET https://firebaseextensions.googleapis.com/v1beta/projects/claxi-bakayise/instances {}
+[debug] [2026-05-18T15:38:32.182Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:32.182Z] Checked if tokens are valid: true, expires at: 1779121404338
+[debug] [2026-05-18T15:38:32.182Z] >>> [apiv2][query] GET https://secretmanager.googleapis.com/v1/projects/claxi-bakayise/secrets/PARAKLEO_PAYMENTS_SECRETS [none]
+[debug] [2026-05-18T15:38:32.379Z] <<< [apiv2][status] GET https://secretmanager.googleapis.com/v1/projects/claxi-bakayise/secrets/PARAKLEO_PAYMENTS_SECRETS 404
+[debug] [2026-05-18T15:38:32.380Z] <<< [apiv2][body] GET https://secretmanager.googleapis.com/v1/projects/claxi-bakayise/secrets/PARAKLEO_PAYMENTS_SECRETS {"error":{"code":404,"message":"Secret [projects/1061720623518/secrets/PARAKLEO_PAYMENTS_SECRETS] not found.","status":"NOT_FOUND"}}
+[debug] [2026-05-18T15:39:02.473Z] ExitPromptError: User force closed the prompt with SIGINT
+    at Interface.sigint (/usr/local/share/nvm/versions/node/v24.14.0/lib/node_modules/firebase-tools/node_modules/@inquirer/core/dist/commonjs/lib/create-prompt.js:101:37)
+    at Interface.emit (node:events:508:28)
+    at [_ttyWrite] [as _ttyWrite] (node:internal/readline/interface:1327:18)
+    at ReadStream.onkeypress (node:internal/readline/interface:284:20)
+    at ReadStream.emit (node:events:520:35)
+    at emitKeys (node:internal/readline/utils:371:14)
+    at emitKeys.next (<anonymous>)
+    at ReadStream.onData (node:internal/readline/emitKeypressEvents:64:36)
+    at ReadStream.emit (node:events:508:28)
+    at addChunk (node:internal/streams/readable:563:12)
+[error] 
+[error] Error: An unexpected error has occurred.
