@@ -42,16 +42,6 @@ export function SignupScreen({ navigate }) {
       </View>
       <Card style={styles.form}>
         {error ? <ErrorState title="Signup failed" message={error} /> : null}
-        <View style={styles.roleGrid}>
-          <View style={[styles.roleCard, styles.roleCardActive]}>
-            <Text style={styles.roleIcon}>S</Text>
-            <Text style={styles.roleTextActive}>I'm a Student</Text>
-          </View>
-          <View style={styles.roleCard}>
-            <Text style={styles.roleIconMuted}>T</Text>
-            <Text style={styles.roleText}>I'm a Tutor</Text>
-          </View>
-        </View>
         <FormField label="Full name" value={name} onChangeText={setName} />
         <FormField label="Email address" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="name@company.com" />
         <FormField label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="••••••••" />
@@ -124,44 +114,6 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     gap: 16,
     padding: 24,
-  },
-  roleGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  roleCard: {
-    alignItems: 'center',
-    backgroundColor: '#fafafa',
-    borderColor: colors.border,
-    borderRadius: 16,
-    borderWidth: 2,
-    flex: 1,
-    gap: 8,
-    padding: 14,
-  },
-  roleCardActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  roleIcon: {
-    color: '#ffffff',
-    fontSize: 28,
-  },
-  roleIconMuted: {
-    color: colors.muted,
-    fontSize: 28,
-  },
-  roleTextActive: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  roleText: {
-    color: colors.muted,
-    fontSize: 13,
-    fontWeight: '900',
-    textAlign: 'center',
   },
   policy: {
     backgroundColor: 'rgba(16,185,129,0.06)',

@@ -5,6 +5,7 @@ import { Card } from '../../components/ui/Card';
 import { FormField } from '../../components/ui/FormField';
 import { ErrorState } from '../../components/ui/States';
 import { useAuth } from '../../context/AuthContext';
+import { TUTOR_LOGIN_BLOCKED_CODE } from '../../services/authService';
 import { colors } from '../../theme/colors';
 
 export function LoginScreen({ navigate }) {
@@ -13,13 +14,18 @@ export function LoginScreen({ navigate }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [tutorBlocked, setTutorBlocked] = useState(false);
 
   async function submit() {
     setBusy(true);
     setError('');
+    setTutorBlocked(false);
     try {
       await login({ email, password });
     } catch (nextError) {
+      if (nextError?.code === TUTOR_LOGIN_BLOCKED_CODE) {
+        setTutorBlocked(true);
+      }
       setError(nextError.message);
     } finally {
       setBusy(false);
@@ -40,19 +46,30 @@ export function LoginScreen({ navigate }) {
         </Text>
       </View>
       <Card style={styles.form}>
-        {error ? <ErrorState title="Sign in failed" message={error} /> : null}
-        <FormField label="Email address" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="name@company.com" />
-        <FormField label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="••••••••" />
-        <View style={styles.utilityRow}>
-          <Text style={styles.muted}>Remember me</Text>
-          <Text style={styles.link}>Forgot password?</Text>
-        </View>
-        <Text style={styles.policy}>
-          By signing in, you agree to Parakleo's Terms of Service, Privacy Policy, and Payment Policy.
-        </Text>
-        <Button disabled={busy || !email || !password} onPress={submit}>
-          {busy ? 'Signing in...' : 'Sign in'}
-        </Button>
+        {tutorBlocked ? (
+          <>
+            <ErrorState title="Tutor Login Not Allowed" message={error || 'Tutors are not allowed to log in on this app.'} />
+            <Button variant="secondary" onPress={() => navigate('Home')}>
+              Go Back
+            </Button>
+          </>
+        ) : (
+          <>
+            {error ? <ErrorState title="Sign in failed" message={error} /> : null}
+            <FormField label="Email address" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="name@company.com" />
+            <FormField label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="••••••••" />
+            <View style={styles.utilityRow}>
+              <Text style={styles.muted}>Remember me</Text>
+              <Text style={styles.link}>Forgot password?</Text>
+            </View>
+            <Text style={styles.policy}>
+              By signing in, you agree to Parakleo's Terms of Service, Privacy Policy, and Payment Policy.
+            </Text>
+            <Button disabled={busy || !email || !password} onPress={submit}>
+              {busy ? 'Signing in...' : 'Sign in'}
+            </Button>
+          </>
+        )}
       </Card>
     </View>
   );

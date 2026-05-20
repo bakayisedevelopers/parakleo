@@ -8,6 +8,24 @@ import {
 import { getFirebaseClients } from '../firebase/config';
 import { getUserProfile, upsertStudentProfile } from './userService';
 
+export const TUTOR_LOGIN_BLOCKED_CODE = 'TUTOR_LOGIN_BLOCKED';
+
+function buildTutorBlockedError() {
+  const error = new Error('Tutors are not allowed to log in on this app. Please use the tutor platform.');
+  error.code = TUTOR_LOGIN_BLOCKED_CODE;
+  return error;
+}
+
+function isTutorProfile(profile = {}) {
+  const role = String(profile?.role || '').toLowerCase();
+  const activeRole = String(profile?.activeRole || '').toLowerCase();
+  const roles = Array.isArray(profile?.roles)
+    ? profile.roles.map((nextRole) => String(nextRole || '').toLowerCase())
+    : [];
+
+  return role === 'tutor' || activeRole === 'tutor' || roles.includes('tutor');
+}
+
 function normalizeStudentUser(firebaseUser, profile = {}) {
   if (!firebaseUser) return null;
 
@@ -35,6 +53,12 @@ export function subscribeToAuthChanges(callback, onError) {
       }
 
       const profile = await getUserProfile(firebaseUser.uid);
+      if (isTutorProfile(profile)) {
+        await signOut(auth);
+        onError?.(buildTutorBlockedError());
+        callback(null);
+        return;
+      }
       callback(normalizeStudentUser(firebaseUser, profile || {}));
     } catch (error) {
       onError?.(error);
@@ -47,6 +71,10 @@ export async function loginWithEmail({ email, password }) {
   const { auth } = getFirebaseClients();
   const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
   const profile = await getUserProfile(credential.user.uid);
+  if (isTutorProfile(profile)) {
+    await signOut(auth);
+    throw buildTutorBlockedError();
+  }
   return normalizeStudentUser(credential.user, profile || {});
 }
 
