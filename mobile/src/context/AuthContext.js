@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { loginWithEmail, logoutUser, signupWithEmail, subscribeToAuthChanges } from '../services/authService';
+import { deleteAccount, loginWithEmail, logoutUser, signupWithEmail, subscribeToAuthChanges } from '../services/authService';
 import { logError } from '../services/logger';
 import { subscribeToUserProfile } from '../services/userService';
 
@@ -47,6 +47,7 @@ export function AuthProvider({ children }) {
     login: loginWithEmail,
     logout: logoutUser,
     signup: signupWithEmail,
+    deleteAccount,
     setUser,
   }), [authError, initializing, user]);
 

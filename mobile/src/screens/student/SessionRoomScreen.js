@@ -133,6 +133,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   const extensionPromptShownRef = useRef(false);
   const autoEndingRef = useRef(false);
   const controlsTimeoutRef = useRef(null);
+  const terminalRedirectedRef = useRef(false);
 
   const sessionId = route?.params?.sessionId || '';
   const [session, setSession] = useState(null);
@@ -340,6 +341,14 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     bridgeRef.current?.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
   };
 
+  const navigateToRequestStatus = useCallback((requestId) => {
+    if (requestId) {
+      navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
+      return;
+    }
+    goBack('Sessions');
+  }, [goBack, navigate]);
+
   const handleOpenCancel = () => {
     setCancelError('');
     setCancelReason('');
@@ -363,7 +372,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
         canceledReason: trimmedReason,
       });
       setIsCancelOpen(false);
-      goBack('Sessions');
+      navigateToRequestStatus(session?.requestId || '');
     } catch (nextError) {
       setCancelError(nextError.message || 'Unable to cancel this class.');
     } finally {
@@ -377,13 +386,24 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     try {
       closeRtcBridge();
       await endSession(session);
-      goBack('Sessions');
+      navigateToRequestStatus(session?.requestId || '');
     } catch (nextError) {
       setError(nextError.message || 'Unable to end this class.');
     } finally {
       setActionBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!session?.id) return;
+    const normalizedStatus = String(session.status || '').toLowerCase();
+    if (!['completed', 'canceled', 'canceled_during'].includes(normalizedStatus)) return;
+    if (terminalRedirectedRef.current) return;
+
+    terminalRedirectedRef.current = true;
+    closeRtcBridge();
+    navigateToRequestStatus(session?.requestId || '');
+  }, [session?.id, session?.requestId, session?.status, navigateToRequestStatus]);
 
   const handleJoinNow = async () => {
     if (!session || actionBusy) return;

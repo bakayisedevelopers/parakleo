@@ -1633,6 +1633,15 @@ export default function StudentDashboardPage() {
                     ? 'Please wait while we analyze your request and prepare the review.'
                     : 'Please wait while we scan and prepare your uploaded files.'}
               </p>
+              {extractionOverlayState === 'done' ? (
+                <button
+                  type="button"
+                  onClick={() => maybeAdvanceToReview(advanceIntent || 'attachment')}
+                  className="mt-3 inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                >
+                  Click Here
+                </button>
+              ) : null}
               {showSlowExtractionMessage ? (
                 <p className="mt-3 rounded-2xl border border-amber-300/60 bg-amber-100 px-4 py-3 text-sm text-zinc-900">
                   Your file is big, scanning your file is taking long, please bear with us.

@@ -1,110 +1,140 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FormField } from '../../components/ui/FormField';
 import { ErrorState, LoadingState } from '../../components/ui/States';
-import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToRequestById, cancelClassRequest } from '../../services/classRequestService';
 import { subscribeToStudentSessions } from '../../services/sessionService';
 import { getUserProfile } from '../../services/userService';
 import { colors } from '../../theme/colors';
-import {
-  getRequestLifecycleLabel,
-  getRequestStatusMeta,
-  isRequestJoinable,
-  TERMINAL_REQUEST_STATUSES,
-} from '../../utils/requestStatus';
+import { isRequestJoinable, TERMINAL_REQUEST_STATUSES } from '../../utils/requestStatus';
 
-function buildTimeline(status, statusDetail) {
+function getStatusCopy(status) {
   const normalized = String(status || '').toLowerCase();
-  const terminal = TERMINAL_REQUEST_STATUSES.includes(normalized);
-  const completed = normalized === 'completed';
-
-  return [
-    {
-      key: 'submitted',
-      title: 'Request made',
-      description: 'Your lesson request is saved and ready for matching.',
-      state: 'done',
-    },
-    {
-      key: 'searching',
-      title: 'Searching for tutor',
-      description: 'Parakleo is matching your request with an available tutor.',
-      state: ['pending', 'matching'].includes(normalized)
-        ? 'current'
-        : ['offered', 'accepted', 'waiting_student', 'in_progress', 'in_session', 'completed', 'no_tutor_available'].includes(normalized)
-          ? 'done'
-          : terminal
-            ? 'done'
-            : 'pending',
-    },
-    {
-      key: 'tutor',
-      title: normalized === 'offered' ? 'Waiting for tutor to accept' : 'Tutor found',
-      description: normalized === 'offered'
-        ? 'A tutor was found and is deciding whether to accept.'
-        : 'Once accepted, your session entry becomes available.',
-      state: normalized === 'offered'
-        ? 'current'
-        : ['accepted', 'waiting_student', 'in_progress', 'in_session', 'completed'].includes(normalized)
-          ? 'done'
-          : normalized === 'no_tutor_available'
-            ? 'failed'
-            : 'pending',
-    },
-    {
-      key: 'ready',
-      title: completed ? 'Class completed' : terminal ? 'Request closed' : 'Class ready',
-      description: statusDetail || 'Tutor matching, class readiness, and closure updates appear here.',
-      state: completed || terminal
-        ? 'current'
-        : ['accepted', 'waiting_student', 'in_progress', 'in_session'].includes(normalized)
-          ? 'current'
-          : 'pending',
-    },
-  ];
+  if (['pending', 'matching'].includes(normalized)) return 'Searching for a tutor';
+  if (normalized === 'offered') return 'Waiting for tutor to accept';
+  if (normalized === 'accepted') return 'Tutor found';
+  if (['waiting_student', 'in_progress', 'in_session'].includes(normalized)) return 'Class ready';
+  if (normalized === 'no_tutor_available') return 'No tutor available';
+  if (normalized === 'completed') return 'Class completed';
+  if (['canceled', 'canceled_during', 'expired'].includes(normalized)) return 'Request closed';
+  return 'Request made';
 }
 
-function getStepPalette(state) {
-  if (state === 'done') {
+function getStatusMeta(status) {
+  const normalized = String(status || '').toLowerCase();
+
+  if (['pending', 'matching'].includes(normalized)) {
     return {
-      backgroundColor: '#d1fae5',
-      borderColor: '#a7f3d0',
-      titleColor: colors.brandDark,
-      copyColor: colors.brandDark,
-      markerColor: colors.brand,
+      label: 'Searching for tutor',
+      tone: 'emerald',
+      icon: 'search',
+      badge: 'Request made • searching for tutor',
     };
   }
 
-  if (state === 'current') {
+  if (normalized === 'offered') {
     return {
-      backgroundColor: '#eef2ff',
-      borderColor: '#c7d2fe',
-      titleColor: colors.indigo,
-      copyColor: colors.text,
-      markerColor: colors.indigo,
+      label: 'Waiting for tutor to accept',
+      tone: 'violet',
+      icon: 'checkmark-circle',
+      badge: 'Tutor found • waiting for acceptance',
     };
   }
 
-  if (state === 'failed') {
+  if (normalized === 'accepted') {
     return {
-      backgroundColor: '#fee2e2',
-      borderColor: '#fecaca',
-      titleColor: colors.danger,
-      copyColor: colors.danger,
-      markerColor: colors.danger,
+      label: 'Tutor found',
+      tone: 'violet',
+      icon: 'checkmark-circle',
+      badge: 'Tutor accepted your request',
+    };
+  }
+
+  if (['waiting_student', 'in_progress', 'in_session'].includes(normalized)) {
+    return {
+      label: 'Class ready',
+      tone: 'violet',
+      icon: 'checkmark-circle',
+      badge: 'Tutor accepted • session is ready',
+    };
+  }
+
+  if (normalized === 'no_tutor_available') {
+    return {
+      label: 'No tutor available',
+      tone: 'amber',
+      icon: 'search',
+      badge: 'No tutor available right now',
+    };
+  }
+
+  if (normalized === 'completed') {
+    return {
+      label: 'Completed',
+      tone: 'emerald',
+      icon: 'checkmark-circle',
+      badge: 'Class completed successfully',
+    };
+  }
+
+  if (['canceled', 'canceled_during', 'expired'].includes(normalized)) {
+    return {
+      label: 'Closed',
+      tone: 'rose',
+      icon: 'close-circle',
+      badge: 'This request is no longer active',
     };
   }
 
   return {
-    backgroundColor: '#fafafa',
-    borderColor: colors.border,
-    titleColor: colors.text,
-    copyColor: colors.muted,
-    markerColor: '#d4d4d8',
+    label: 'Request made',
+    tone: 'zinc',
+    icon: 'search',
+    badge: 'Preparing your request',
+  };
+}
+
+function getToneStyles(tone) {
+  if (tone === 'emerald') {
+    return {
+      heroBg: '#10b981',
+      iconWrapBg: '#d1fae5',
+      iconColor: '#047857',
+    };
+  }
+
+  if (tone === 'violet') {
+    return {
+      heroBg: '#8b5cf6',
+      iconWrapBg: '#ede9fe',
+      iconColor: '#6d28d9',
+    };
+  }
+
+  if (tone === 'amber') {
+    return {
+      heroBg: '#f59e0b',
+      iconWrapBg: '#fef3c7',
+      iconColor: '#b45309',
+    };
+  }
+
+  if (tone === 'rose') {
+    return {
+      heroBg: '#f43f5e',
+      iconWrapBg: '#ffe4e6',
+      iconColor: '#be123c',
+    };
+  }
+
+  return {
+    heroBg: '#71717a',
+    iconWrapBg: '#f4f4f5',
+    iconColor: '#3f3f46',
   };
 }
 
@@ -120,17 +150,31 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
   const [isCanceling, setIsCanceling] = useState(false);
   const [offeredTutorProfile, setOfferedTutorProfile] = useState(null);
 
-  useEffect(() => subscribeToRequestById(
-    requestId,
-    (item) => {
-      setRequest(item);
+  useEffect(() => {
+    if (!requestId) {
+      goBack('Dashboard');
+    }
+  }, [goBack, requestId]);
+
+  useEffect(() => {
+    if (!requestId) {
       setLoading(false);
-    },
-    (nextError) => {
-      setError(nextError.message || 'Unable to load this request right now.');
-      setLoading(false);
-    },
-  ), [requestId]);
+      setRequest(null);
+      return () => {};
+    }
+
+    return subscribeToRequestById(
+      requestId,
+      (item) => {
+        setRequest(item);
+        setLoading(false);
+      },
+      (nextError) => {
+        setError(nextError.message || 'Unable to load this request right now.');
+        setLoading(false);
+      },
+    );
+  }, [requestId]);
 
   useEffect(() => subscribeToStudentSessions(
     user?.uid,
@@ -171,6 +215,14 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     [requestId, sessions],
   );
 
+  const canJoin = isRequestJoinable(request?.status) && Boolean(relatedSession?.id);
+  const shouldAutoOpenSession = canJoin && Boolean(relatedSession?.id);
+
+  useEffect(() => {
+    if (!shouldAutoOpenSession || !relatedSession?.id) return;
+    navigate({ key: 'SessionRoom', params: { sessionId: relatedSession.id, parentTab: 'Sessions' } });
+  }, [navigate, relatedSession?.id, shouldAutoOpenSession]);
+
   if (loading) {
     return <LoadingState label="Loading request status" />;
   }
@@ -183,13 +235,17 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     return <ErrorState title="Request not found" message="We could not find this class request." />;
   }
 
-  const statusMeta = getRequestStatusMeta(request.status);
-  const lifecycleLabel = getRequestLifecycleLabel(request.status);
-  const timeline = buildTimeline(request.status, request.statusDetail);
-  const canJoin = isRequestJoinable(request.status) && Boolean(relatedSession?.id);
+  if (!requestId) {
+    return null;
+  }
+
+  const statusText = getStatusCopy(request.status);
+  const statusMeta = getStatusMeta(request.status);
+  const tone = getToneStyles(statusMeta.tone);
+  const isWaitingTutorAcceptance = String(request?.status || '').toLowerCase() === 'offered';
+  const tutorDisplayName = offeredTutorProfile?.fullName || offeredTutorProfile?.displayName || request?.tutorName || 'Tutor';
+  const tutorAvatarLetter = tutorDisplayName.charAt(0).toUpperCase();
   const canCancel = !TERMINAL_REQUEST_STATUSES.includes(String(request.status || '').toLowerCase());
-  const quoteOriginal = request.pricingSnapshot?.originalPrice ?? request.pricingSnapshot?.totalAmount ?? 0;
-  const quoteFinal = request.pricingSnapshot?.finalPrice ?? request.pricingSnapshot?.totalAmount ?? 0;
   const tutorRating = Number(
     offeredTutorProfile?.tutorProfile?.overallRating
     ?? offeredTutorProfile?.ratings?.asTutor?.average
@@ -210,6 +266,7 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
       });
       setShowCancelModal(false);
       setCancelReason('');
+      navigate({ key: 'Requests', params: {} });
     } finally {
       setIsCanceling(false);
     }
@@ -217,24 +274,55 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
 
   return (
     <View style={styles.wrap}>
-      <Card style={styles.heroCard}>
-        <Text style={styles.kicker}>Live request update</Text>
-        <Text style={styles.heroTitle}>{lifecycleLabel}</Text>
-        <Text style={styles.heroCopy}>
-          Request made, tutor search, and class readiness updates appear here in real time.
-        </Text>
-        <View style={styles.heroMetaRow}>
-          <StatusBadge label={statusMeta.label} tone={statusMeta.tone} />
-          <Text style={styles.heroMetaText}>{request.topic || request.subject || 'Class request'}</Text>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageTitle}>Request Status</Text>
+        <Text style={styles.pageDescription}>Simple live status for your class request.</Text>
+      </View>
+
+      <View style={styles.heroShell}>
+        <View style={[styles.heroCard, { backgroundColor: tone.heroBg }]}>
+          <Text style={styles.kicker}>Live request update</Text>
+          <Text style={styles.heroTitle}>{statusText}</Text>
+          <Text style={styles.heroCopy}>
+            Request made, tutor search, and class completion updates appear here.
+          </Text>
+
+          <View style={styles.currentStateCard}>
+            <View style={styles.currentStateHeader}>
+              <View style={[styles.currentStateIconWrap, { backgroundColor: tone.iconWrapBg }]}>
+                <Ionicons name={statusMeta.icon} size={20} color={tone.iconColor} />
+              </View>
+              <View style={styles.currentStateTextWrap}>
+                <Text style={styles.currentStateLabel}>Current state</Text>
+                <Text style={styles.currentStateValue}>{statusMeta.label}</Text>
+              </View>
+            </View>
+            <Text style={styles.currentStateBadge}>{statusMeta.badge}</Text>
+
+            {isWaitingTutorAcceptance ? (
+              <View style={styles.tutorCard}>
+                <View style={styles.tutorAvatar}>
+                  <Text style={styles.tutorAvatarText}>{tutorAvatarLetter}</Text>
+                </View>
+                <View style={styles.tutorMeta}>
+                  <Text style={styles.tutorLabel}>Tutor</Text>
+                  <Text style={styles.tutorName}>{tutorDisplayName}</Text>
+                  <Text style={styles.tutorRating}>Rating: {tutorRating > 0 ? `${tutorRating.toFixed(2)}` : 'Not rated yet'}</Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
         </View>
-      </Card>
+      </View>
 
       <Card style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Request overview</Text>
+        <Text style={styles.sectionSubtitle}>Essential details only. Open full details when needed.</Text>
+
         <View style={styles.overviewGrid}>
           <View style={styles.metric}>
             <Text style={styles.metricLabel}>Topic</Text>
-            <Text style={styles.metricValue}>{request.topic || 'Lesson request'}</Text>
+            <Text style={styles.metricValue}>{request.topic || 'Your request'}</Text>
           </View>
           <View style={styles.metric}>
             <Text style={styles.metricLabel}>Duration</Text>
@@ -244,80 +332,56 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
             <Text style={styles.metricLabel}>Payment method</Text>
             <Text style={styles.metricValue}>{request.selectedCardId || 'Selected card on file'}</Text>
           </View>
-          <View style={styles.metric}>
-            <Text style={styles.metricLabel}>Quote</Text>
-            <Text style={styles.metricValue}>R{Number(quoteOriginal || 0).toFixed(2)} -> Pay R{Number(quoteFinal || 0).toFixed(2)}</Text>
-          </View>
         </View>
+
+        {canJoin ? (
+          <View style={styles.readyCard}>
+            <Text style={styles.readyText}>Your class is ready. Join now from the button below.</Text>
+          </View>
+        ) : null}
+
+        {isWaitingTutorAcceptance ? (
+          <View style={styles.offerCard}>
+            <Text style={styles.offerTitle}>Waiting for tutor to accept</Text>
+          </View>
+        ) : null}
 
         {request?.statusDetail ? (
           <View style={styles.detailBanner}>
             <Text style={styles.detailBannerText}>{request.statusDetail}</Text>
           </View>
         ) : null}
-
-        {request.status === 'offered' ? (
-          <View style={styles.offerCard}>
-            <Text style={styles.offerTitle}>Waiting for tutor to accept</Text>
-            <Text style={styles.offerCopy}>
-              Tutor: {request.tutorName || offeredTutorProfile?.fullName || offeredTutorProfile?.displayName || 'Tutor'}
-            </Text>
-            <Text style={styles.offerCopy}>
-              Rating: {tutorRating > 0 ? tutorRating.toFixed(2) : 'Not rated yet'}
-            </Text>
-          </View>
-        ) : null}
-      </Card>
-
-      <Card style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Status tracker</Text>
-        <View style={styles.timelineList}>
-          {timeline.map((step) => {
-            const palette = getStepPalette(step.state);
-            return (
-              <View
-                key={step.key}
-                style={[
-                  styles.timelineStep,
-                  {
-                    backgroundColor: palette.backgroundColor,
-                    borderColor: palette.borderColor,
-                  },
-                ]}
-              >
-                <View style={[styles.timelineMarker, { backgroundColor: palette.markerColor }]} />
-                <View style={styles.timelineCopy}>
-                  <Text style={[styles.timelineTitle, { color: palette.titleColor }]}>{step.title}</Text>
-                  <Text style={[styles.timelineDescription, { color: palette.copyColor }]}>{step.description}</Text>
-                </View>
-              </View>
-            );
-          })}
-        </View>
       </Card>
 
       <Card style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Actions</Text>
+        <Text style={styles.sectionSubtitle}>Quick things you may need right now.</Text>
+
         <View style={styles.actions}>
           {canJoin ? (
-            <Button onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: relatedSession.id, parentTab: 'Sessions' } })}>
-              Join / Re-open class
-            </Button>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: relatedSession.id, parentTab: 'Sessions' } })}
+              style={styles.joinButton}
+            >
+              <Text style={styles.joinButtonText}>Join session</Text>
+              <Ionicons name="arrow-forward" size={16} color="#ffffff" />
+            </Pressable>
           ) : null}
-          <Button
-            variant="secondary"
+
+          <Pressable
+            accessibilityRole="button"
             onPress={() => navigate({ key: 'RequestDetails', params: { requestId, parentTab: 'Requests' } })}
+            style={styles.secondaryAction}
           >
-            View full request details
-          </Button>
+            <Text style={styles.secondaryActionText}>View full request details</Text>
+          </Pressable>
+
           {canCancel ? (
-            <Button variant="secondary" onPress={() => setShowCancelModal(true)}>
-              Cancel request
-            </Button>
+            <Pressable accessibilityRole="button" onPress={() => setShowCancelModal(true)} style={styles.cancelAction}>
+              <Text style={styles.cancelActionText}>Cancel Request</Text>
+            </Pressable>
           ) : null}
-          <Button variant="secondary" onPress={() => goBack('Requests')}>
-            Back to My Classes
-          </Button>
         </View>
       </Card>
 
@@ -354,37 +418,135 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 16,
   },
+  pageHeader: {
+    gap: 4,
+  },
+  pageTitle: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  pageDescription: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  heroShell: {
+    backgroundColor: '#ffffff',
+    borderColor: colors.border,
+    borderRadius: 32,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   heroCard: {
-    backgroundColor: '#ecfdf5',
     gap: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
   },
   kicker: {
-    color: colors.brandDark,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 999,
+    borderWidth: 1,
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '900',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     textTransform: 'uppercase',
   },
   heroTitle: {
-    color: colors.text,
-    fontSize: 30,
+    color: '#ffffff',
+    fontSize: 34,
     fontWeight: '900',
   },
   heroCopy: {
-    color: colors.muted,
+    color: 'rgba(255,255,255,0.92)',
     fontSize: 15,
     lineHeight: 22,
   },
-  heroMetaRow: {
+  currentStateCard: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 8,
+    marginTop: 6,
+    padding: 14,
+  },
+  currentStateHeader: {
     alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 10,
   },
-  heroMetaText: {
-    color: colors.text,
+  currentStateIconWrap: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  currentStateTextWrap: {
     flex: 1,
-    fontSize: 14,
+  },
+  currentStateLabel: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
     fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  currentStateValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  currentStateBadge: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+  },
+  tutorCard: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+    padding: 10,
+  },
+  tutorAvatar: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderRadius: 16,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  tutorAvatarText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  tutorMeta: {
+    flex: 1,
+    gap: 2,
+  },
+  tutorLabel: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  tutorName: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  tutorRating: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
   },
   sectionCard: {
     gap: 14,
@@ -393,6 +555,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 18,
     fontWeight: '900',
+  },
+  sectionSubtitle: {
+    color: colors.muted,
+    fontSize: 13,
+    marginTop: -8,
   },
   overviewGrid: {
     gap: 10,
@@ -416,6 +583,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 6,
   },
+  readyCard: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 14,
+  },
+  readyText: {
+    color: '#065f46',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  offerCard: {
+    backgroundColor: '#eef2ff',
+    borderColor: '#c7d2fe',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 14,
+  },
+  offerTitle: {
+    color: colors.indigo,
+    fontSize: 14,
+    fontWeight: '800',
+  },
   detailBanner: {
     backgroundColor: '#f4f4f5',
     borderRadius: 18,
@@ -426,54 +617,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  offerCard: {
-    backgroundColor: '#eef2ff',
-    borderColor: '#c7d2fe',
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 14,
-    gap: 4,
-  },
-  offerTitle: {
-    color: colors.indigo,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  offerCopy: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  timelineList: {
-    gap: 10,
-  },
-  timelineStep: {
-    borderRadius: 20,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 12,
-    padding: 14,
-  },
-  timelineMarker: {
-    borderRadius: 999,
-    height: 12,
-    marginTop: 4,
-    width: 12,
-  },
-  timelineCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  timelineTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  timelineDescription: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
   actions: {
     gap: 10,
+  },
+  joinButton: {
+    alignItems: 'center',
+    backgroundColor: colors.brand,
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 16,
+  },
+  joinButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  secondaryAction: {
+    alignItems: 'center',
+    backgroundColor: '#fafafa',
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 16,
+  },
+  secondaryActionText: {
+    color: '#27272a',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  cancelAction: {
+    alignItems: 'center',
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 16,
+  },
+  cancelActionText: {
+    color: '#be123c',
+    fontSize: 14,
+    fontWeight: '800',
   },
   modalOverlay: {
     flex: 1,

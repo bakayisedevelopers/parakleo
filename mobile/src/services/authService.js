@@ -1,12 +1,13 @@
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
 } from 'firebase/auth';
 import { getFirebaseClients } from '../firebase/config';
-import { getUserProfile, upsertStudentProfile } from './userService';
+import { deleteUserProfile, getUserProfile, upsertStudentProfile } from './userService';
 
 export const TUTOR_LOGIN_BLOCKED_CODE = 'TUTOR_LOGIN_BLOCKED';
 
@@ -94,4 +95,15 @@ export async function signupWithEmail({ name, email, password }) {
 export async function logoutUser() {
   const { auth } = getFirebaseClients();
   await signOut(auth);
+}
+
+export async function deleteAccount(uid) {
+  const { auth } = getFirebaseClients();
+  const authUser = auth.currentUser;
+  if (!authUser) {
+    throw new Error('No active user session found.');
+  }
+
+  await deleteUserProfile(uid);
+  await deleteUser(authUser);
 }

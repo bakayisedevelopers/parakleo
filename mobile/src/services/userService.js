@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getFirebaseClients } from '../firebase/config';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
@@ -67,6 +67,11 @@ export async function updateUserProfile(uid, updates) {
   );
 
   return getUserProfile(uid);
+}
+
+export async function deleteUserProfile(uid) {
+  const { db } = getFirebaseClients();
+  await deleteDoc(doc(db, 'users', uid));
 }
 
 export async function updateUserRatingSummary(uid, roleKey, overallScore) {

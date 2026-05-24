@@ -48,19 +48,34 @@ function DropdownField({
   options = [],
   selectedValue = '',
   onSelect,
+  compact = false,
 }) {
   const [open, setOpen] = useState(false);
   const displayValue = valueLabel || placeholder;
 
   return (
     <View style={styles.dropdownWrap}>
-      <Text style={styles.dropdownLabel}>{label}</Text>
-      <Pressable accessibilityRole="button" onPress={() => setOpen(true)} style={styles.dropdownTrigger}>
-        <Text style={[styles.dropdownValue, !valueLabel && styles.dropdownPlaceholder]} numberOfLines={1}>
-          {displayValue}
-        </Text>
-        <Ionicons name="chevron-down" size={16} color={colors.muted} />
-      </Pressable>
+      {compact ? (
+        <View style={styles.inlineInfoRow}>
+          <Text style={styles.inlineLabel}>{label}</Text>
+          <Pressable accessibilityRole="button" onPress={() => setOpen(true)} style={styles.inlineDropdownTrigger}>
+            <Text style={[styles.dropdownValue, styles.dropdownValueCompact, !valueLabel && styles.dropdownPlaceholder]} numberOfLines={1}>
+              {displayValue}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={colors.muted} />
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.dropdownLabel}>{label}</Text>
+          <Pressable accessibilityRole="button" onPress={() => setOpen(true)} style={styles.dropdownTrigger}>
+            <Text style={[styles.dropdownValue, !valueLabel && styles.dropdownPlaceholder]} numberOfLines={1}>
+              {displayValue}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={colors.muted} />
+          </Pressable>
+        </>
+      )}
 
       <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
         <View style={styles.modalOverlay}>
@@ -98,6 +113,13 @@ function DropdownField({
 
 function buildAttachmentKey(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function getAttachmentStatusLabel(status) {
+  if (status === 'text extracted') return 'Done';
+  if (status === 'extraction weak') return 'Extraction weak';
+  if (status === 'queued') return 'Queued';
+  return 'Processing...';
 }
 
 function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [], attachmentExtractionByKey = {} }) {
@@ -229,10 +251,13 @@ export function StudentRequestComposer({
   const [isExtracting, setIsExtracting] = useState(false);
   const [isPreparingReview, setIsPreparingReview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showProcessingComplete, setShowProcessingComplete] = useState(false);
+  const [showAttachmentProcessingOverlay, setShowAttachmentProcessingOverlay] = useState(false);
   const [typedSubjectStatus, setTypedSubjectStatus] = useState('');
   const [typedTopicStatus, setTypedTopicStatus] = useState('');
   const lastAutoReviewSignatureRef = useRef('');
   const typingClassificationRunRef = useRef(0);
+  const processingRedirectTimeoutRef = useRef(null);
 
   useEffect(() => {
     setCardId(paymentMethods.find((card) => card.isDefault)?.id || paymentMethods[0]?.id || '');
@@ -270,6 +295,10 @@ export function StudentRequestComposer({
   }
 
   function resetComposerState() {
+    if (processingRedirectTimeoutRef.current) {
+      clearTimeout(processingRedirectTimeoutRef.current);
+      processingRedirectTimeoutRef.current = null;
+    }
     setStage('input');
     setTopic('');
     setAttachments([]);
@@ -285,6 +314,27 @@ export function StudentRequestComposer({
     setIsTextEntryOpen(false);
     setTypedSubjectStatus('');
     setTypedTopicStatus('');
+    setShowProcessingComplete(false);
+  }
+
+  function proceedToReviewFromOverlay() {
+    if (processingRedirectTimeoutRef.current) {
+      clearTimeout(processingRedirectTimeoutRef.current);
+      processingRedirectTimeoutRef.current = null;
+    }
+    setShowProcessingComplete(false);
+    setShowAttachmentProcessingOverlay(false);
+    setStage('review');
+  }
+
+  function resetProcessingFlowState() {
+    if (processingRedirectTimeoutRef.current) {
+      clearTimeout(processingRedirectTimeoutRef.current);
+      processingRedirectTimeoutRef.current = null;
+    }
+    setShowProcessingComplete(false);
+    setShowAttachmentProcessingOverlay(false);
+    lastAutoReviewSignatureRef.current = '';
   }
 
   async function handlePickedFiles(files) {
@@ -296,9 +346,13 @@ export function StudentRequestComposer({
     if (!nextFiles.length) return;
 
     setStage('input');
+    resetProcessingFlowState();
     setError('');
     setSuccessMessage('');
+    setShowAttachmentProcessingOverlay(true);
     setIsExtracting(true);
+    let extractionCompleted = false;
+    const extractedResultsByKey = {};
 
     const nextAttachments = [...attachments, ...nextFiles];
     setAttachments(nextAttachments);
@@ -314,15 +368,28 @@ export function StudentRequestComposer({
       await extractAttachments(nextFiles, (result, index) => {
         const file = nextFiles[index];
         const fileKey = buildAttachmentKey(file);
+        extractedResultsByKey[fileKey] = result;
         setAttachmentExtractionByKey((prev) => ({ ...prev, [fileKey]: result }));
         setAttachmentExtractionStatusByKey((prev) => ({
           ...prev,
           [fileKey]: result.success ? 'text extracted' : 'extraction weak',
         }));
       });
+      extractionCompleted = true;
     } catch (nextError) {
       setError(nextError.message || 'Unable to process the selected files right now.');
+      setShowAttachmentProcessingOverlay(false);
     } finally {
+      if (extractionCompleted) {
+        await prepareReview({
+          skipExtractingGuard: true,
+          attachmentsInput: nextAttachments,
+          extractionByKeyInput: {
+            ...attachmentExtractionByKey,
+            ...extractedResultsByKey,
+          },
+        });
+      }
       setIsExtracting(false);
     }
   }
@@ -334,6 +401,7 @@ export function StudentRequestComposer({
     setAttachments(nextAttachments);
     setStage('input');
     setQuote(null);
+    resetProcessingFlowState();
 
     if (removedKey) {
       setAttachmentExtractionByKey((prev) => {
@@ -349,17 +417,30 @@ export function StudentRequestComposer({
     }
   }
 
-  async function prepareReview() {
-    if (!hasRequestContent || isExtracting || isPreparingReview) return;
+  async function prepareReview(options = {}) {
+    const {
+      skipExtractingGuard = false,
+      attachmentsInput = attachments,
+      extractionByKeyInput = attachmentExtractionByKey,
+    } = options;
+    const hasRequestContentInput = Boolean(topic.trim()) || attachmentsInput.length > 0;
+
+    if (!hasRequestContentInput || ((!skipExtractingGuard && isExtracting) || isPreparingReview)) return;
 
     setError('');
     setSuccessMessage('');
     setIsPreparingReview(true);
-    const reviewSignature = buildReviewSignature();
+    const reviewSignature = [
+      topic.trim(),
+      attachmentsInput.map((file) => buildAttachmentKey(file)).join('|'),
+      selectedSubject,
+      durationMinutes,
+      hasManualDurationOverride ? 'manual' : 'auto',
+    ].join('::');
 
     try {
-      const attachmentExtractions = attachments
-        .map((file) => attachmentExtractionByKey[buildAttachmentKey(file)])
+      const attachmentExtractions = attachmentsInput
+        .map((file) => extractionByKeyInput[buildAttachmentKey(file)])
         .filter(Boolean);
       const subjectOptions = SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }));
       const classificationInput = buildSubjectClassificationInput({
@@ -392,8 +473,19 @@ export function StudentRequestComposer({
 
       setSelectedSubject(nextSubject);
       await refreshQuote(hasManualDurationOverride ? durationMinutes : nextEstimatedMinutes, nextSubject);
-      setStage('review');
-      lastAutoReviewSignatureRef.current = '';
+      if (attachmentsInput.length > 0) {
+        setShowProcessingComplete(true);
+        if (processingRedirectTimeoutRef.current) {
+          clearTimeout(processingRedirectTimeoutRef.current);
+        }
+        processingRedirectTimeoutRef.current = setTimeout(() => {
+          proceedToReviewFromOverlay();
+        }, 900);
+      } else {
+        setShowAttachmentProcessingOverlay(false);
+        setStage('review');
+      }
+      lastAutoReviewSignatureRef.current = reviewSignature;
     } catch (nextError) {
       setError(nextError.message || 'Unable to prepare the review right now.');
       lastAutoReviewSignatureRef.current = reviewSignature;
@@ -405,38 +497,8 @@ export function StudentRequestComposer({
   useEffect(() => {
     if (flowState !== 'request_flow') {
       lastAutoReviewSignatureRef.current = '';
-      return undefined;
     }
-
-    if (attachments.length === 0 || !hasRequestContent || isExtracting || isPreparingReview || stage === 'review') {
-      return undefined;
-    }
-
-    const nextSignature = buildReviewSignature();
-
-    if (!nextSignature.trim() || nextSignature === lastAutoReviewSignatureRef.current) {
-      return undefined;
-    }
-
-    lastAutoReviewSignatureRef.current = nextSignature;
-    const timeoutId = setTimeout(() => {
-      prepareReview();
-    }, 250);
-
-    return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    attachments,
-    durationMinutes,
-    flowState,
-    hasManualDurationOverride,
-    hasRequestContent,
-    isExtracting,
-    isPreparingReview,
-    selectedSubject,
-    stage,
-    topic,
-  ]);
+  }, [flowState]);
 
   useEffect(() => {
     if (attachments.length > 0) {
@@ -619,6 +681,12 @@ export function StudentRequestComposer({
     onStageChange?.(stage);
   }, [onStageChange, stage]);
 
+  useEffect(() => () => {
+    if (processingRedirectTimeoutRef.current) {
+      clearTimeout(processingRedirectTimeoutRef.current);
+    }
+  }, []);
+
   return (
     <View style={styles.wrap}>
       {successMessage ? (
@@ -690,7 +758,7 @@ export function StudentRequestComposer({
                       <View key={fileKey} style={styles.attachmentRow}>
                         <View style={styles.attachmentMeta}>
                           <Text style={styles.attachmentName} numberOfLines={1}>{file.name}</Text>
-                          <Text style={styles.attachmentStatus}>{status === 'text extracted' ? 'Done' : 'Processing...'}</Text>
+                          <Text style={styles.attachmentStatus}>{getAttachmentStatusLabel(status)}</Text>
                         </View>
                         <Pressable accessibilityRole="button" onPress={() => removeAttachment(index)} style={styles.removePill}>
                           <Text style={styles.removeText}>Remove</Text>
@@ -771,8 +839,13 @@ export function StudentRequestComposer({
               <View style={styles.reviewRows}>
                 <DropdownField
                   label="Time"
+                  compact
                   selectedValue={durationMinutes}
-                  valueLabel={`${durationMinutes} min`}
+                  valueLabel={
+                    freeMinutesRemaining > 0
+                      ? `${durationMinutes} min · ${freeMinutesRemaining.toFixed(2)} free`
+                      : `${durationMinutes} min`
+                  }
                   options={durationOptions.map((option) => ({ value: option, label: `${option} min` }))}
                   onSelect={async (value) => {
                     const nextDuration = Number(value || DEFAULT_LESSON_DURATION);
@@ -785,11 +858,9 @@ export function StudentRequestComposer({
                     }
                   }}
                 />
-                <Text style={styles.freeMinutesNote}>
-                  {freeMinutesRemaining > 0 ? `${freeMinutesRemaining.toFixed(2)} free` : 'No free minutes'}
-                </Text>
                 <DropdownField
                   label="Subject"
+                  compact
                   selectedValue={selectedSubject}
                   valueLabel={selectedSubject}
                   placeholder="Select subject"
@@ -804,9 +875,9 @@ export function StudentRequestComposer({
                     }
                   }}
                 />
-                <View style={styles.topicRow}>
-                  <Text style={styles.sectionLabel}>Topic</Text>
-                  <Text style={styles.reviewValue}>{reviewTopic || 'Not set'}</Text>
+                <View style={styles.inlineInfoRow}>
+                  <Text style={styles.inlineLabel}>Topic</Text>
+                  <Text style={styles.inlineValue} numberOfLines={1}>{reviewTopic || 'Not set'}</Text>
                 </View>
               </View>
 
@@ -827,6 +898,7 @@ export function StudentRequestComposer({
                 ) : null}
                 <DropdownField
                   label="Payment"
+                  compact
                   selectedValue={cardId}
                   valueLabel={paymentMethods.find((card) => card.id === cardId) ? formatCardLabel(paymentMethods.find((card) => card.id === cardId)) : ''}
                   placeholder="Select card"
@@ -841,7 +913,14 @@ export function StudentRequestComposer({
                 <Button style={styles.actionButton} disabled={isSubmitting} onPress={confirmRequest}>
                   {isSubmitting ? 'Confirming...' : 'Confirm request'}
                 </Button>
-                <Button style={styles.actionButton} onPress={() => setStage('input')} variant="secondary">
+                <Button
+                  style={styles.actionButton}
+                  onPress={() => {
+                    resetProcessingFlowState();
+                    setStage('input');
+                  }}
+                  variant="secondary"
+                >
                   Back
                 </Button>
               </View>
@@ -861,20 +940,43 @@ export function StudentRequestComposer({
         onFilesSelected={handlePickedFiles}
       />
 
-      <Modal animationType="fade" transparent visible={isExtracting || isPreparingReview || isSubmitting}>
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isSubmitting || showProcessingComplete || (showAttachmentProcessingOverlay && (isExtracting || isPreparingReview))}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.loadingCard}>
-            <ActivityIndicator color={colors.brand} size="large" />
+            <View style={styles.processingIconWrap}>
+              {showProcessingComplete ? (
+                <Ionicons name="checkmark-circle" size={30} color={colors.brand} />
+              ) : (
+                <ActivityIndicator color={colors.brand} size="small" />
+              )}
+            </View>
             <Text style={styles.modalTitle}>
-              {isSubmitting ? 'Confirming request' : isPreparingReview ? 'Preparing review' : 'Processing your file'}
+              {showProcessingComplete
+                ? 'Processing complete'
+                : isSubmitting
+                  ? 'Confirming request'
+                  : isPreparingReview
+                    ? 'Preparing review'
+                    : 'Processing your file'}
             </Text>
             <Text style={styles.modalCopy}>
-              {isSubmitting
-                ? 'Please wait while we upload your files and post the live request.'
-                : isPreparingReview
-                  ? 'Please wait while we classify the subject and fetch the pricing quote.'
-                  : 'Please wait while we scan and prepare your uploaded files.'}
+              {showProcessingComplete
+                ? 'You are being redirected.'
+                : isSubmitting
+                  ? 'Please wait while we upload your files and post the live request.'
+                  : isPreparingReview
+                    ? 'Please wait while we classify the subject and fetch the pricing quote.'
+                    : 'Please wait while we scan and prepare your uploaded files.'}
             </Text>
+            {showProcessingComplete ? (
+              <Pressable accessibilityRole="button" onPress={proceedToReviewFromOverlay} style={styles.overlayCta}>
+                <Text style={styles.overlayCtaText}>Click Here</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -1052,20 +1154,6 @@ const styles = StyleSheet.create({
   reviewRows: {
     gap: 10,
   },
-  freeMinutesNote: {
-    color: colors.brandDark,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  topicRow: {
-    backgroundColor: '#ecfdf5',
-    borderColor: 'rgba(16,185,129,0.18)',
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
   reviewTitle: {
     color: colors.text,
     fontSize: 24,
@@ -1093,6 +1181,30 @@ const styles = StyleSheet.create({
   dropdownWrap: {
     gap: 6,
   },
+  inlineInfoRow: {
+    alignItems: 'center',
+    borderColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 50,
+    paddingHorizontal: 12,
+    backgroundColor: '#ecfdf5',
+  },
+  inlineLabel: {
+    color: colors.brandDark,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  inlineValue: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
   dropdownLabel: {
     color: colors.brandDark,
     fontSize: 13,
@@ -1110,12 +1222,22 @@ const styles = StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: 12,
   },
+  inlineDropdownTrigger: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    minHeight: 42,
+  },
   dropdownValue: {
     color: colors.text,
     flex: 1,
     fontSize: 14,
     fontWeight: '700',
     marginRight: 8,
+  },
+  dropdownValueCompact: {
+    textAlign: 'right',
   },
   dropdownPlaceholder: {
     color: colors.muted,
@@ -1218,10 +1340,10 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     alignItems: 'center',
-    backgroundColor: 'rgba(15,23,42,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.8)',
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: 16,
   },
   modalCard: {
     backgroundColor: colors.surface,
@@ -1234,11 +1356,26 @@ const styles = StyleSheet.create({
   loadingCard: {
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: 24,
+    borderColor: colors.border,
+    borderRadius: 30,
+    borderWidth: 1,
     gap: 12,
-    maxWidth: 360,
-    padding: 24,
+    maxWidth: 420,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
     width: '100%',
+  },
+  processingIconWrap: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderRadius: 999,
+    height: 56,
+    justifyContent: 'center',
+    width: 56,
   },
   modalTitle: {
     color: colors.text,
@@ -1251,5 +1388,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
+  },
+  overlayCta: {
+    alignItems: 'center',
+    backgroundColor: '#10b981',
+    borderRadius: 16,
+    marginTop: 2,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    width: '100%',
+  },
+  overlayCtaText: {
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

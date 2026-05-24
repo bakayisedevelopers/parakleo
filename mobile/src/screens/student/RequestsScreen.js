@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/States';
@@ -8,8 +9,15 @@ import { useAuth } from '../../context/AuthContext';
 import { subscribeToStudentRequests } from '../../services/classRequestService';
 import { subscribeToStudentSessions } from '../../services/sessionService';
 import { colors } from '../../theme/colors';
-import { formatRand } from '../../utils/pricing';
-import { getRequestLifecycleLabel, getRequestStatusMeta, isRequestJoinable } from '../../utils/requestStatus';
+import { getRequestStatusMeta } from '../../utils/requestStatus';
+
+function statusLabel(status) {
+  if (['pending', 'matching', 'offered'].includes(status)) return 'Searching for tutor';
+  if (['accepted', 'waiting_student', 'in_progress', 'in_session'].includes(status)) return 'Tutor found';
+  if (status === 'no_tutor_available') return 'No tutor available';
+  if (status === 'completed') return 'Class completed';
+  return 'Request update';
+}
 
 export function RequestsScreen({ navigate }) {
   const { user } = useAuth();
@@ -50,53 +58,59 @@ export function RequestsScreen({ navigate }) {
     [sessions],
   );
 
-  if (loading || loadingSessions) return <LoadingState label="Loading requests" />;
+  if (loading || loadingSessions) return <LoadingState label="Syncing your classes..." />;
   if (error) return <ErrorState message={error} />;
-  if (!requests.length) return <EmptyState title="No requests yet" message="Create a class request from the dashboard to see it here." />;
+  if (!requests.length) {
+    return (
+      <EmptyState
+        title="No classes yet"
+        message="Create your first request and it will appear here with its session details."
+        action={<Button onPress={() => navigate('Dashboard')}>Request Class</Button>}
+      />
+    );
+  }
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>My Classes</Text>
+      <Text style={styles.subtitle}>A single place for request status and session access.</Text>
       {requests.map((request) => (
-        <Card key={request.id} style={styles.card}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => navigate({ key: 'RequestStatus', params: { requestId: request.id, parentTab: 'Requests' } })}
-            style={styles.cardPressable}
-          >
-            <StatusBadge {...getRequestStatusMeta(request.status)} />
-            <Text style={styles.cardTitle}>{request.topic || request.subject || 'Class request'}</Text>
-            <Text style={styles.copy}>{request.description || 'No description added.'}</Text>
-            <Text style={styles.meta}>{getRequestLifecycleLabel(request.status)}</Text>
-            <Text style={styles.meta}>Subject: {request.subject || 'Mathematics'} | Duration: {request.duration || `${request.durationMinutes || 10} minutes`}</Text>
-            {request.pricingSnapshot?.totalAmount ? (
-              <Text style={styles.meta}>
-                Quote: {formatRand(request.pricingSnapshot.originalPrice ?? request.pricingSnapshot.totalAmount)} | Pay {formatRand(request.pricingSnapshot.finalPrice ?? request.pricingSnapshot.totalAmount)}
-              </Text>
-            ) : null}
-            <Text style={styles.meta}>
-              Attachments: {Array.isArray(request.attachments) ? request.attachments.length : (request.attachment ? 1 : 0)}
-            </Text>
-            {sessionByRequestId.get(request.id) ? (
-              <Text style={styles.sessionMeta}>
-                Session linked: {sessionByRequestId.get(request.id).status || 'waiting_student'} | {sessionByRequestId.get(request.id).duration || request.duration || 'Duration pending'}
-              </Text>
-            ) : null}
-          </Pressable>
-          <View style={styles.actions}>
-            <Button
-              variant="secondary"
-              onPress={() => navigate({ key: 'RequestDetails', params: { requestId: request.id, parentTab: 'Requests' } })}
+        <View key={request.id} style={styles.itemWrap}>
+          <Card style={styles.card}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => navigate({ key: 'RequestStatus', params: { requestId: request.id, parentTab: 'Requests' } })}
+              style={styles.cardPressable}
             >
-              View details
-            </Button>
-            {isRequestJoinable(request.status) && sessionByRequestId.get(request.id)?.id ? (
-              <Button onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: sessionByRequestId.get(request.id).id, parentTab: 'Sessions' } })}>
-                Join / Re-open class
-              </Button>
-            ) : null}
+              <StatusBadge {...getRequestStatusMeta(request.status)} />
+              <Text style={styles.cardTitle}>{request.topic || request.subject || 'Class request'}</Text>
+              <Text style={styles.copy}>{request.description || 'No description added.'}</Text>
+              <Text style={styles.meta}>Subject: {request.subject || 'Mathematics'}</Text>
+            </Pressable>
+          </Card>
+
+          <View style={styles.footerRow}>
+            <Text style={styles.statusText}>{statusLabel(request.status)}</Text>
+            <View style={styles.footerActions}>
+              <View style={styles.durationWrap}>
+                <Ionicons name="time-outline" size={14} color={colors.muted} />
+                <Text style={styles.durationText}>
+                  {request.duration || sessionByRequestId.get(request.id)?.duration || 'Per-minute'}
+                </Text>
+              </View>
+              {sessionByRequestId.get(request.id)?.id ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: sessionByRequestId.get(request.id).id, parentTab: 'Sessions' } })}
+                >
+                  <Text style={styles.joinText}>
+                    Join / Re-open class
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
-        </Card>
+        </View>
       ))}
     </View>
   );
@@ -110,6 +124,13 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 28,
     fontWeight: '900',
+  },
+  subtitle: {
+    color: colors.muted,
+    fontSize: 14,
+  },
+  itemWrap: {
+    gap: 8,
   },
   card: {
     gap: 10,
@@ -131,12 +152,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  sessionMeta: {
-    color: colors.brandDark,
+  footerRow: {
+    alignItems: 'center',
+    backgroundColor: '#fafafa',
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  statusText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  footerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  durationWrap: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  durationText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  joinText: {
+    color: '#047857',
     fontSize: 12,
     fontWeight: '800',
-  },
-  actions: {
-    gap: 10,
   },
 });
