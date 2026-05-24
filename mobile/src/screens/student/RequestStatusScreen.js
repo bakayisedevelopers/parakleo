@@ -215,7 +215,9 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     [requestId, sessions],
   );
 
-  const canJoin = isRequestJoinable(request?.status) && Boolean(relatedSession?.id);
+  const relatedSessionStatus = String(relatedSession?.status || '').toLowerCase();
+  const relatedSessionIsActive = ['waiting_student', 'in_progress', 'in_session'].includes(relatedSessionStatus);
+  const canJoin = isRequestJoinable(request?.status) && Boolean(relatedSession?.id) && relatedSessionIsActive;
   const shouldAutoOpenSession = canJoin && Boolean(relatedSession?.id);
 
   useEffect(() => {

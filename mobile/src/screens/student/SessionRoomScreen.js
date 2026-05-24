@@ -305,7 +305,11 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   useEffect(() => () => {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (bridgeRef.current) {
-      bridgeRef.current.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
+      if (typeof bridgeRef.current.close === 'function') {
+        bridgeRef.current.close();
+      } else {
+        bridgeRef.current.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
+      }
     }
   }, []);
 
@@ -327,6 +331,15 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
           ...prev,
           ...(payload.payload || {}),
         }));
+        return;
+      }
+
+      if (payload.type === 'log') {
+        const message = payload?.payload?.message || 'RTC bridge log';
+        const detail = payload?.payload?.error ? ` (${payload.payload.error})` : '';
+        // Surface WebView RTC diagnostics in Metro/device logs for debugging.
+        // eslint-disable-next-line no-console
+        console.log(`[StudentRtcBridge] ${message}${detail}`);
       }
     } catch {
       // Ignore malformed bridge messages from the WebView.
@@ -334,11 +347,19 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   };
 
   const handleToggleMute = () => {
-    bridgeRef.current?.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.toggleAudio && window.ParakleoSessionBridge.toggleAudio(); true;');
+    if (typeof bridgeRef.current?.toggleAudio === 'function') {
+      bridgeRef.current.toggleAudio();
+      return;
+    }
+    bridgeRef.current?.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.toggleAudio && window.ParakleoSessionBridge.toggleAudio(); true;');
   };
 
   const closeRtcBridge = () => {
-    bridgeRef.current?.injectJavaScript('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
+    if (typeof bridgeRef.current?.close === 'function') {
+      bridgeRef.current.close();
+      return;
+    }
+    bridgeRef.current?.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
   };
 
   const navigateToRequestStatus = useCallback((requestId) => {
