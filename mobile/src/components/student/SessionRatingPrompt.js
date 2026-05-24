@@ -71,7 +71,7 @@ export function SessionRatingPrompt({ session, role = 'student', onHandled }) {
                 onPress={() => handleSubmit(starValue)}
                 style={styles.starButton}
               >
-                <Text style={[styles.star, starValue <= selectedRating && styles.starActive]}>*</Text>
+                <Text style={[styles.star, starValue <= selectedRating && styles.starActive]}>★</Text>
               </Pressable>
             ))}
           </View>

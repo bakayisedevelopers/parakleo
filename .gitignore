@@ -1,5 +1,6 @@
 node_modules
 .env
+web/.env.local
 .firebase
 web/node_models
 web/dist
