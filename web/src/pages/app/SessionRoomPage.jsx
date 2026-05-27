@@ -135,6 +135,68 @@ function HiddenMediaMounts({ localVideoRef, remoteVideoRef, remoteScreenVideoRef
   );
 }
 
+function createExcalidrawTextElement(layoutItem, index) {
+  const x = Number(layoutItem?.position?.x || 0);
+  const y = Number(layoutItem?.position?.y || 0);
+  const width = Math.max(220, Number(layoutItem?.width || 600));
+  const text = String(layoutItem?.content || '').trim();
+  if (!text) return null;
+
+  const lineCount = Math.max(1, text.split('\n').length);
+  const fontSize = 24;
+  const lineHeight = 1.25;
+  const estimatedHeight = Math.max(
+    Number(layoutItem?.height || 0),
+    Math.ceil(lineCount * fontSize * lineHeight),
+  );
+  const seed = (Date.now() + (index * 7919)) % 2147483647;
+  const versionNonce = (Date.now() + (index * 104729)) % 2147483647;
+  const now = Date.now();
+
+  return {
+    id: `parsed-question-${index + 1}`,
+    type: 'text',
+    x,
+    y,
+    width,
+    height: estimatedHeight,
+    angle: 0,
+    strokeColor: '#1f2937',
+    backgroundColor: 'transparent',
+    fillStyle: 'hachure',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roughness: 0,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed,
+    version: 1,
+    versionNonce,
+    isDeleted: false,
+    boundElements: null,
+    updated: now,
+    link: null,
+    locked: false,
+    fontSize,
+    fontFamily: 1,
+    textAlign: 'left',
+    verticalAlign: 'top',
+    containerId: null,
+    originalText: text,
+    lineHeight,
+    text,
+  };
+}
+
+function mapLayoutToExcalidrawElements(layout = []) {
+  return (Array.isArray(layout) ? layout : [])
+    .filter((item) => item?.type === 'text')
+    .map((item, index) => createExcalidrawTextElement(item, index))
+    .filter(Boolean);
+}
+
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 let cachedBoardPdfJs = null;
@@ -431,18 +493,28 @@ export default function SessionRoomPage() {
         ocrImageReferences,
       });
 
-      const parsedQuestions = gptExtraction
-        ? parseQuestionsFromGptExtraction({
-            gptExtraction,
-            attachments,
-          })
-        : parseQuestionsFromExtraction({
-            extractedText,
-            attachments,
-            attachmentExtractions,
-            ocrImageReferences: hydratedImageReferences,
-          });
+      const fallbackParsedQuestions = () => parseQuestionsFromExtraction({
+        extractedText,
+        attachments,
+        attachmentExtractions,
+        ocrImageReferences: hydratedImageReferences,
+      });
+
+      let parsedQuestions = [];
+      if (gptExtraction) {
+        const gptParsedQuestions = parseQuestionsFromGptExtraction({
+          gptExtraction,
+          attachments,
+        });
+        const hasUsableGptQuestions = gptParsedQuestions.some(
+          (question) => String(question?.text || '').trim().length > 0,
+        );
+        parsedQuestions = hasUsableGptQuestions ? gptParsedQuestions : fallbackParsedQuestions();
+      } else {
+        parsedQuestions = fallbackParsedQuestions();
+      }
       const layout = prepareWhiteboardLayout(parsedQuestions);
+      const textElements = mapLayoutToExcalidrawElements(layout);
 
       debugLog('sessionRoom', '[whiteboardPreparation] parsing finished.', {
         sessionId: session?.id || null,
@@ -450,8 +522,10 @@ export default function SessionRoomPage() {
         layoutCount: layout.length,
       });
 
-      // Excalidraw OSS migration: keep board initialization stable without vendor-specific shape APIs.
-      // Parsed layout is still computed for future scene hydration.
+      // Hydrate parsed question text into Excalidraw scene.
+      if (textElements.length && typeof editor?.setSceneElements === 'function') {
+        editor.setSceneElements(textElements);
+      }
       if (typeof editor?.refresh === 'function') {
         editor.refresh();
       }
@@ -1149,7 +1223,9 @@ export default function SessionRoomPage() {
 
         <div
           className={`absolute z-30 ${
-            role === 'student' ? 'bottom-4 left-4' : 'bottom-4 left-4 top-4 flex items-center'
+            role === 'student'
+              ? `right-4 ${!rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? 'bottom-20' : 'bottom-4'}`
+              : 'right-4 top-1/2 -translate-y-1/2'
           } ${
             role === 'student'
               ? showStudentOverlay

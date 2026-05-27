@@ -3366,7 +3366,11 @@ exports.mobileWebviewAuth = onRequest({ cors: true }, async (req, res) => {
     try {
       const parsed = new URL(targetPathRaw);
       const expectedHost = String(authDomain || '').replace(/^https?:\/\//, '').trim().toLowerCase();
-      if (parsed.host.toLowerCase() === expectedHost) {
+      const requestHost = String(req.get('host') || '').trim().toLowerCase();
+      const allowedHosts = new Set(
+        [expectedHost, requestHost].map((host) => host.replace(/:\d+$/, '')).filter(Boolean),
+      );
+      if (allowedHosts.has(parsed.host.toLowerCase())) {
         targetPath = targetPathRaw;
       }
     } catch {

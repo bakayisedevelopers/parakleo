@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  PermissionsAndroid,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -48,6 +50,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [hasMicPermission, setHasMicPermission] = useState(Platform.OS === 'android' ? null : true);
   const [idToken, setIdToken] = useState('');
   const [authHandoff, setAuthHandoff] = useState(null);
   const [hasAcceptedExtension, setHasAcceptedExtension] = useState(false);
@@ -63,10 +66,11 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
   const selectedDurationMinutes = Number(session?.durationMinutes || session?.pricingSnapshot?.durationMinutes || 0);
   const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
+  const isWebRtcConnected = String(session?.webrtc?.status || '').toLowerCase() === 'connected';
+  const isTutorScreenSharingActive = session?.webrtc?.screenShare?.active === true;
   const isStudentBillableActive = session?.status === 'in_progress'
-    && rtcState.isPeerConnected
-    && rtcState.isRemoteScreenSharing
-    && rtcState.hasLiveRemoteScreenTrack;
+    && isWebRtcConnected
+    && isTutorScreenSharingActive;
   const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
   useEffect(() => subscribeToSessionById(
     sessionId,
@@ -87,6 +91,38 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     extensionPromptShownRef.current = false;
     autoEndingRef.current = false;
   }, [session?.id]);
+
+  useEffect(() => {
+    let active = true;
+    const ensureMicPermission = async () => {
+      if (Platform.OS !== 'android') {
+        if (active) setHasMicPermission(true);
+        return;
+      }
+
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone permission required',
+            message: 'Parakleo needs microphone access so WebView sessions can connect to live tutoring audio.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Not now',
+          },
+        );
+        if (active) {
+          setHasMicPermission(granted === PermissionsAndroid.RESULTS.GRANTED);
+        }
+      } catch {
+        if (active) setHasMicPermission(false);
+      }
+    };
+
+    ensureMicPermission();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -228,7 +264,20 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
       if (payload.type === 'log') {
         const message = payload?.payload?.message || 'RTC bridge log';
-        const detail = payload?.payload?.error ? ` (${payload.payload.error})` : '';
+        const details = [];
+        if (payload?.payload?.detail !== undefined) {
+          try {
+            details.push(typeof payload.payload.detail === 'string'
+              ? payload.payload.detail
+              : JSON.stringify(payload.payload.detail));
+          } catch {
+            details.push(String(payload.payload.detail));
+          }
+        }
+        if (payload?.payload?.error) {
+          details.push(String(payload.payload.error));
+        }
+        const detail = details.length ? ` (${details.join(' | ')})` : '';
         // Surface WebView RTC diagnostics in Metro/device logs for debugging.
         // eslint-disable-next-line no-console
         console.log(`[StudentRtcBridge] ${message}${detail}`);
@@ -285,13 +334,24 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
         <Pressable style={styles.stage}>
           {['waiting_student', 'in_progress'].includes(String(session.status || '')) ? (
-            <StudentRtcSessionView
-              authHandoff={authHandoff}
-              bridgeRef={bridgeRef}
-              idToken={idToken}
-              onBridgeMessage={handleBridgeMessage}
-              sessionId={session.id}
-            />
+            hasMicPermission ? (
+              <StudentRtcSessionView
+                authHandoff={authHandoff}
+                bridgeRef={bridgeRef}
+                idToken={idToken}
+                onBridgeMessage={handleBridgeMessage}
+                sessionId={session.id}
+              />
+            ) : (
+              <View style={styles.stageFallback}>
+                <Card style={styles.fallbackCard}>
+                  <Text style={styles.fallbackTitle}>Microphone access is required</Text>
+                  <Text style={styles.fallbackCopy}>
+                    Please allow microphone permission in app settings, then reopen the session room.
+                  </Text>
+                </Card>
+              </View>
+            )
           ) : (
             <View style={styles.stageFallback}>
               <Card style={styles.fallbackCard}>

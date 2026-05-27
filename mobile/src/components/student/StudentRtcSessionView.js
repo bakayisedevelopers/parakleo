@@ -22,6 +22,7 @@ export function StudentRtcSessionView({
   const mutedRef = useRef(false);
 
   const sessionUrl = useMemo(() => {
+    const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
     const webBaseUrl = String(process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://parakleo.co.za').trim().replace(/\/+$/, '');
     const sessionPath = `/app/session/${encodeURIComponent(String(sessionId || ''))}`;
     const params = new URLSearchParams({
@@ -33,7 +34,10 @@ export function StudentRtcSessionView({
       projectId: String(process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || ''),
       appId: String(process.env.EXPO_PUBLIC_FIREBASE_APP_ID || ''),
     });
-    return `${getFunctionEndpoint('mobileWebviewAuth')}?${params.toString()}`;
+    if (useFirebaseEmulators) {
+      return `${getFunctionEndpoint('mobileWebviewAuth')}?${params.toString()}`;
+    }
+    return `${webBaseUrl}/mobile-webview-auth?${params.toString()}`;
   }, [sessionId]);
   const injectedAuthBootstrap = useMemo(() => {
     const payload = JSON.stringify(authHandoff || {});
@@ -47,13 +51,244 @@ export function StudentRtcSessionView({
           var persistenceKey = 'firebase:persistence:' + handoff.apiKey + ':' + appName;
           window.localStorage.setItem(authKey, JSON.stringify(handoff.user));
           window.localStorage.setItem(persistenceKey, 'local');
+
+          if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'log',
+              payload: { message: 'Auth handoff persisted to localStorage.' }
+            }));
+          }
         } catch (error) {
-          // no-op
+          if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'log',
+              payload: { message: 'Auth handoff persistence failed.', error: String(error && error.message || error) }
+            }));
+          }
         }
       })();
       true;
     `;
   }, [authHandoff]);
+  const injectedRuntimeProbe = `
+    (function () {
+      try {
+        if (!window.__PARAKLEO_CONSOLE_BRIDGED__) {
+          window.__PARAKLEO_CONSOLE_BRIDGED__ = true;
+          var originalLog = console.log;
+          var originalWarn = console.warn;
+          var originalError = console.error;
+          function forward(level, args) {
+            try {
+              var serialized = Array.prototype.map.call(args || [], function (entry) {
+                if (typeof entry === 'string') return entry;
+                try { return JSON.stringify(entry); } catch (_e) { return String(entry); }
+              }).join(' ');
+              if (serialized.indexOf('parakleo:') === -1 && serialized.indexOf('webrtc') === -1) return;
+              if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'log',
+                  payload: { message: 'WebView console ' + level, detail: serialized }
+                }));
+              }
+            } catch (_err) {
+              // no-op
+            }
+          }
+          console.log = function () { forward('log', arguments); originalLog && originalLog.apply(console, arguments); };
+          console.warn = function () { forward('warn', arguments); originalWarn && originalWarn.apply(console, arguments); };
+          console.error = function () { forward('error', arguments); originalError && originalError.apply(console, arguments); };
+        }
+
+        if (!window.__PARAKLEO_RTC_PROBE__) {
+          window.__PARAKLEO_RTC_PROBE__ = true;
+
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            var originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+            function buildSilentAudioStream() {
+              try {
+                var AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return null;
+                var ctx = new AudioCtx();
+                var oscillator = ctx.createOscillator();
+                var gain = ctx.createGain();
+                var destination = ctx.createMediaStreamDestination();
+                gain.gain.value = 0.00001;
+                oscillator.connect(gain);
+                gain.connect(destination);
+                oscillator.start();
+                return destination.stream || null;
+              } catch (_error) {
+                return null;
+              }
+            }
+            navigator.mediaDevices.getUserMedia = function (constraints) {
+              if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'log',
+                  payload: { message: 'RTC getUserMedia called', detail: constraints }
+                }));
+              }
+              var sourcePromise = originalGetUserMedia(constraints).then(function (stream) {
+                  var tracks = (stream && stream.getTracks ? stream.getTracks() : []).map(function (t) {
+                    return { kind: t.kind, id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState };
+                  });
+                  if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'log',
+                      payload: { message: 'RTC getUserMedia success', detail: { trackCount: tracks.length, tracks: tracks } }
+                    }));
+                  }
+                  return stream;
+                });
+
+              var timeoutMs = 4500;
+              var timeoutPromise = new Promise(function (resolve) {
+                setTimeout(function () {
+                  var silentStream = buildSilentAudioStream();
+                  if (!silentStream) {
+                    resolve(null);
+                    return;
+                  }
+                  if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'log',
+                      payload: { message: 'RTC getUserMedia timeout fallback: synthetic silent stream.' }
+                    }));
+                  }
+                  resolve(silentStream);
+                }, timeoutMs);
+              });
+
+              return Promise.race([sourcePromise, timeoutPromise]).then(function (stream) {
+                if (stream) return stream;
+                return sourcePromise;
+              }).catch(function (err) {
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: { message: 'RTC getUserMedia failed', error: String(err && (err.name + ': ' + err.message) || err) }
+                  }));
+                }
+                throw err;
+              });
+            };
+          }
+
+          if (window.RTCPeerConnection) {
+            var OriginalRTCPeerConnection = window.RTCPeerConnection;
+            window.RTCPeerConnection = function (config) {
+              var pc = new OriginalRTCPeerConnection(config);
+              try {
+                var detail = {
+                  iceTransportPolicy: config && config.iceTransportPolicy ? config.iceTransportPolicy : 'all',
+                  iceServers: (config && Array.isArray(config.iceServers) ? config.iceServers : []).map(function (s) {
+                    var urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+                    return { urls: urls, hasUsername: Boolean(s.username), hasCredential: Boolean(s.credential) };
+                  }),
+                };
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: { message: 'RTCPeerConnection created', detail: detail }
+                  }));
+                }
+              } catch (_e) {
+                // no-op
+              }
+
+              pc.addEventListener('connectionstatechange', function () {
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  var state = String(pc.connectionState || '');
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'rtc_state',
+                    payload: {
+                      connectionMessage: state === 'connected' ? 'Connected' : (state === 'connecting' ? 'Connecting...' : 'Reconnecting...'),
+                      isPeerConnected: state === 'connected',
+                      networkError: '',
+                    }
+                  }));
+                }
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: { message: 'RTC connectionstatechange', detail: pc.connectionState }
+                  }));
+                }
+              });
+              pc.addEventListener('iceconnectionstatechange', function () {
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  var iceState = String(pc.iceConnectionState || '');
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'rtc_state',
+                    payload: {
+                      connectionMessage: (iceState === 'connected' || iceState === 'completed') ? 'Connected' : (iceState === 'checking' ? 'Connecting...' : 'Reconnecting...'),
+                      isPeerConnected: iceState === 'connected' || iceState === 'completed',
+                      networkError: '',
+                    }
+                  }));
+                }
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: { message: 'RTC iceconnectionstatechange', detail: pc.iceConnectionState }
+                  }));
+                }
+              });
+              pc.addEventListener('signalingstatechange', function () {
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: { message: 'RTC signalingstatechange', detail: pc.signalingState }
+                  }));
+                }
+              });
+              pc.addEventListener('icecandidateerror', function (event) {
+                if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'log',
+                    payload: {
+                      message: 'RTC icecandidateerror',
+                      detail: {
+                        errorCode: event && event.errorCode,
+                        errorText: event && event.errorText,
+                        url: event && event.url,
+                      },
+                    },
+                  }));
+                }
+              });
+
+              return pc;
+            };
+            window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
+          }
+        }
+
+        var payload = {
+          href: String(window.location && window.location.href || ''),
+          hasMediaDevices: Boolean(navigator.mediaDevices),
+          hasGetUserMedia: Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+          secureContext: Boolean(window.isSecureContext),
+          userAgent: String(navigator.userAgent || ''),
+        };
+        if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'log',
+            payload: { message: 'WebView runtime probe', detail: payload }
+          }));
+        }
+      } catch (error) {
+        if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'log',
+            payload: { message: 'WebView runtime probe failed', error: String(error && error.message || error) }
+          }));
+        }
+      }
+    })();
+    true;
+  `;
 
   const emitBridge = (type, payload) => {
     onBridgeMessage?.(toBridgeMessage(type, payload));
@@ -119,8 +354,14 @@ export function StudentRtcSessionView({
     <View style={styles.wrap}>
       <WebView
         allowsInlineMediaPlayback
+        allowsFullscreenVideo
+        domStorageEnabled
         javaScriptEnabled
+        mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
         mediaPlaybackRequiresUserAction={false}
+        setSupportMultipleWindows={false}
+        sharedCookiesEnabled
+        thirdPartyCookiesEnabled
         onError={(event) => {
           emitBridge('rtc_state', {
             connectionMessage: 'Unable to load secure session room.',
@@ -128,6 +369,23 @@ export function StudentRtcSessionView({
             isPeerConnected: false,
             isRemoteScreenSharing: false,
             hasLiveRemoteScreenTrack: false,
+          });
+          emitBridge('log', {
+            message: 'WebView onError',
+            error: JSON.stringify(event?.nativeEvent || {}),
+          });
+        }}
+        onHttpError={(event) => {
+          emitBridge('rtc_state', {
+            connectionMessage: 'Secure session room request failed.',
+            networkError: `HTTP ${event?.nativeEvent?.statusCode || ''} while loading session room.`,
+            isPeerConnected: false,
+            isRemoteScreenSharing: false,
+            hasLiveRemoteScreenTrack: false,
+          });
+          emitBridge('log', {
+            message: 'WebView onHttpError',
+            error: JSON.stringify(event?.nativeEvent || {}),
           });
         }}
         onLoadEnd={() => {
@@ -143,9 +401,16 @@ export function StudentRtcSessionView({
         onMessage={(event) => {
           onBridgeMessage?.(event);
         }}
+        onShouldStartLoadWithRequest={(request) => {
+          emitBridge('log', {
+            message: `WebView navigating to ${request?.url || 'unknown URL'}`,
+          });
+          return true;
+        }}
         originWhitelist={['https://*']}
         ref={webViewRef}
         injectedJavaScriptBeforeContentLoaded={injectedAuthBootstrap}
+        injectedJavaScript={injectedRuntimeProbe}
         source={{
           uri: sessionUrl,
           headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},

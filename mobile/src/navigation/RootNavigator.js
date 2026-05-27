@@ -315,7 +315,7 @@ export function RootNavigator() {
   };
 
   return (
-    <View style={styles.safe}>
+    <View style={[styles.safe, isFullscreenRoute ? styles.safeFullscreen : null]}>
       <View style={styles.shell}>
         {isFullscreenRoute ? (
           <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
@@ -419,6 +419,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0,
+  },
+  safeFullscreen: {
+    paddingTop: 0,
   },
   shell: {
     flex: 1,

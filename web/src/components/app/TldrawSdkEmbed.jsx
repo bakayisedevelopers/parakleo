@@ -97,6 +97,14 @@ export default function TldrawSdkEmbed({ roomId, onMount }) {
                 // no-op
               }
             },
+            setSceneElements: (elements = []) => {
+              try {
+                const nextElements = Array.isArray(elements) ? elements : [];
+                api.updateScene({ elements: nextElements });
+              } catch {
+                // no-op
+              }
+            },
           });
         }}
         onChange={(elements, appState) => {
