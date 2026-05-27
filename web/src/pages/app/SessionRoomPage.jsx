@@ -311,7 +311,6 @@ export default function SessionRoomPage() {
     && isRatingPromptOpen
     && RATABLE_STATUSES.has(session?.status)
     && ratingStatus === 'pending';
-  const tldrawLicenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY;
   const forceRelayOnly = String(import.meta.env.VITE_WEBRTC_FORCE_RELAY_ONLY || '').toLowerCase() === 'true';
   const whiteboardRoom = session?.whiteboardRoomId || session?.requestId || session?.id;
   const graceRemaining = Math.max(0, Math.ceil(((session?.joinGraceEndsAt || 0) - Date.now()) / 1000));
@@ -426,7 +425,6 @@ export default function SessionRoomPage() {
     }
 
     try {
-      const { AssetRecordType, createShapeId, toRichText } = await import('tldraw');
       const hydratedImageReferences = await buildBoardImageReferences({
         attachments,
         attachmentExtractions,
@@ -452,111 +450,14 @@ export default function SessionRoomPage() {
         layoutCount: layout.length,
       });
 
-      const assets = [];
-      const shapes = [];
-
-      layout.forEach((item, index) => {
-        if (item.type === 'text') {
-          shapes.push({
-            id: createShapeId(),
-            type: 'text',
-            parentId: editor.getCurrentPageId(),
-            x: item.position.x,
-            y: item.position.y,
-            props: {
-              richText: toRichText(item.content),
-              autoSize: false,
-              w: item.width || 900,
-              size: 'm',
-              font: 'sans',
-              textAlign: 'start',
-              scale: 1,
-            },
-          });
-          return;
-        }
-
-        if (item.type === 'file' && item.url) {
-          const assetId = AssetRecordType.createId();
-          assets.push({
-            id: assetId,
-            type: 'bookmark',
-            typeName: 'asset',
-            props: {
-              title: item.fileName || `Uploaded file ${index + 1}`,
-              description: item.mimeType || 'Original uploaded file',
-              image: '',
-              favicon: '',
-              src: item.url,
-            },
-            meta: {},
-          });
-
-          shapes.push({
-            id: createShapeId(),
-            type: 'bookmark',
-            parentId: editor.getCurrentPageId(),
-            x: item.position.x,
-            y: item.position.y,
-            props: {
-              assetId,
-              url: item.url,
-              w: item.width || 420,
-              h: item.height || 160,
-            },
-          });
-          return;
-        }
-
-        if (item.type === 'image' && item.src) {
-          const assetId = AssetRecordType.createId();
-          assets.push({
-            id: assetId,
-            type: 'image',
-            typeName: 'asset',
-            props: {
-              name: `Question image ${index + 1}`,
-              src: item.src,
-              mimeType: item.mimeType || 'image/png',
-              w: item.width || 800,
-              h: item.height || 600,
-              isAnimated: false,
-            },
-            meta: {},
-          });
-
-          shapes.push({
-            id: createShapeId(),
-            type: 'image',
-            parentId: editor.getCurrentPageId(),
-            x: item.position.x,
-            y: item.position.y,
-            props: {
-              assetId,
-              w: item.width || 420,
-              h: item.height || 320,
-            },
-          });
-        }
-      });
-
-      if (assets.length) {
-        editor.createAssets(assets);
+      // Excalidraw OSS migration: keep board initialization stable without vendor-specific shape APIs.
+      // Parsed layout is still computed for future scene hydration.
+      if (typeof editor?.refresh === 'function') {
+        editor.refresh();
       }
-      if (shapes.length) {
-        editor.createShapes(shapes);
-      }
-
-      if (shapes.length && typeof editor.setCamera === 'function') {
-        editor.setCamera({ x: 80, y: 80, z: 1 }, { immediate: true });
-      }
-
       boardContentLoadedRef.current = true;
-      debugLog('sessionRoom', '[whiteboardPreparation] board injection completed.', {
+      debugLog('sessionRoom', '[whiteboardPreparation] board initialized for Excalidraw.', {
         sessionId: session?.id || null,
-        insertedAssetCount: assets.length,
-        insertedShapeCount: shapes.length,
-        createdElementCount: assets.length + shapes.length,
       });
     } catch (error) {
       debugLog('sessionRoom', '[whiteboardPreparation] board injection failed.', {
@@ -568,7 +469,7 @@ export default function SessionRoomPage() {
 
   const handleBoardMount = useCallback((editor) => {
     boardEditorRef.current = editor;
-    debugLog('sessionRoom', '[whiteboardPreparation] tldraw editor mounted.', {
+    debugLog('sessionRoom', '[whiteboardPreparation] excalidraw editor mounted.', {
       sessionId: session?.id || null,
       role,
     });
@@ -1165,7 +1066,6 @@ export default function SessionRoomPage() {
       <div className="absolute inset-0">
         <TldrawSdkEmbed
           roomId={whiteboardRoom}
-          licenseKey={tldrawLicenseKey}
           onMount={handleBoardMount}
         />
       </div>

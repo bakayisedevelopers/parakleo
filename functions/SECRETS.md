@@ -41,6 +41,7 @@ Use grouped JSON secrets for Firebase Functions to reduce active Secret Manager 
   "FIREBASE_APP_ID": "...",
   "GEMINI_MODEL": "...",
   "GEMINI_VISION_MODEL": "...",
+  "GEMINI_VISION_FALLBACK_MODEL": "gemini-2.5-pro",
   "GEMINI_CLASSIFICATION_MODEL": "...",
   "GEMINI_CLASSIFICATION_TIMEOUT_MS": "...",
   "MAX_PDF_PAGES": "...",

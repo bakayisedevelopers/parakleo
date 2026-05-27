@@ -2031,6 +2031,15 @@ function getBearerToken(req) {
   return authHeader.substring('Bearer '.length).trim();
 }
 
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
@@ -2162,6 +2171,7 @@ function getAiSecrets() {
     appId: groupedSecrets.FIREBASE_APP_ID || groupedSecrets.VITE_FIREBASE_APP_ID || '',
     GEMINI_MODEL: groupedSecrets.GEMINI_MODEL || groupedSecrets.FIREBASE_AI_MODEL || '',
     GEMINI_VISION_MODEL: groupedSecrets.GEMINI_VISION_MODEL || '',
+    GEMINI_VISION_FALLBACK_MODEL: groupedSecrets.GEMINI_VISION_FALLBACK_MODEL || '',
     GEMINI_CLASSIFICATION_MODEL: groupedSecrets.GEMINI_CLASSIFICATION_MODEL || '',
     GEMINI_CLASSIFICATION_TIMEOUT_MS: groupedSecrets.GEMINI_CLASSIFICATION_TIMEOUT_MS || '',
     MAX_PDF_PAGES: groupedSecrets.MAX_PDF_PAGES || '',
@@ -3307,6 +3317,134 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
 
   const profileSnap = await userRef.get();
   res.status(200).json({ success: true, profile: { uid: decoded.uid, ...(profileSnap.data() || {}) } });
+});
+
+exports.mobileWebviewAuth = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'GET') {
+    res.status(405).send('Method not allowed');
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).send('Unauthorized request.');
+    return;
+  }
+
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(token);
+  } catch (error) {
+    logger.warn('Failed to verify Firebase auth token for mobile webview auth.', {
+      error: error.message,
+    });
+    res.status(401).send('Unauthorized request.');
+    return;
+  }
+
+  const sessionId = String(req.query.sessionId || '').trim();
+  if (!sessionId) {
+    res.status(400).send('Missing sessionId.');
+    return;
+  }
+
+  const apiKey = String(req.query.apiKey || '').trim();
+  const authDomain = String(req.query.authDomain || '').trim();
+  const projectId = String(req.query.projectId || '').trim();
+  const appId = String(req.query.appId || '').trim();
+  if (!apiKey || !authDomain || !projectId || !appId) {
+    res.status(400).send('Missing Firebase configuration.');
+    return;
+  }
+
+  const targetPathRaw = String(req.query.target || '').trim();
+  const fallbackTarget = `/app/session/${sessionId}`;
+  let targetPath = fallbackTarget;
+  if (targetPathRaw.startsWith('/')) {
+    targetPath = targetPathRaw;
+  } else if (targetPathRaw.startsWith('https://')) {
+    try {
+      const parsed = new URL(targetPathRaw);
+      const expectedHost = String(authDomain || '').replace(/^https?:\/\//, '').trim().toLowerCase();
+      if (parsed.host.toLowerCase() === expectedHost) {
+        targetPath = targetPathRaw;
+      }
+    } catch {
+      targetPath = fallbackTarget;
+    }
+  }
+
+  const sessionSnap = await db.collection('sessions').doc(sessionId).get();
+  if (!sessionSnap.exists) {
+    res.status(404).send('Session not found.');
+    return;
+  }
+
+  const sessionData = sessionSnap.data() || {};
+  const isParticipant = String(sessionData.studentId || '') === decodedToken.uid
+    || String(sessionData.tutorId || '') === decodedToken.uid;
+  if (!isParticipant) {
+    res.status(403).send('You are not allowed to access this session.');
+    return;
+  }
+
+  let customToken;
+  try {
+    customToken = await admin.auth().createCustomToken(decodedToken.uid);
+  } catch (error) {
+    logger.error('Failed to create Firebase custom token for mobile webview auth.', {
+      uid: decodedToken.uid,
+      sessionId,
+      error: error.message,
+    });
+    res.status(500).send('Unable to create auth bridge token.');
+    return;
+  }
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connecting to session...</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { height: 100%; display: grid; place-items: center; text-align: center; padding: 24px; }
+    .muted { color: #a1a1aa; font-size: 14px; margin-top: 8px; }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-auth-compat.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <div>Connecting to your class...</div>
+      <div class="muted">Authenticating securely</div>
+    </div>
+  </div>
+  <script>
+    (async function () {
+      try {
+        firebase.initializeApp({
+          apiKey: "${escapeHtml(apiKey)}",
+          authDomain: "${escapeHtml(authDomain)}",
+          projectId: "${escapeHtml(projectId)}",
+          appId: "${escapeHtml(appId)}"
+        });
+        await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        await firebase.auth().signInWithCustomToken("${escapeHtml(customToken)}");
+        window.location.replace("${escapeHtml(targetPath)}");
+      } catch (error) {
+        document.querySelector('.muted').textContent = 'Authentication failed. Please return to the app and try again.';
+      }
+    })();
+  </script>
+</body>
+</html>`;
+
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(html);
 });
 
 exports.getIceConfig = onRequest(

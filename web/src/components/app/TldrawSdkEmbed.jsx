@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import 'tldraw/tldraw.css';
+import '@excalidraw/excalidraw/index.css';
 import { debugError, debugLog } from '../../utils/devLogger';
 
-const TLDRAW_RELOAD_RETRY_KEY = 'parakleo_tldraw_chunk_reload_retry';
-const LEGACY_TLDRAW_RELOAD_RETRY_KEY = 'claxi_tldraw_chunk_reload_retry';
+const EXCALIDRAW_RELOAD_RETRY_KEY = 'parakleo_excalidraw_chunk_reload_retry';
 
-export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
-  const [TldrawComponent, setTldrawComponent] = useState(null);
+export default function TldrawSdkEmbed({ roomId, onMount }) {
+  const [ExcalidrawComponent, setExcalidrawComponent] = useState(null);
   const [loadError, setLoadError] = useState('');
 
   const persistenceKey = useMemo(
-    () => `parakleo-${roomId || 'session-board'}`,
-    [roomId]
+    () => `parakleo-excalidraw-${roomId || 'session-board'}`,
+    [roomId],
   );
 
   useEffect(() => {
@@ -20,85 +19,96 @@ export default function TldrawSdkEmbed({ roomId, licenseKey, onMount }) {
     async function loadSdk() {
       try {
         setLoadError('');
-        debugLog('tldraw', 'Loading tldraw SDK runtime module.');
+        debugLog('excalidraw', 'Loading Excalidraw OSS runtime module.');
 
-        const module = await import('tldraw');
-
+        const module = await import('@excalidraw/excalidraw');
         if (canceled) return;
 
-        const sdkComponent = module?.Tldraw || null;
-
+        const sdkComponent = module?.Excalidraw || null;
         if (!sdkComponent) {
-          debugError('tldraw', 'SDK module missing Tldraw export.');
-          setLoadError('Whiteboard failed to initialize (missing Tldraw export).');
+          debugError('excalidraw', 'SDK module missing Excalidraw export.');
+          setLoadError('Whiteboard failed to initialize (missing Excalidraw export).');
           return;
         }
 
-        debugLog('tldraw', 'tldraw SDK loaded successfully.');
-        setTldrawComponent(() => sdkComponent);
+        debugLog('excalidraw', 'Excalidraw OSS SDK loaded successfully.');
+        setExcalidrawComponent(() => sdkComponent);
       } catch (error) {
         if (canceled) return;
-        debugError('tldraw', 'Whiteboard SDK load failed.', {
-          message: error?.message,
-        });
+        debugError('excalidraw', 'Whiteboard SDK load failed.', { message: error?.message });
 
         const isChunkLoadFailure = /Failed to fetch dynamically imported module/i.test(error?.message || '');
         const hasRetried = typeof window !== 'undefined'
-          && window.sessionStorage?.getItem(TLDRAW_RELOAD_RETRY_KEY) === 'true';
+          && window.sessionStorage?.getItem(EXCALIDRAW_RELOAD_RETRY_KEY) === 'true';
 
         if (isChunkLoadFailure && !hasRetried && typeof window !== 'undefined') {
-          debugLog('tldraw', 'Retrying once after dynamic import chunk load failure.');
-          window.sessionStorage?.setItem(TLDRAW_RELOAD_RETRY_KEY, 'true');
-          window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
+          window.sessionStorage?.setItem(EXCALIDRAW_RELOAD_RETRY_KEY, 'true');
           window.location.reload();
           return;
         }
 
         if (typeof window !== 'undefined') {
-          window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
-          window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
+          window.sessionStorage?.removeItem(EXCALIDRAW_RELOAD_RETRY_KEY);
         }
-        setLoadError(error?.message || 'Unable to load tldraw SDK.');
+
+        setLoadError(error?.message || 'Unable to load Excalidraw SDK.');
       }
     }
 
     loadSdk();
-
     return () => {
       canceled = true;
     };
   }, []);
 
   useEffect(() => {
-    if (!TldrawComponent || typeof window === 'undefined') return;
-    window.sessionStorage?.removeItem(TLDRAW_RELOAD_RETRY_KEY);
-    window.sessionStorage?.removeItem(LEGACY_TLDRAW_RELOAD_RETRY_KEY);
-  }, [TldrawComponent]);
+    if (!ExcalidrawComponent || typeof window === 'undefined') return;
+    window.sessionStorage?.removeItem(EXCALIDRAW_RELOAD_RETRY_KEY);
+  }, [ExcalidrawComponent]);
 
   if (loadError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-        <p className="text-sm font-semibold text-rose-600">
-          Whiteboard is temporarily unavailable.
-        </p>
+        <p className="text-sm font-semibold text-rose-600">Whiteboard is temporarily unavailable.</p>
         <p className="text-xs text-zinc-500">{loadError}</p>
       </div>
     );
   }
 
-  if (!TldrawComponent) {
+  if (!ExcalidrawComponent) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-center text-xs text-zinc-500">
-        Loading collaborative whiteboard SDK...
+        Loading Excalidraw whiteboard...
       </div>
     );
   }
 
   return (
-    <TldrawComponent
-      persistenceKey={persistenceKey}
-      licenseKey={licenseKey || undefined}
-      onMount={onMount}
-    />
+    <div className="h-full w-full">
+      <ExcalidrawComponent
+        excalidrawAPI={(api) => {
+          if (!api) return;
+          onMount?.({
+            refresh: () => {
+              try {
+                const appState = api.getAppState?.() || {};
+                api.updateScene({ appState });
+              } catch {
+                // no-op
+              }
+            },
+          });
+        }}
+        onChange={(elements, appState) => {
+          if (typeof window === 'undefined') return;
+          try {
+            const payload = JSON.stringify({ elements, appState });
+            window.localStorage.setItem(persistenceKey, payload);
+          } catch {
+            // no-op
+          }
+        }}
+      />
+    </div>
   );
 }

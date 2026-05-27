@@ -11,6 +11,7 @@ const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
 const DEFAULT_CLASSIFICATION_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_STREAM_EXTRACTION_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_TUTOR_RESULTS_FALLBACK_MODEL = 'gemini-2.5-pro';
 
 function getGeminiConfig(overrides = {}) {
   return {
@@ -215,7 +216,12 @@ function validateSubjectMarks(result) {
   subjectRows.forEach((item) => {
     const rawSubject = typeof item?.subject === 'string' ? item.subject.trim() : '';
     const subject = normalizeSubjectName(rawSubject) || rawSubject;
-    const mark = Number(item?.mark);
+    const rawMark = item?.mark;
+    let mark = Number(rawMark);
+    if (!Number.isFinite(mark) && typeof rawMark === 'string') {
+      const sanitizedMark = rawMark.replace('%', '').trim();
+      mark = Number(sanitizedMark);
+    }
 
     if (!subject || !Number.isFinite(mark) || mark < 0 || mark > 100) return;
 
@@ -360,10 +366,19 @@ async function extractTutorResultsWithGemini25Flash(images, options = {}) {
   const logger = options.logger || console;
   const logContext = options.logContext || {};
   const config = getGeminiConfig(options.firebaseConfig || {});
-  const model = options.model || config.visionModel || config.model || TUTOR_RESULTS_GEMINI_MODEL;
+  const primaryModel = options.model || config.visionModel || config.model || TUTOR_RESULTS_GEMINI_MODEL;
+  const fallbackModel = options.fallbackModel
+    || options.firebaseConfig?.GEMINI_VISION_FALLBACK_MODEL
+    || process.env.GEMINI_VISION_FALLBACK_MODEL
+    || DEFAULT_TUTOR_RESULTS_FALLBACK_MODEL;
+  const attemptModels = [primaryModel];
+  if (fallbackModel && fallbackModel !== primaryModel) {
+    attemptModels.push(fallbackModel);
+  }
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const startedAt = Date.now();
+    const model = attemptModels[Math.min(attempt - 1, attemptModels.length - 1)];
     try {
       logger.info?.('gemini_tutor_results_extraction_started', {
         ...logContext,
@@ -421,7 +436,8 @@ async function extractTutorResultsWithGemini25Flash(images, options = {}) {
     }
   }
 
-  throw new Error('AI could not read valid subjects and marks from this document. Upload a clearer result document or try a stronger Gemini vision model.');
+  const rootCause = lastError?.message ? ` Last error: ${lastError.message}` : '';
+  throw new Error(`AI could not read valid subjects and marks from this document. Upload a clearer result document or try a stronger Gemini vision model.${rootCause}`);
 }
 
 function normalizeText(value = '') {

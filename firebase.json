@@ -70,6 +70,10 @@
         "function": "streamAttachmentAi"
       },
       {
+        "source": "/mobile-webview-auth",
+        "function": "mobileWebviewAuth"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

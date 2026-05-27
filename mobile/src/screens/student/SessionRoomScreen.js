@@ -1,39 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { StudentRtcSessionView } from '../../components/student/StudentRtcSessionView';
-import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { ErrorState, LoadingState } from '../../components/ui/States';
 import { useAuth } from '../../context/AuthContext';
-import { getFirebaseClients, getFunctionEndpoint } from '../../firebase/config';
+import { getFirebaseClients } from '../../firebase/config';
 import {
   endSession,
-  finalizeSessionClosure,
   joinSessionAsStudent,
   subscribeToSessionById,
   updateSession,
 } from '../../services/sessionService';
-
-function useLiveSeconds(startAt) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!startAt) return 0;
-  return Math.max(0, Math.floor((now - Number(startAt)) / 1000));
-}
 
 function useBillableSeconds(session, isBillableActive) {
   const [now, setNow] = useState(Date.now());
@@ -50,79 +33,6 @@ function useBillableSeconds(session, isBillableActive) {
   return accumulatedSeconds + Math.max(0, Math.floor((now - activeStartedAt) / 1000));
 }
 
-function formatDuration(seconds) {
-  const safeSeconds = Math.max(0, Number(seconds || 0));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60).toString().padStart(2, '0');
-  const remainingSeconds = Math.floor(safeSeconds % 60).toString().padStart(2, '0');
-  if (hours > 0) return `${String(hours).padStart(2, '0')}:${minutes}:${remainingSeconds}`;
-  return `${minutes}:${remainingSeconds}`;
-}
-
-function StageBadge({ children, tone = 'default', icon = null }) {
-  return (
-    <View style={[
-      styles.badge,
-      tone === 'success' && styles.badgeSuccess,
-      tone === 'warning' && styles.badgeWarning,
-      tone === 'danger' && styles.badgeDanger,
-      tone === 'info' && styles.badgeInfo,
-    ]}
-    >
-      <View style={styles.badgeInner}>
-        {icon ? (
-          <Ionicons
-            color={
-              tone === 'success'
-                ? '#047857'
-                : tone === 'warning'
-                  ? '#b45309'
-                  : tone === 'danger'
-                    ? '#be123c'
-                    : tone === 'info'
-                      ? '#0369a1'
-                      : '#27272a'
-            }
-            name={icon}
-            size={13}
-          />
-        ) : null}
-        <Text style={[
-          styles.badgeText,
-          tone === 'success' && styles.badgeTextSuccess,
-          tone === 'warning' && styles.badgeTextWarning,
-          tone === 'danger' && styles.badgeTextDanger,
-          tone === 'info' && styles.badgeTextInfo,
-        ]}
-        >
-          {children}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-function RailIconButton({ icon, label, onPress, active = false, danger = false }) {
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[
-        styles.railIconButton,
-        active && styles.railIconButtonActive,
-        danger && styles.railIconButtonDanger,
-      ]}
-    >
-      <Ionicons
-        color={danger ? '#ffffff' : (active ? '#047857' : '#27272a')}
-        name={icon}
-        size={19}
-      />
-    </Pressable>
-  );
-}
-
 export function SessionRoomScreen({ route, navigate, goBack }) {
   const { user } = useAuth();
   const { height, width } = useWindowDimensions();
@@ -132,7 +42,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   const joinAttemptedRef = useRef(false);
   const extensionPromptShownRef = useRef(false);
   const autoEndingRef = useRef(false);
-  const controlsTimeoutRef = useRef(null);
   const terminalRedirectedRef = useRef(false);
 
   const sessionId = route?.params?.sessionId || '';
@@ -140,11 +49,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [idToken, setIdToken] = useState('');
-  const [actionBusy, setActionBusy] = useState(false);
-  const [showStudentControls, setShowStudentControls] = useState(true);
-  const [isCancelOpen, setIsCancelOpen] = useState(false);
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelError, setCancelError] = useState('');
+  const [authHandoff, setAuthHandoff] = useState(null);
   const [hasAcceptedExtension, setHasAcceptedExtension] = useState(false);
   const [graceEndsAtMs, setGraceEndsAtMs] = useState(null);
   const [rtcState, setRtcState] = useState({
@@ -156,32 +61,13 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     hasLiveRemoteScreenTrack: false,
   });
 
-  const iceEndpoint = getFunctionEndpoint('getIceConfig');
-  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'parakleo';
   const selectedDurationMinutes = Number(session?.durationMinutes || session?.pricingSnapshot?.durationMinutes || 0);
   const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
-  const graceRemaining = Math.max(0, Math.ceil(((session?.joinGraceEndsAt || 0) - Date.now()) / 1000));
-  const callSeconds = useLiveSeconds(session?.callStartedAt);
   const isStudentBillableActive = session?.status === 'in_progress'
     && rtcState.isPeerConnected
     && rtcState.isRemoteScreenSharing
     && rtcState.hasLiveRemoteScreenTrack;
   const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
-  const extensionGraceRemainingSeconds = hasAcceptedExtension && graceEndsAtMs
-    ? Math.max(0, Math.ceil((graceEndsAtMs - Date.now()) / 1000))
-    : 0;
-
-  const connectionTone = useMemo(() => {
-    const networkError = String(rtcState.networkError || '');
-    const connectionMessage = String(rtcState.connectionMessage || '');
-    if (networkError) return 'danger';
-    if (!connectionMessage) return 'default';
-    if (connectionMessage.toLowerCase().includes('connected') || connectionMessage.toLowerCase().includes('live')) {
-      return 'success';
-    }
-    return 'info';
-  }, [rtcState.connectionMessage, rtcState.networkError]);
-
   useEffect(() => subscribeToSessionById(
     sessionId,
     (item) => {
@@ -195,27 +81,56 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   ), [sessionId]);
 
   useEffect(() => {
-    let active = true;
-    getFirebaseClients().auth.currentUser?.getIdToken?.()
-      .then((token) => {
-        if (active) setIdToken(token || '');
-      })
-      .catch(() => {
-        if (active) setIdToken('');
-      });
-    return () => {
-      active = false;
-    };
-  }, [session?.id, user?.uid]);
-
-  useEffect(() => {
     joinAttemptedRef.current = false;
-    setShowStudentControls(true);
     setHasAcceptedExtension(false);
     setGraceEndsAtMs(null);
     extensionPromptShownRef.current = false;
     autoEndingRef.current = false;
   }, [session?.id]);
+
+  useEffect(() => {
+    let active = true;
+    const resolveAuthHandoff = async () => {
+      try {
+        const clients = await getFirebaseClients();
+        const firebaseUser = clients?.auth?.currentUser;
+        const apiKey = String(process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '').trim();
+        if (!firebaseUser || !apiKey) {
+          if (active) setAuthHandoff(null);
+          return;
+        }
+        const serialized = typeof firebaseUser.toJSON === 'function' ? firebaseUser.toJSON() : null;
+        if (!serialized) {
+          if (active) setAuthHandoff(null);
+          return;
+        }
+        if (active) setAuthHandoff({ apiKey, user: serialized });
+      } catch {
+        if (active) setAuthHandoff(null);
+      }
+    };
+    resolveAuthHandoff();
+    return () => {
+      active = false;
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    let active = true;
+    const resolveIdToken = async () => {
+      try {
+        const clients = await getFirebaseClients();
+        const token = await clients?.auth?.currentUser?.getIdToken?.();
+        if (active) setIdToken(token || '');
+      } catch {
+        if (active) setIdToken('');
+      }
+    };
+    resolveIdToken();
+    return () => {
+      active = false;
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!session?.id) return;
@@ -277,20 +192,8 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     const warningThreshold = Math.max(0, selectedDurationSeconds - 60);
     if (!extensionPromptShownRef.current && billedSeconds >= warningThreshold) {
       extensionPromptShownRef.current = true;
-      Alert.alert(
-        'Add a 2-minute grace period?',
-        'Your selected lesson time is almost up. Continue and get a 2-minute grace period?',
-        [
-          { text: 'Keep locked time', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () => {
-              setHasAcceptedExtension(true);
-              setGraceEndsAtMs(Date.now() + (Math.max(0, selectedDurationSeconds + 120 - billedSeconds) * 1000));
-            },
-          },
-        ],
-      );
+      setHasAcceptedExtension(true);
+      setGraceEndsAtMs(Date.now() + (Math.max(0, selectedDurationSeconds + 120 - billedSeconds) * 1000));
     }
 
     if (!hasAcceptedExtension && billedSeconds >= selectedDurationSeconds && !autoEndingRef.current) {
@@ -303,7 +206,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   }, [billedSeconds, hasAcceptedExtension, selectedDurationSeconds, session]);
 
   useEffect(() => () => {
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (bridgeRef.current) {
       if (typeof bridgeRef.current.close === 'function') {
         bridgeRef.current.close();
@@ -311,16 +213,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
         bridgeRef.current.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
       }
     }
-  }, []);
-
-  const revealStudentControls = useCallback(() => {
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-    }
-    setShowStudentControls(true);
-    controlsTimeoutRef.current = setTimeout(() => {
-      setShowStudentControls(false);
-    }, 5000);
   }, []);
 
   const handleBridgeMessage = (event) => {
@@ -346,14 +238,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     }
   };
 
-  const handleToggleMute = () => {
-    if (typeof bridgeRef.current?.toggleAudio === 'function') {
-      bridgeRef.current.toggleAudio();
-      return;
-    }
-    bridgeRef.current?.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.toggleAudio && window.ParakleoSessionBridge.toggleAudio(); true;');
-  };
-
   const closeRtcBridge = () => {
     if (typeof bridgeRef.current?.close === 'function') {
       bridgeRef.current.close();
@@ -370,51 +254,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     goBack('Sessions');
   }, [goBack, navigate]);
 
-  const handleOpenCancel = () => {
-    setCancelError('');
-    setCancelReason('');
-    setIsCancelOpen(true);
-  };
-
-  const handleConfirmCancel = async () => {
-    const trimmedReason = String(cancelReason || '').trim();
-    if (!trimmedReason) {
-      setCancelError('Please enter a cancellation reason before canceling the class.');
-      return;
-    }
-    if (!session?.id || actionBusy) return;
-
-    setActionBusy(true);
-    try {
-      closeRtcBridge();
-      await finalizeSessionClosure(session, {
-        closureType: 'canceled_during',
-        canceledBy: 'student',
-        canceledReason: trimmedReason,
-      });
-      setIsCancelOpen(false);
-      navigateToRequestStatus(session?.requestId || '');
-    } catch (nextError) {
-      setCancelError(nextError.message || 'Unable to cancel this class.');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const handleEndSession = async () => {
-    if (!session?.id || actionBusy) return;
-    setActionBusy(true);
-    try {
-      closeRtcBridge();
-      await endSession(session);
-      navigateToRequestStatus(session?.requestId || '');
-    } catch (nextError) {
-      setError(nextError.message || 'Unable to end this class.');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
   useEffect(() => {
     if (!session?.id) return;
     const normalizedStatus = String(session.status || '').toLowerCase();
@@ -426,27 +265,9 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     navigateToRequestStatus(session?.requestId || '');
   }, [session?.id, session?.requestId, session?.status, navigateToRequestStatus]);
 
-  const handleJoinNow = async () => {
-    if (!session || actionBusy) return;
-    const defaultMethod = (user?.paymentMethods || []).find((method) => method?.isDefault)
-      || user?.paymentMethods?.[0]
-      || null;
-    setActionBusy(true);
-    try {
-      await joinSessionAsStudent(session, defaultMethod?.id || '', defaultMethod?.last4 || '');
-    } catch (nextError) {
-      setError(nextError.message || 'Unable to join this session.');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
   if (loading) return <LoadingState label="Loading session room" />;
   if (error && !session) return <ErrorState message={error} />;
   if (!session) return <ErrorState title="Session not found" message="Session not found or no access." />;
-
-  const connectionCopy = rtcState.connectionMessage || 'Connecting...';
-  const showOverlay = showStudentControls;
 
   return (
     <View style={styles.safe}>
@@ -462,14 +283,13 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
           </View>
         ) : null}
 
-        <Pressable onPress={revealStudentControls} style={styles.stage}>
-          {session.status === 'in_progress' && idToken ? (
+        <Pressable style={styles.stage}>
+          {['waiting_student', 'in_progress'].includes(String(session.status || '')) ? (
             <StudentRtcSessionView
+              authHandoff={authHandoff}
               bridgeRef={bridgeRef}
-              iceEndpoint={iceEndpoint}
               idToken={idToken}
               onBridgeMessage={handleBridgeMessage}
-              projectId={projectId}
               sessionId={session.id}
             />
           ) : (
@@ -483,58 +303,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
             </View>
           )}
 
-          <View style={[styles.topOverlay, !showOverlay && styles.hiddenOverlay]}>
-            <View style={styles.badgeWrap}>
-              <StageBadge icon="time-outline">Call length {formatDuration(callSeconds)}</StageBadge>
-              <StageBadge icon="cash-outline" tone={isStudentBillableActive ? 'success' : 'warning'}>
-                Billable {formatDuration(billedSeconds)}
-              </StageBadge>
-              <StageBadge icon="wifi-outline" tone={connectionTone}>
-                {connectionCopy}
-              </StageBadge>
-              <StageBadge
-                icon={rtcState.networkError ? 'alert-circle-outline' : (rtcState.isRemoteScreenSharing ? 'desktop-outline' : 'hourglass-outline')}
-                tone={rtcState.networkError ? 'danger' : (rtcState.isRemoteScreenSharing ? 'success' : 'warning')}
-              >
-                {rtcState.networkError
-                  ? 'Connection issue'
-                  : rtcState.isRemoteScreenSharing
-                    ? 'Screen live'
-                    : 'Waiting for tutor to share'}
-              </StageBadge>
-              {session.status === 'waiting_student' ? (
-                <StageBadge icon="time-outline" tone="warning">Join window {graceRemaining}s</StageBadge>
-              ) : null}
-              {hasAcceptedExtension ? (
-                <StageBadge icon="time-outline" tone={extensionGraceRemainingSeconds > 0 ? 'success' : 'info'}>
-                  {extensionGraceRemainingSeconds > 0
-                    ? `Grace period ${extensionGraceRemainingSeconds}s`
-                    : 'Overtime billed at locked rate'}
-                </StageBadge>
-              ) : null}
-            </View>
-          </View>
-
-          <View style={[styles.controlsRailWrap, !showOverlay && styles.hiddenOverlay]}>
-            <View style={styles.controlsRail}>
-              <RailIconButton
-                active={!rtcState.isMuted}
-                icon={rtcState.isMuted ? 'mic-off-outline' : 'mic-outline'}
-                label={rtcState.isMuted ? 'Unmute' : 'Mute'}
-                onPress={handleToggleMute}
-              />
-              <RailIconButton icon="close-outline" label="Cancel" onPress={handleOpenCancel} />
-              <RailIconButton danger icon="call-outline" label={actionBusy ? 'Working' : 'End session'} onPress={handleEndSession} />
-            </View>
-          </View>
-
-          {session.status === 'waiting_student' ? (
-            <View style={[styles.joinNowWrap, !showOverlay && styles.hiddenOverlay]}>
-              <Button disabled={actionBusy} onPress={handleJoinNow} style={styles.joinNowButton}>
-                {actionBusy ? 'Joining...' : 'Join now'}
-              </Button>
-            </View>
-          ) : null}
+          {/* Mobile controls intentionally removed so only WebView session controls are shown. */}
         </Pressable>
 
         {error ? (
@@ -543,32 +312,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
           </View>
         ) : null}
 
-        {isCancelOpen ? (
-          <View style={styles.modalOverlay}>
-            <Card style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Cancel this class</Text>
-              <Text style={styles.modalCopy}>Please tell us why you want to cancel this class.</Text>
-              <TextInput
-                multiline
-                numberOfLines={4}
-                onChangeText={setCancelReason}
-                placeholder="Enter cancellation reason"
-                style={styles.modalInput}
-                textAlignVertical="top"
-                value={cancelReason}
-              />
-              {cancelError ? <Text style={styles.modalError}>{cancelError}</Text> : null}
-              <View style={styles.modalActions}>
-                <Button onPress={() => setIsCancelOpen(false)} style={styles.modalButton} variant="secondary">
-                  Keep class open
-                </Button>
-                <Button disabled={actionBusy} onPress={handleConfirmCancel} style={styles.modalButton}>
-                  {actionBusy ? 'Canceling...' : 'Confirm cancel'}
-                </Button>
-              </View>
-            </Card>
-          </View>
-        ) : null}
       </View>
     </View>
   );

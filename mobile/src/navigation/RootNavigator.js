@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { LoadingState } from '../components/ui/States';
@@ -120,16 +120,14 @@ export function RootNavigator() {
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
+  const [ratingQueue, setRatingQueue] = useState([]);
   const [handledRatingSessionIds, setHandledRatingSessionIds] = useState([]);
-  const ratingTarget = useMemo(
-    () =>
-      sessions.find(
-        (session) =>
-          RATABLE_SESSION_STATUSES.includes(String(session.status || '').toLowerCase()) &&
-          !handledRatingSessionIds.includes(session.id),
-      ) || null,
-    [handledRatingSessionIds, sessions],
-  );
+  const previousSessionStatusesRef = useRef(new Map());
+  const ratingTarget = useMemo(() => {
+    if (!ratingQueue.length) return null;
+    const [nextSessionId] = ratingQueue;
+    return sessions.find((session) => session.id === nextSessionId) || null;
+  }, [ratingQueue, sessions]);
 
   useEffect(() => {
     let mounted = true;
@@ -161,7 +159,10 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user?.uid) {
       setNotifications([]);
+      setSessions([]);
+      setRatingQueue([]);
       setHandledRatingSessionIds([]);
+      previousSessionStatusesRef.current = new Map();
       setNotificationsLoading(false);
       return () => {};
     }
@@ -182,7 +183,9 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user?.uid) {
       setSessions([]);
+      setRatingQueue([]);
       setHandledRatingSessionIds([]);
+      previousSessionStatusesRef.current = new Map();
       return () => {};
     }
 
@@ -192,6 +195,52 @@ export function RootNavigator() {
       () => setSessions([]),
     );
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const previousStatuses = previousSessionStatusesRef.current;
+    const currentStatuses = new Map();
+    const transitionedSessionIds = [];
+
+    sessions.forEach((session) => {
+      const sessionId = String(session?.id || '').trim();
+      if (!sessionId) return;
+
+      const currentStatus = String(session?.status || '').toLowerCase();
+      const previousStatus = previousStatuses.get(sessionId);
+      currentStatuses.set(sessionId, currentStatus);
+
+      if (!previousStatus) return;
+      if (previousStatus === currentStatus) return;
+      if (RATABLE_SESSION_STATUSES.includes(previousStatus)) return;
+      if (!RATABLE_SESSION_STATUSES.includes(currentStatus)) return;
+      if (handledRatingSessionIds.includes(sessionId)) return;
+
+      transitionedSessionIds.push(sessionId);
+    });
+
+    previousSessionStatusesRef.current = currentStatuses;
+
+    if (!transitionedSessionIds.length) return;
+    setRatingQueue((prev) => {
+      const seen = new Set(prev);
+      const next = [...prev];
+      transitionedSessionIds.forEach((sessionId) => {
+        if (!seen.has(sessionId)) {
+          next.push(sessionId);
+          seen.add(sessionId);
+        }
+      });
+      return next;
+    });
+  }, [handledRatingSessionIds, sessions, user?.uid]);
+
+  useEffect(() => {
+    if (!ratingQueue.length) return;
+    const activeSessionIds = new Set(sessions.map((session) => session.id));
+    setRatingQueue((prev) => prev.filter((sessionId) => activeSessionIds.has(sessionId)));
+  }, [ratingQueue.length, sessions]);
 
   useEffect(() => {
     if (!isNotificationsOpen) {
@@ -245,7 +294,10 @@ export function RootNavigator() {
     setAuthRoute('Home');
     setIsNavOpen(false);
     setActiveRoute({ key: 'Dashboard', params: {} });
+    setSessions([]);
+    setRatingQueue([]);
     setHandledRatingSessionIds([]);
+    previousSessionStatusesRef.current = new Map();
     await logout();
   };
 
@@ -353,8 +405,8 @@ export function RootNavigator() {
             if (!sessionId) {
               return;
             }
-
             setHandledRatingSessionIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]));
+            setRatingQueue((prev) => prev.filter((id) => id !== sessionId));
           }}
         />
       </View>
