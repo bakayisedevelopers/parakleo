@@ -128,3 +128,15 @@ export function getProfileStatusByRole(user, role) {
   }
   return getStudentOnboardingStatus(user);
 }
+
+export function hasCurrentTutorAgreement(user) {
+  const tutorAgreement = user?.tutorAgreement || {};
+  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
+  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
+  return Boolean(
+    tutorAgreement.currentVersionAccepted === true
+      && requiredVersion
+      && acceptedVersion
+      && requiredVersion === acceptedVersion,
+  );
+}

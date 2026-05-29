@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom';
 import { BookOpen, Home, ShieldCheck, UserCircle2, Wallet } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
 import { useAdmin } from '../../hooks/useAdmin';
+import { hasCurrentTutorAgreement } from '../../utils/onboarding';
 
 function navConfig(role, isAdmin = false) {
   if (role === 'tutor') {
@@ -34,7 +36,13 @@ function navConfig(role, isAdmin = false) {
 
 export default function AppBottomNav({ role = 'student' }) {
   const { isAdmin } = useAdmin();
-  const links = navConfig(role, isAdmin);
+  const { user } = useAuth();
+  const links = navConfig(role, isAdmin).filter((link) => {
+    if (role === 'tutor' && link.to === '/app/tutor/agreement') {
+      return !hasCurrentTutorAgreement(user);
+    }
+    return true;
+  });
 
   return (
     <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 w-full max-w-md -translate-x-1/2 px-3">

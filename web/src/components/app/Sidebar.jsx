@@ -2,6 +2,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LogOut, ShieldCheck, UserCircle2, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAdmin } from '../../hooks/useAdmin';
+import { hasCurrentTutorAgreement } from '../../utils/onboarding';
 import { getRoleNavigation } from '../../constants/navigation';
 import ReferralShareButton from './ReferralShareButton';
 
@@ -9,8 +10,11 @@ const baseClass = 'group flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm
 
 export default function Sidebar({ role, onNavigate, mobile = false }) {
   const { isAdmin } = useAdmin();
-  const links = getRoleNavigation(role, { includeAdmin: isAdmin });
   const { logout, user } = useAuth();
+  const links = getRoleNavigation(role, {
+    includeAdmin: isAdmin,
+    showTutorAgreement: role === 'tutor' && !hasCurrentTutorAgreement(user),
+  });
   const navigate = useNavigate();
 
   const handleLogout = async () => {
