@@ -3,7 +3,7 @@ import { DEFAULT_SUBJECTS } from '../constants/subjects';
 import { isTutorAgreementCurrent } from '../utils/onboarding';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
-const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.0';
+const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.1';
 const MOCK_USER_KEY = 'parakleo_mock_user';
 
 function buildReferralSlug() {

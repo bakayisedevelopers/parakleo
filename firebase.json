@@ -82,6 +82,10 @@
         "function": "acceptTutorAgreement"
       },
       {
+        "source": "/emailSignedTutorAgreement",
+        "function": "emailSignedTutorAgreement"
+      },
+      {
         "source": "/publishTutorAgreementVersion",
         "function": "publishTutorAgreementVersion"
       },

@@ -11,9 +11,13 @@ export default function AdminTutorAgreementsPage() {
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
-    version: '',
+    version: '1.0.1',
     effectiveDate: new Date().toISOString().slice(0, 10),
-    changeSummary: '',
+    reviewedAt: new Date().toISOString().slice(0, 10),
+    nextReviewAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().slice(0, 10),
+    reviewedBy: 'Parakleo',
+    stampLabel: 'PARAKLEO AGREEMENT RECORD',
+    changeSummary: 'Improved signed PDF formatting, added Parakleo agreement stamp, and added email delivery of signed agreement PDFs.',
     contentMarkdown: '',
     title: 'Tutor Agreement',
     status: 'active',
@@ -30,7 +34,7 @@ export default function AdminTutorAgreementsPage() {
         ...prev,
         contentMarkdown: result?.activeVersion?.contentMarkdown || '',
         title: result?.activeVersion?.title || prev.title,
-        version: result?.document?.currentVersion ? `${result.document.currentVersion}` : prev.version,
+        version: prev.version || (result?.document?.currentVersion ? `${result.document.currentVersion}` : ''),
       }));
     } catch (error) {
       setMessage(error.message || 'Unable to load tutor agreements.');
@@ -54,6 +58,10 @@ export default function AdminTutorAgreementsPage() {
         version: form.version,
         title: form.title,
         effectiveDate: form.effectiveDate,
+        reviewedAt: form.reviewedAt,
+        nextReviewAt: form.nextReviewAt,
+        reviewedBy: form.reviewedBy,
+        stampLabel: form.stampLabel,
         changeSummary: form.changeSummary,
         contentMarkdown: form.contentMarkdown,
         status: form.status,
@@ -96,6 +104,14 @@ export default function AdminTutorAgreementsPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <FormField label="Version" name="version" value={form.version} onChange={(event) => setForm((prev) => ({ ...prev, version: event.target.value }))} placeholder="1.0.1" required />
                 <FormField label="Effective date" name="effectiveDate" type="date" value={form.effectiveDate} onChange={(event) => setForm((prev) => ({ ...prev, effectiveDate: event.target.value }))} required />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField label="Reviewed by" name="reviewedBy" value={form.reviewedBy} onChange={(event) => setForm((prev) => ({ ...prev, reviewedBy: event.target.value }))} />
+                <FormField label="Reviewed at" name="reviewedAt" type="date" value={form.reviewedAt} onChange={(event) => setForm((prev) => ({ ...prev, reviewedAt: event.target.value }))} />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField label="Next review at" name="nextReviewAt" type="date" value={form.nextReviewAt} onChange={(event) => setForm((prev) => ({ ...prev, nextReviewAt: event.target.value }))} />
+                <FormField label="Stamp label" name="stampLabel" value={form.stampLabel} onChange={(event) => setForm((prev) => ({ ...prev, stampLabel: event.target.value }))} />
               </div>
               <FormField label="Title" name="title" value={form.title} onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))} required />
               <FormField label="Change summary" name="changeSummary" value={form.changeSummary} onChange={(event) => setForm((prev) => ({ ...prev, changeSummary: event.target.value }))} placeholder="Clarify payout timing and safety language." />

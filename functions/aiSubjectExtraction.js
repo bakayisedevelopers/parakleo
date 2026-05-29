@@ -693,7 +693,7 @@ function buildBoardStreamPrompt({ topicHint = '', descriptionHint = '' } = {}) {
     '',
     'Allowed line formats:',
     '{"type":"classification","subject":"Mathematics","topic":"Algebra","topics":["Algebra"],"estimatedMinutes":30,"confidence":0.87}',
-    '{"type":"question","questionId":"q_001","pageNumber":1,"sourceImageIndex":0,"questionNumber":"1.1","text":"Solve for x","marks":3,"visualRegions":[{"type":"diagram","x":0.12,"y":0.44,"width":0.38,"height":0.22,"description":"Coordinate grid and labelled triangle"}]}',
+    '{"type":"question","questionId":"q_001","pageNumber":1,"sourceImageIndex":0,"questionNumber":"1.1","questionType":"multiple_choice","text":"Solve for x","marks":3,"options":[{"label":"A","text":"x = 2","isCorrect":false},{"label":"B","text":"x = 3","isCorrect":false},{"label":"C","text":"x = 4","isCorrect":true},{"label":"D","text":"x = 5","isCorrect":false}],"visualRegions":[{"type":"diagram","x":0.12,"y":0.44,"width":0.38,"height":0.22,"description":"Coordinate grid and labelled triangle"}]}',
     '{"type":"complete"}',
     '',
     'Rules:',
@@ -703,6 +703,10 @@ function buildBoardStreamPrompt({ topicHint = '', descriptionHint = '' } = {}) {
     '- Emit each question exactly once.',
     '- questionId must be stable and unique in this extraction (q_001, q_002, ...).',
     '- text must contain only the question text, concise and readable.',
+    "- questionType must be one of: 'short_answer', 'multiple_choice', 'true_false', 'long_answer', or 'other'.",
+    '- For multiple-choice questions, include options as a structured array of objects: [{label,text,isCorrect?}] and do not merge choices into text.',
+    "- For true/false questions, set questionType='true_false' and include options for True and False.",
+    '- For non-MCQ questions, options must be an empty array.',
     '- Include pageNumber and questionNumber when visible; otherwise null.',
     '- Include sourceImageIndex for the exact uploaded image that contains the question when known.',
     '- marks should be a number when visible, otherwise null.',
@@ -763,6 +767,22 @@ function normalizeStreamQuestion(event = {}, fallbackIndex = 0) {
     ? Math.floor(sourceImageIndexRaw)
     : null;
   const marks = Number.isFinite(marksRaw) && marksRaw >= 0 ? Number(marksRaw.toFixed(2)) : null;
+  const questionType = normalizeText(event.questionType || '').toLowerCase();
+  const normalizedQuestionType = ['short_answer', 'multiple_choice', 'true_false', 'long_answer', 'other'].includes(questionType)
+    ? questionType
+    : 'other';
+  const options = Array.isArray(event.options)
+    ? event.options.map((option = {}, optionIndex) => {
+      const label = normalizeText(option.label || String.fromCharCode(65 + optionIndex));
+      const optionText = normalizeText(option.text || '');
+      if (!optionText) return null;
+      return {
+        label: label || String.fromCharCode(65 + optionIndex),
+        text: optionText,
+        isCorrect: typeof option.isCorrect === 'boolean' ? option.isCorrect : null,
+      };
+    }).filter(Boolean)
+    : [];
   const visualRegions = Array.isArray(event.visualRegions)
     ? event.visualRegions.map((region = {}) => {
       const x = Number(region.x);
@@ -786,8 +806,10 @@ function normalizeStreamQuestion(event = {}, fallbackIndex = 0) {
     pageNumber,
     sourceImageIndex,
     questionNumber: normalizeText(event.questionNumber) || null,
+    questionType: normalizedQuestionType,
     text,
     marks,
+    options,
     diagramImageRef: normalizeText(event.diagramImageRef) || '',
     visualRegions,
   };

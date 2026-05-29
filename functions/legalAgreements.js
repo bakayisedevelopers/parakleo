@@ -1,10 +1,13 @@
 const { createHash, randomUUID } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const PDFDocument = require('pdfkit');
 
 const LEGAL_ENTITY_NAME = 'Parakleo, operated by Jabu Msiza';
 const TUTOR_AGREEMENT_DOCUMENT_ID = 'tutor_agreement';
 const TUTOR_AGREEMENT_TITLE = 'Tutor Agreement';
-const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.0';
+const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.1';
+const TUTOR_AGREEMENT_STAMP_LABEL = 'PARAKLEO AGREEMENT RECORD';
 const TUTOR_AGREEMENT_VERSION_PREFIX = 'tutor_agreement_';
 const TUTOR_AGREEMENT_STATUS = {
   ACTIVE: 'active',
@@ -32,6 +35,9 @@ This Tutor Agreement is entered into between **${LEGAL_ENTITY_NAME}** ("Parakleo
 
 - The tutor must provide accurate identity, qualifications, subjects, experience, banking details, and any other required profile information.
 - The tutor must keep their profile up to date and promptly correct any inaccurate or outdated information.
+- Tutor application or profile submission does not guarantee verification or platform approval.
+- The tutor confirms they are at least 18 years old.
+- Fraud, forged documents, identity misrepresentation, or false credentials are prohibited and may result in immediate suspension or termination.
 
 **3. Tutor conduct**
 
@@ -103,13 +109,21 @@ This Tutor Agreement is entered into between **${LEGAL_ENTITY_NAME}** ("Parakleo
 **15. Limitation of liability**
 
 - Parakleo operates as a platform and does not guarantee tutor income, student outcomes, uninterrupted availability, or specific results.
+- Educational outcomes depend on multiple factors beyond Parakleo's control, and no guarantee of marks, admissions, or academic progression is made.
+- Parakleo is not liable for delays, outages, internet disruptions, software bugs, service interruptions, or third-party service failures.
 
-**16. Updates to this agreement**
+**16. Governing law and policy compliance**
+
+- This agreement is governed by the laws of the Republic of South Africa.
+- The tutor must comply with present and future platform policies, safety standards, and operational requirements published by Parakleo.
+- The tutor consents to electronic communications, notices, and updates delivered via email, in-product notifications, or other digital channels.
+
+**17. Updates to this agreement**
 
 - Parakleo may update this agreement by publishing a new version.
 - Tutors must accept the current active version before continuing as verified, active, searchable, or bookable tutors.
 
-**17. Acceptance**
+**18. Acceptance**
 
 - Checking the acceptance box and typing the tutor's full legal name constitutes electronic acceptance.
 - Acceptance records capture the date, time, version, tutor identity, and available metadata.
@@ -148,9 +162,12 @@ function formatDate(value) {
 
 function toPlainText(markdown = '') {
   return String(markdown || '')
-    .replace(/^#\s+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
     .replace(/^\-\s+/gm, '• ')
+    .replace(/^\*\s+/gm, '• ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -161,12 +178,21 @@ function buildAgreementPdfBuffer({
   effectiveDate,
   legalEntityName,
   contentMarkdown,
+  reviewedAt,
+  nextReviewAt,
+  stampLabel = TUTOR_AGREEMENT_STAMP_LABEL,
   acceptance,
 }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margin: 48,
+      margins: {
+        top: 120,
+        left: 48,
+        right: 48,
+        bottom: 60,
+      },
+      compress: false,
       info: {
         Title: `${title} ${version}`,
         Author: legalEntityName,
@@ -179,30 +205,91 @@ function buildAgreementPdfBuffer({
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
+    const pageWidth = doc.page.width;
+    const pageHeight = doc.page.height;
+    const pageMargin = 24;
+    const contentWidth = doc.page.width - (doc.page.margins.left + doc.page.margins.right);
+    const innerPaddingX = 8;
+    const safeContentX = doc.page.margins.left + innerPaddingX;
+    const safeContentWidth = contentWidth - (innerPaddingX * 2);
+    const safeBottomY = pageHeight - doc.page.margins.bottom - 14;
+
+    const ensureSpace = (requiredHeight = 40) => {
+      if (doc.y + requiredHeight > safeBottomY) {
+        doc.addPage();
+        doc.x = safeContentX;
+      }
+    };
+
+    const drawPageFrame = () => {
+      doc.save();
+      doc.rect(pageMargin, pageMargin, pageWidth - (pageMargin * 2), pageHeight - (pageMargin * 2))
+        .lineWidth(1)
+        .strokeColor('#E4E4E7')
+        .stroke();
+      doc
+        .moveTo(doc.page.margins.left, 96)
+        .lineTo(pageWidth - doc.page.margins.right, 96)
+        .lineWidth(2)
+        .strokeColor('#10B981')
+        .stroke();
+      doc.restore();
+    };
+
+    const drawFooter = () => {
+      const footerY = pageHeight - 42;
+      doc.save();
+      doc.font('Helvetica').fontSize(8).fillColor('#52525B');
+      doc.text(
+        'This PDF represents the exact Tutor Agreement version accepted by the tutor on the acceptance date shown above.',
+        doc.page.margins.left,
+        footerY,
+        { width: contentWidth - 70 },
+      );
+      doc.text(`Page ${doc.page.number}`, pageWidth - doc.page.margins.right - 40, footerY, { width: 40, align: 'right' });
+      doc.restore();
+    };
+
+    drawPageFrame();
+    doc.on('pageAdded', () => {
+      drawPageFrame();
+    });
+
+    const logoPath = path.resolve(__dirname, 'assets/logo.png');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, doc.page.margins.left, 42, { fit: [48, 48] });
+    }
+
     doc
       .fillColor('#059669')
       .fontSize(22)
       .font('Helvetica-Bold')
-      .text('Parakleo', { align: 'center' });
+      .text('Parakleo', doc.page.margins.left + 56, 46, { width: safeContentWidth - 56 });
 
     doc
-      .moveDown(0.3)
-      .fillColor('#111827')
+      .fillColor('#059669')
       .fontSize(18)
       .font('Helvetica-Bold')
-      .text(title, { align: 'center' });
+      .text(title, doc.page.margins.left + 56, 72, { width: safeContentWidth - 56, align: 'left' });
 
     doc
-      .moveDown(0.2)
       .fontSize(10)
       .font('Helvetica')
-      .fillColor('#374151')
-      .text(legalEntityName, { align: 'center' });
+      .fillColor('#52525B')
+      .text(legalEntityName, doc.page.margins.left + 56, 92, { width: safeContentWidth - 56, align: 'left' });
+
+    doc.x = safeContentX;
+    doc.y = doc.page.margins.top;
 
     doc.moveDown(1);
-    doc.fontSize(11).fillColor('#111827');
+    doc.fontSize(11).fillColor('#18181B');
     doc.text(`Version: ${version}`);
     doc.text(`Effective date: ${effectiveDate || 'Not specified'}`);
+    doc.text(`Reviewed date: ${reviewedAt || 'Not specified'}`);
+    if (nextReviewAt) {
+      doc.text(`Next review date: ${nextReviewAt}`);
+    }
+    doc.text(`Legal entity: ${legalEntityName}`);
     doc.text(`Accepted by: ${acceptance.typedSignatureName || acceptance.acceptedByFullName || 'Unknown'}`);
     doc.text(`Accepted by email: ${acceptance.acceptedByEmail || 'Unknown'}`);
     doc.text(`User ID: ${acceptance.userId || 'Unknown'}`);
@@ -210,31 +297,55 @@ function buildAgreementPdfBuffer({
     doc.text(`Accepted at: ${acceptance.acceptedAt || ''}`);
 
     doc.moveDown(1);
-    doc.font('Helvetica-Bold').text('Accepted contract text');
+    ensureSpace(60);
+    doc.font('Helvetica-Bold').fillColor('#059669').text('Accepted contract text');
     doc.moveDown(0.35);
-    doc.font('Helvetica');
+    doc.font('Helvetica').fillColor('#18181B');
 
     const paragraphs = toPlainText(contentMarkdown).split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
     paragraphs.forEach((paragraph) => {
+      // Keep each paragraph within tighter inner bounds and force page breaks before overflow.
+      ensureSpace(48);
       doc.text(paragraph, {
-        width: 500,
+        width: safeContentWidth,
         align: 'left',
       });
       doc.moveDown(0.5);
     });
 
     doc.moveDown(1);
-    doc.font('Helvetica-Bold').text('Acceptance metadata');
-    doc.font('Helvetica');
+    ensureSpace(80);
+    doc.font('Helvetica-Bold').fillColor('#059669').text('Acceptance Information');
+    doc.font('Helvetica').fillColor('#18181B');
     doc.text(`Checkbox accepted: ${acceptance.checkboxAccepted ? 'true' : 'false'}`);
     doc.text(`Typed signature name: ${acceptance.typedSignatureName || ''}`);
     doc.text(`Content hash: ${acceptance.contentHash || ''}`);
-    doc.text(`Legal entity: ${legalEntityName}`);
+    doc.moveDown(0.6);
+
+    if (doc.y + 130 > safeBottomY) {
+      doc.addPage();
+      doc.x = safeContentX;
+    }
+
+    const stampTop = doc.y;
+    const stampHeight = 92;
+    doc.roundedRect(safeContentX, stampTop, safeContentWidth, stampHeight, 10)
+      .fillAndStroke('#ECFDF5', '#059669');
+    doc.fillColor('#065F46').font('Helvetica-Bold').fontSize(11)
+      .text(stampLabel, safeContentX + 12, stampTop + 12);
+    doc.fillColor('#065F46').font('Helvetica').fontSize(10)
+      .text(`Operated by Jabu Msiza`, safeContentX + 12, stampTop + 30)
+      .text(`Agreement Version: ${version}`, safeContentX + 12, stampTop + 44)
+      .text(`Accepted: ${acceptance.acceptedAt || 'Not specified'}`, safeContentX + 12, stampTop + 58);
+    if (reviewedAt) {
+      doc.text(`Reviewed: ${reviewedAt}`, safeContentX + 280, stampTop + 44, { width: 180 });
+    }
+    if (nextReviewAt) {
+      doc.text(`Next Review: ${nextReviewAt}`, safeContentX + 280, stampTop + 58, { width: 180 });
+    }
     doc.moveDown(1);
-    doc.fontSize(9).fillColor('#4b5563').text(
-      'This PDF represents the agreement version accepted by the tutor on the acceptance date shown above.',
-      { align: 'left' },
-    );
+
+    drawFooter();
 
     doc.end();
   });
@@ -261,6 +372,10 @@ async function ensureTutorAgreementSeeded({ db, admin, now = new Date() }) {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         createdBy: 'system',
         legalEntityName: LEGAL_ENTITY_NAME,
+        reviewedBy: 'Parakleo',
+        reviewedAt: formatDate(now),
+        nextReviewAt: formatDate(new Date(now.getTime() + (365 * 24 * 60 * 60 * 1000))),
+        stampLabel: TUTOR_AGREEMENT_STAMP_LABEL,
         changeSummary: 'Initial tutor agreement template.',
         contentHash: computeContentHash(contentMarkdown),
       }, { merge: true });
@@ -378,6 +493,9 @@ async function uploadAgreementPdf({
   version,
   documentTitle,
   effectiveDate,
+  reviewedAt = '',
+  nextReviewAt = '',
+  stampLabel = TUTOR_AGREEMENT_STAMP_LABEL,
   contentMarkdown,
   acceptance,
 }) {
@@ -387,6 +505,9 @@ async function uploadAgreementPdf({
     version,
     effectiveDate,
     legalEntityName: LEGAL_ENTITY_NAME,
+    reviewedAt,
+    nextReviewAt,
+    stampLabel,
     contentMarkdown,
     acceptance,
   });
@@ -433,9 +554,9 @@ async function acceptTutorAgreement({
 
   const tutorAgreement = user?.tutorAgreement || {};
   const requiredVersion = normalizeVersionInput(tutorAgreement.requiredVersion || activeVersion.version);
-  if (normalizeVersionInput(activeVersion.version) !== requiredVersion) {
-    throw new Error('Please refresh and review the latest Tutor Agreement before accepting.');
-  }
+  // If the user profile still has a stale required version, continue with the
+  // currently active agreement instead of failing acceptance.
+  const requiredVersionMismatch = normalizeVersionInput(activeVersion.version) !== requiredVersion;
 
   const signatureName = String(typedSignatureName || '').trim();
   if (!checkboxAccepted) {
@@ -492,6 +613,8 @@ async function acceptTutorAgreement({
     signatureType: 'checkbox_and_typed_name',
     typedSignatureName: signatureName,
     checkboxAccepted: true,
+    requiredVersionAtAcceptance: requiredVersion,
+    requiredVersionMismatchAtAcceptance: requiredVersionMismatch,
     legalEntityName: LEGAL_ENTITY_NAME,
     documentTitle: activeVersion.title || TUTOR_AGREEMENT_TITLE,
     documentEffectiveDate: activeVersion.effectiveDate || '',
@@ -508,11 +631,15 @@ async function acceptTutorAgreement({
     version: activeVersion.version,
     documentTitle: activeVersion.title || TUTOR_AGREEMENT_TITLE,
     effectiveDate: activeVersion.effectiveDate || '',
+    reviewedAt: activeVersion.reviewedAt || '',
+    nextReviewAt: activeVersion.nextReviewAt || '',
+    stampLabel: activeVersion.stampLabel || TUTOR_AGREEMENT_STAMP_LABEL,
     contentMarkdown: activeVersion.contentMarkdown || '',
     acceptance,
   });
 
   acceptance.pdfUrl = pdfUrl;
+  acceptance.pdfStoragePath = `tutor-agreements/${user.uid}/${activeVersion.version}/${acceptanceId}.pdf`;
 
   await db.runTransaction(async (transaction) => {
     transaction.set(acceptanceRef, {
@@ -563,6 +690,10 @@ async function publishTutorAgreementVersion({
   effectiveDate = '',
   contentMarkdown = '',
   changeSummary = '',
+  reviewedBy = 'Parakleo',
+  reviewedAt = '',
+  nextReviewAt = '',
+  stampLabel = TUTOR_AGREEMENT_STAMP_LABEL,
   updatedBy = 'admin',
   status = TUTOR_AGREEMENT_STATUS.ACTIVE,
 }) {
@@ -581,8 +712,13 @@ async function publishTutorAgreementVersion({
 
   await db.runTransaction(async (transaction) => {
     const documentSnap = await transaction.get(documentRef);
+    const versionSnap = await transaction.get(versionRef);
     const existingDocument = documentSnap.exists ? documentSnap.data() : {};
     const previousVersionId = existingDocument.currentVersionId || null;
+
+    if (versionSnap.exists) {
+      throw new Error(`Version ${normalizedVersion} already exists. Publish a new version number to preserve immutable history.`);
+    }
 
     transaction.set(versionRef, {
       documentId: TUTOR_AGREEMENT_DOCUMENT_ID,
@@ -595,6 +731,10 @@ async function publishTutorAgreementVersion({
       createdBy: updatedBy || 'admin',
       legalEntityName: LEGAL_ENTITY_NAME,
       changeSummary: String(changeSummary || '').trim(),
+      reviewedBy: String(reviewedBy || 'Parakleo').trim() || 'Parakleo',
+      reviewedAt: String(reviewedAt || effectiveDate || now.toISOString()).trim(),
+      nextReviewAt: String(nextReviewAt || '').trim(),
+      stampLabel: String(stampLabel || TUTOR_AGREEMENT_STAMP_LABEL).trim() || TUTOR_AGREEMENT_STAMP_LABEL,
       contentHash,
     }, { merge: true });
 
@@ -669,6 +809,10 @@ async function publishTutorAgreementVersion({
     contentMarkdown: content,
     contentHash,
     legalEntityName: LEGAL_ENTITY_NAME,
+    reviewedBy: String(reviewedBy || 'Parakleo').trim() || 'Parakleo',
+    reviewedAt: String(reviewedAt || effectiveDate || now.toISOString()).trim(),
+    nextReviewAt: String(nextReviewAt || '').trim(),
+    stampLabel: String(stampLabel || TUTOR_AGREEMENT_STAMP_LABEL).trim() || TUTOR_AGREEMENT_STAMP_LABEL,
   };
 }
 
@@ -678,6 +822,7 @@ module.exports = {
   TUTOR_AGREEMENT_TITLE,
   TUTOR_AGREEMENT_DEFAULT_VERSION,
   TUTOR_AGREEMENT_STATUS,
+  TUTOR_AGREEMENT_STAMP_LABEL,
   buildTutorAgreementMarkdown,
   computeContentHash,
   ensureTutorAgreementSeeded,

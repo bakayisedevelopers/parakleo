@@ -18,7 +18,7 @@ test('tutor agreement template includes legal entity wording and starter section
 });
 
 test('tutor agreement version ids are deterministic', () => {
-  assert.equal(makeVersionDocId(TUTOR_AGREEMENT_DEFAULT_VERSION), 'tutor_agreement_1.0.0');
+  assert.equal(makeVersionDocId(TUTOR_AGREEMENT_DEFAULT_VERSION), 'tutor_agreement_1.0.1');
   assert.equal(makeVersionDocId('1.0.1'), 'tutor_agreement_1.0.1');
 });
 

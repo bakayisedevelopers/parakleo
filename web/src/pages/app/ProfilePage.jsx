@@ -161,7 +161,7 @@ export default function ProfilePage() {
             <div className="grid gap-3 text-sm text-zinc-700 md:grid-cols-3">
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Current version</p>
-                <p className="mt-1 font-semibold text-zinc-900">{currentUser?.tutorAgreement?.requiredVersion || '1.0.0'}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{currentUser?.tutorAgreement?.requiredVersion || '1.0.1'}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Accepted version</p>

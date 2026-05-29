@@ -149,6 +149,10 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       providerRoute: extraction?.providerRoute || '',
       providerReason: extraction?.providerReason || '',
       confidence: Number(extraction?.confidence || 0),
+      pricing: extraction?.pricing || null,
+      cloudVisionPriceUsd: Number(extraction?.cloudVisionPriceUsd || 0) || 0,
+      cloudVisionPriceZar: Number(extraction?.cloudVisionPriceZar || 0) || 0,
+      fxRateZarPerUsd: Number(extraction?.fxRateZarPerUsd || 0) || 0,
     };
   });
 

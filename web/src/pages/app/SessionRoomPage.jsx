@@ -305,6 +305,139 @@ async function buildBoardImageReferences({ attachments = [], attachmentExtractio
   return refs;
 }
 
+function getCropRectFromVisualRegion(region = {}, sourceImage = {}) {
+  const sourceWidth = Number(sourceImage?.width || 0);
+  const sourceHeight = Number(sourceImage?.height || 0);
+  if (!sourceWidth || !sourceHeight) return null;
+
+  let x = Number(region?.x || 0);
+  let y = Number(region?.y || 0);
+  let width = Number(region?.width || 0);
+  let height = Number(region?.height || 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return null;
+  }
+
+  const maxCoordinate = Math.max(Math.abs(x), Math.abs(y), Math.abs(width), Math.abs(height));
+  if (maxCoordinate <= 1) {
+    x *= sourceWidth;
+    width *= sourceWidth;
+    y *= sourceHeight;
+    height *= sourceHeight;
+  } else if (maxCoordinate <= 100) {
+    x = (x / 100) * sourceWidth;
+    width = (width / 100) * sourceWidth;
+    y = (y / 100) * sourceHeight;
+    height = (height / 100) * sourceHeight;
+  }
+
+  const padding = 20;
+  const cropX = Math.max(0, Math.floor(x - padding));
+  const cropY = Math.max(0, Math.floor(y - padding));
+  const cropWidth = Math.min(sourceWidth - cropX, Math.ceil(width + padding * 2));
+  const cropHeight = Math.min(sourceHeight - cropY, Math.ceil(height + padding * 2));
+  if (cropWidth < 20 || cropHeight < 20) return null;
+
+  return { x: cropX, y: cropY, width: cropWidth, height: cropHeight };
+}
+
+function loadImageObject(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load source image for crop.'));
+    image.src = src;
+  });
+}
+
+async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs = []) {
+  if (!Array.isArray(parsedQuestions) || !parsedQuestions.length || !Array.isArray(imageRefs) || !imageRefs.length) {
+    return parsedQuestions;
+  }
+
+  const sourceImageCache = new Map();
+  const ensureSourceImage = async (sourceImageIndex) => {
+    if (sourceImageCache.has(sourceImageIndex)) return sourceImageCache.get(sourceImageIndex);
+    const sourceRef = imageRefs[sourceImageIndex];
+    if (!sourceRef?.src) return null;
+    const image = await loadImageObject(sourceRef.src);
+    const entry = {
+      image,
+      width: Number(sourceRef?.width || image.naturalWidth || image.width || 0),
+      height: Number(sourceRef?.height || image.naturalHeight || image.height || 0),
+      src: sourceRef.src,
+      fileName: sourceRef.fileName || `source-${sourceImageIndex + 1}`,
+    };
+    sourceImageCache.set(sourceImageIndex, entry);
+    return entry;
+  };
+
+  const nextQuestions = [];
+  let cropCounter = 0;
+  for (const question of parsedQuestions) {
+    const nextQuestion = { ...question, images: Array.isArray(question?.images) ? [...question.images] : [] };
+    const regions = Array.isArray(question?.visualRegions) ? question.visualRegions : [];
+    if (!regions.length) {
+      nextQuestions.push(nextQuestion);
+      continue;
+    }
+
+    const sourceImageIndex = Number.isFinite(Number(question?.sourceImageIndex))
+      ? Math.max(0, Math.floor(Number(question.sourceImageIndex)))
+      : 0;
+    // eslint-disable-next-line no-await-in-loop
+    const sourceEntry = await ensureSourceImage(sourceImageIndex);
+    if (!sourceEntry?.image) {
+      nextQuestions.push(nextQuestion);
+      continue;
+    }
+
+    for (let regionIndex = 0; regionIndex < regions.length; regionIndex += 1) {
+      const region = regions[regionIndex];
+      const regionType = String(region?.type || '').toLowerCase();
+      if (!['diagram', 'table', 'graph', 'figure', 'image', 'formula', 'equation', 'other'].includes(regionType || 'other')) {
+        continue;
+      }
+      const rect = getCropRectFromVisualRegion(region, sourceEntry);
+      if (!rect) continue;
+      const canvas = document.createElement('canvas');
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      const context = canvas.getContext('2d');
+      if (!context) continue;
+      context.drawImage(
+        sourceEntry.image,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        0,
+        0,
+        rect.width,
+        rect.height,
+      );
+      // eslint-disable-next-line no-await-in-loop
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) continue;
+      const cropUrl = URL.createObjectURL(blob);
+      cropCounter += 1;
+      nextQuestion.images.push({
+        id: `${question?.questionId || 'q'}-crop-${cropCounter}`,
+        src: cropUrl,
+        mimeType: 'image/png',
+        fileName: `${sourceEntry.fileName} crop ${regionIndex + 1}`,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+
+    nextQuestions.push(nextQuestion);
+  }
+
+  return nextQuestions;
+}
+
 export default function SessionRoomPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -435,6 +568,7 @@ export default function SessionRoomPage() {
       .filter(Boolean)
       .join('\n\n')
       .trim();
+    const documentAiExtraction = boardPreparationSource?.documentAiExtraction || null;
     const gptExtraction = boardPreparationSource?.gptExtraction || null;
     const attachments = session?.attachments
       || request?.attachments
@@ -465,6 +599,7 @@ export default function SessionRoomPage() {
       attachments,
       attachmentExtractions,
       ocrImageReferences,
+      documentAiExtraction,
       gptExtraction,
     };
   }, [request, session]);
@@ -477,6 +612,7 @@ export default function SessionRoomPage() {
       attachments,
       attachmentExtractions,
       ocrImageReferences,
+      documentAiExtraction,
       gptExtraction,
     } = getSessionBoardSeedContent();
     if (!String(extractedText || '').trim() && !(attachments || []).length) {
@@ -501,7 +637,20 @@ export default function SessionRoomPage() {
       });
 
       let parsedQuestions = [];
-      if (gptExtraction) {
+      if (documentAiExtraction) {
+        const docAiParsedQuestions = parseQuestionsFromGptExtraction({
+          gptExtraction: documentAiExtraction,
+          attachments,
+        });
+        const hasUsableDocAiQuestions = docAiParsedQuestions.some(
+          (question) => String(question?.text || '').trim().length > 0,
+        );
+        if (hasUsableDocAiQuestions) {
+          parsedQuestions = docAiParsedQuestions;
+        }
+      }
+
+      if (!parsedQuestions.length && gptExtraction) {
         const gptParsedQuestions = parseQuestionsFromGptExtraction({
           gptExtraction,
           attachments,
@@ -510,9 +659,10 @@ export default function SessionRoomPage() {
           (question) => String(question?.text || '').trim().length > 0,
         );
         parsedQuestions = hasUsableGptQuestions ? gptParsedQuestions : fallbackParsedQuestions();
-      } else {
+      } else if (!parsedQuestions.length) {
         parsedQuestions = fallbackParsedQuestions();
       }
+      parsedQuestions = await attachVisualCropUrlsToQuestions(parsedQuestions, hydratedImageReferences);
       const layout = prepareWhiteboardLayout(parsedQuestions);
       const textElements = mapLayoutToExcalidrawElements(layout);
 

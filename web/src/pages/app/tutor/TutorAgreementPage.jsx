@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, ShieldCheck } from 'lucide-react';
+import { Download, FileText, Mail, ShieldCheck } from 'lucide-react';
 import PageHeader from '../../../components/ui/PageHeader';
 import SectionCard from '../../../components/ui/SectionCard';
 import FormField from '../../../components/ui/FormField';
@@ -8,6 +8,7 @@ import { useLiveUserProfile } from '../../../hooks/useLiveUserProfile';
 import {
   LEGAL_ENTITY_NAME,
   acceptTutorAgreement,
+  emailSignedTutorAgreement,
   formatAgreementDate,
   getTutorAgreementBundle,
 } from '../../../services/legalAgreementService';
@@ -18,6 +19,70 @@ function formatTimestamp(value) {
   const date = new Date(typeof value?.toMillis === 'function' ? value.toMillis() : value);
   if (Number.isNaN(date.getTime())) return 'Not available';
   return date.toLocaleString();
+}
+
+function renderAgreementMarkdown(markdown = '') {
+  const lines = String(markdown || '').split('\n');
+  const elements = [];
+  let listItems = [];
+  let paragraph = [];
+  let key = 0;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    elements.push(
+      <p key={`p-${key++}`} className="mb-3 text-sm leading-6 text-zinc-700">
+        {paragraph.join(' ')}
+      </p>,
+    );
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    elements.push(
+      <ul key={`ul-${key++}`} className="mb-4 list-disc space-y-1 pl-5 text-sm leading-6 text-zinc-700">
+        {listItems.map((item, index) => <li key={`li-${key}-${index}`}>{item}</li>)}
+      </ul>,
+    );
+    listItems = [];
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+
+    if (line.startsWith('# ')) {
+      flushParagraph();
+      flushList();
+      elements.push(<h2 key={`h2-${key++}`} className="mb-3 mt-4 text-xl font-bold text-emerald-700">{line.slice(2).trim()}</h2>);
+      return;
+    }
+
+    if (line.startsWith('## ')) {
+      flushParagraph();
+      flushList();
+      elements.push(<h3 key={`h3-${key++}`} className="mb-2 mt-4 text-lg font-bold text-emerald-700">{line.slice(3).trim()}</h3>);
+      return;
+    }
+
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      flushParagraph();
+      listItems.push(line.slice(2).trim());
+      return;
+    }
+
+    flushList();
+    paragraph.push(line.replace(/\*\*(.*?)\*\*/g, '$1'));
+  });
+
+  flushParagraph();
+  flushList();
+  return elements;
 }
 
 export default function TutorAgreementPage() {
@@ -31,11 +96,23 @@ export default function TutorAgreementPage() {
   const [typedSignatureName, setTypedSignatureName] = useState(currentUser?.fullName || currentUser?.displayName || '');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEmailing, setIsEmailing] = useState(false);
+  const [emailDestination, setEmailDestination] = useState('');
+  const [showEmailForm, setShowEmailForm] = useState(false);
 
   const activeVersion = bundle.activeVersion || null;
   const acceptances = bundle.acceptances || [];
   const currentAcceptance = acceptances[0] || null;
+  const latestAcceptanceId = currentAcceptance?.id || currentUser?.tutorAgreement?.latestAcceptanceId || '';
+  const hasSignedPdf = Boolean(currentAcceptance?.pdfUrl || currentUser?.tutorAgreement?.latestAcceptancePdfUrl);
   const agreementAccepted = hasCurrentTutorAgreement(currentUser);
+  const hasSignedActiveVersion = Boolean(
+    activeVersion?.version
+      && (
+        currentUser?.tutorAgreement?.acceptedVersion === activeVersion.version
+        || currentAcceptance?.version === activeVersion.version
+      ),
+  );
   const canSubmit = Boolean(
     user?.uid
       && activeVersion
@@ -77,6 +154,21 @@ export default function TutorAgreementPage() {
     setTypedSignatureName(currentUser?.fullName || currentUser?.displayName || currentUser?.email || '');
   }, [currentUser?.displayName, currentUser?.email, currentUser?.fullName]);
 
+  useEffect(() => {
+    if (hasSignedActiveVersion) {
+      setCheckboxAccepted(true);
+    }
+  }, [hasSignedActiveVersion]);
+
+  useEffect(() => {
+    setEmailDestination(
+      currentUser?.email
+      || bundle?.user?.email
+      || currentAcceptance?.acceptedByEmail
+      || '',
+    );
+  }, [bundle?.user?.email, currentAcceptance?.acceptedByEmail, currentUser?.email]);
+
   const handleAccept = async () => {
     if (!canSubmit) return;
 
@@ -115,6 +207,35 @@ export default function TutorAgreementPage() {
       setMessage(error.message || 'Unable to accept the Tutor Agreement.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleEmailSignedAgreement = async () => {
+    if (!latestAcceptanceId) {
+      setMessage('No signed agreement record was found yet. Please sign the agreement first.');
+      return;
+    }
+    const email = String(emailDestination || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage('Please enter a valid email address.');
+      return;
+    }
+
+    setIsEmailing(true);
+    setMessage('');
+    try {
+      await emailSignedTutorAgreement({
+        acceptanceId: latestAcceptanceId,
+        destinationEmail: email,
+      });
+      setMessage('Signed agreement emailed successfully.');
+      const refreshed = await getTutorAgreementBundle();
+      setBundle(refreshed);
+      setShowEmailForm(false);
+    } catch (error) {
+      setMessage(error.message || 'We could not email the signed agreement. Please try again or download it manually.');
+    } finally {
+      setIsEmailing(false);
     }
   };
 
@@ -159,17 +280,29 @@ export default function TutorAgreementPage() {
               </div>
             </div>
 
-            {currentAcceptance?.pdfUrl ? (
-              <a
-                href={currentAcceptance.pdfUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
-              >
-                <Download className="h-4 w-4" />
-                Download signed PDF
-              </a>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {hasSignedPdf ? (
+                <a
+                  href={currentAcceptance?.pdfUrl || currentUser?.tutorAgreement?.latestAcceptancePdfUrl || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                >
+                  <Download className="h-4 w-4" />
+                  Download signed PDF
+                </a>
+              ) : null}
+              {latestAcceptanceId ? (
+                <button
+                  type="button"
+                  onClick={() => setShowEmailForm((prev) => !prev)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                >
+                  <Mail className="h-4 w-4" />
+                  Email signed agreement
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-6 rounded-[24px] border border-zinc-200 bg-white p-4 shadow-sm">
@@ -177,10 +310,38 @@ export default function TutorAgreementPage() {
               <h3 className="text-sm font-bold text-zinc-900">Agreement text</h3>
               <span className="text-xs text-zinc-500">Scrollable contract preview</span>
             </div>
-            <div className="max-h-[58vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
-              {isLoading ? 'Loading agreement...' : activeVersion?.contentMarkdown || 'No active Tutor Agreement found.'}
+            <div className="max-h-[58vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              {isLoading
+                ? <p className="text-sm text-zinc-600">Loading agreement...</p>
+                : activeVersion?.contentMarkdown
+                  ? renderAgreementMarkdown(activeVersion.contentMarkdown)
+                  : <p className="text-sm text-zinc-600">No active Tutor Agreement found.</p>}
             </div>
           </div>
+
+          {showEmailForm && latestAcceptanceId ? (
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">
+              <h3 className="text-sm font-bold text-zinc-900">Email signed agreement</h3>
+              <p className="mt-1 text-xs text-zinc-500">Send your existing signed PDF to an email address.</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+                <input
+                  type="email"
+                  value={emailDestination}
+                  onChange={(event) => setEmailDestination(event.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm text-zinc-900 focus:border-emerald-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleEmailSignedAgreement}
+                  disabled={isEmailing}
+                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {isEmailing ? 'Sending...' : 'Send email'}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
             <div className="rounded-[24px] border border-zinc-200 bg-white p-4">
@@ -190,7 +351,11 @@ export default function TutorAgreementPage() {
                 <input
                   type="checkbox"
                   checked={checkboxAccepted}
-                  onChange={(event) => setCheckboxAccepted(event.target.checked)}
+                  onChange={(event) => {
+                    if (hasSignedActiveVersion) return;
+                    setCheckboxAccepted(event.target.checked);
+                  }}
+                  disabled={hasSignedActiveVersion}
                   className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-600"
                 />
                 <span className="text-sm text-zinc-700">
@@ -224,6 +389,7 @@ export default function TutorAgreementPage() {
                   <p><span className="font-semibold">Current version:</span> {currentUser?.tutorAgreement?.acceptedVersion || 'Not accepted yet'}</p>
                   <p><span className="font-semibold">Accepted at:</span> {formatTimestamp(currentUser?.tutorAgreement?.acceptedAt)}</p>
                   <p><span className="font-semibold">Verification gate:</span> {agreementAccepted ? 'Open' : 'Blocked until agreement accepted'}</p>
+                  <p><span className="font-semibold">Latest email status:</span> {currentAcceptance?.latestEmailDelivery?.status || 'Not sent yet'}</p>
                 </div>
               </div>
 

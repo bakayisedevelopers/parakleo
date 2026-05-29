@@ -374,11 +374,6 @@ export function parseQuestionsFromGptExtraction({
         ? dedupeImages(question.images.map((image) => normalizeImageAttachment(image)).filter(Boolean))
         : [];
 
-      const optionsText = options.length
-        ? `\n\nOptions:\n${options
-          .map((option) => `${String(option?.label || '').trim() || '-'} ${String(option?.text || '').trim()}`.trim())
-          .join('\n')}`
-        : '';
       const visualsText = visualRegions.length
         ? `\n\nVisual regions:\n${visualRegions
           .map((region, regionIndex) => {
@@ -397,14 +392,42 @@ export function parseQuestionsFromGptExtraction({
 
       blocks.push({
         questionNumber: String(question?.questionNumber || ''),
-        text: `${prefix}${questionText ? `\n${questionText}` : ''}${optionsText}${visualsText}${warningsText}`.trim(),
+        text: `${prefix}${questionText ? `\n${questionText}` : ''}${visualsText}${warningsText}`.trim(),
         images: questionImages,
         files: [],
         pageNumber,
+        sourceImageIndex: Number.isFinite(Number(question?.sourceImageIndex))
+          ? Number(question.sourceImageIndex)
+          : Math.max(0, pageNumber - 1),
         questionId: String(question?.questionId || ''),
+        questionType: String(question?.questionType || 'other'),
+        options: options.map((option = {}, optionIndex) => ({
+          label: String(option?.label || String.fromCharCode(65 + optionIndex)),
+          text: String(option?.text || '').trim(),
+          isCorrect: typeof option?.isCorrect === 'boolean' ? option.isCorrect : null,
+        })).filter((option) => option.text),
         type: String(question?.type || 'unknown'),
         hasVisuals: Boolean(question?.hasVisuals),
         visualRegions,
+      });
+
+      options.forEach((option = {}, optionIndex) => {
+        const optionLabel = String(option?.label || String.fromCharCode(65 + optionIndex)).trim() || String.fromCharCode(65 + optionIndex);
+        const optionText = String(option?.text || '').trim();
+        if (!optionText) return;
+        blocks.push({
+          questionNumber: '',
+          text: `Option ${optionLabel}: ${optionText}`,
+          images: [],
+          files: [],
+          pageNumber,
+          questionId: `${String(question?.questionId || `q_${questionIndex + 1}`)}_option_${optionLabel.toLowerCase()}`,
+          questionType: 'option',
+          optionForQuestionId: String(question?.questionId || ''),
+          type: 'question_option',
+          hasVisuals: false,
+          visualRegions: [],
+        });
       });
     });
   });

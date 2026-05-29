@@ -589,6 +589,10 @@ function buildExtractionResult({
   structuredData = null,
   ppStructureVersion = '',
   errorMessage = '',
+  pricing = null,
+  cloudVisionPriceUsd = 0,
+  cloudVisionPriceZar = 0,
+  fxRateZarPerUsd = 0,
 }) {
   return {
     fileName: file?.name || 'unknown-file',
@@ -616,6 +620,10 @@ function buildExtractionResult({
     structuredData: structuredData && typeof structuredData === 'object' ? structuredData : null,
     ppStructureVersion: String(ppStructureVersion || structuredData?.ppStructureVersion || ''),
     errorMessage: String(errorMessage || ''),
+    pricing: pricing && typeof pricing === 'object' ? pricing : null,
+    cloudVisionPriceUsd: Number(cloudVisionPriceUsd || 0) || 0,
+    cloudVisionPriceZar: Number(cloudVisionPriceZar || 0) || 0,
+    fxRateZarPerUsd: Number(fxRateZarPerUsd || 0) || 0,
   };
 }
 
@@ -674,6 +682,10 @@ export async function extractSingleAttachment(file, options = {}) {
         structuredData: imageResult.structuredData || null,
         ppStructureVersion: imageResult.ppStructureVersion || '',
         errorMessage: imageResult.errorMessage || '',
+        pricing: imageResult.pricing || null,
+        cloudVisionPriceUsd: Number(imageResult.cloudVisionPriceUsd || 0) || 0,
+        cloudVisionPriceZar: Number(imageResult.cloudVisionPriceZar || 0) || 0,
+        fxRateZarPerUsd: Number(imageResult.fxRateZarPerUsd || 0) || 0,
       });
     } catch (error) {
       console.debug('[attachmentExtraction] image OCR failed', { fileName: file.name, error: error?.message });

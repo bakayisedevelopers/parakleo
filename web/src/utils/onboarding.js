@@ -126,7 +126,7 @@ export function hasCurrentTutorAgreement(user) {
 }
 
 export function isTutorAgreementCurrent(tutorAgreement = {}) {
-  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
+  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.1').trim();
   const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
   const acceptedCurrentVersion = tutorAgreement.currentVersionAccepted === true || tutorAgreement.acceptedCurrentVersion === true;
   return Boolean(

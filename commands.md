@@ -1,6 +1,8 @@
 PARAKLEO DEVELOPMENT COMMANDS
 =============================
 
+npm install -g @openai/codex
+
 This is a practical command reference for this repository.
 Repo root: /workspaces/parakleo
 

@@ -272,6 +272,10 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
       geminiEstimatedMinutes: Number(extraction?.geminiEstimatedMinutes || extraction?.structuredData?.geminiEstimatedMinutes || 0) || 0,
       geminiVisualRegionCount: Number(extraction?.geminiVisualRegionCount || extraction?.structuredData?.geminiVisualRegionCount || 0) || 0,
       structuredData: extraction?.structuredData || null,
+      pricing: extraction?.pricing || null,
+      cloudVisionPriceUsd: Number(extraction?.cloudVisionPriceUsd || 0) || 0,
+      cloudVisionPriceZar: Number(extraction?.cloudVisionPriceZar || 0) || 0,
+      fxRateZarPerUsd: Number(extraction?.fxRateZarPerUsd || 0) || 0,
     };
   });
 

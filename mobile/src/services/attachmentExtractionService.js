@@ -43,6 +43,10 @@ function buildExtractionResult(attachment, payload = {}, overrides = {}) {
     providerReason: String(payload?.providerReason || ''),
     confidence: Number(payload?.confidence || 0),
     ppStructureVersion: String(payload?.ppStructureVersion || payload?.structuredData?.ppStructureVersion || ''),
+    pricing: payload?.pricing && typeof payload.pricing === 'object' ? payload.pricing : null,
+    cloudVisionPriceUsd: Number(payload?.cloudVisionPriceUsd || 0) || 0,
+    cloudVisionPriceZar: Number(payload?.cloudVisionPriceZar || 0) || 0,
+    fxRateZarPerUsd: Number(payload?.fxRateZarPerUsd || 0) || 0,
   };
 }
 

@@ -3,6 +3,11 @@ import { getFirebaseClients } from '../firebase/config';
 const GET_TUTOR_AGREEMENT_ENDPOINT = import.meta.env.VITE_GET_TUTOR_AGREEMENT_ENDPOINT || '/getTutorAgreement';
 const ACCEPT_TUTOR_AGREEMENT_ENDPOINT = import.meta.env.VITE_ACCEPT_TUTOR_AGREEMENT_ENDPOINT || '/acceptTutorAgreement';
 const PUBLISH_TUTOR_AGREEMENT_ENDPOINT = import.meta.env.VITE_PUBLISH_TUTOR_AGREEMENT_ENDPOINT || '/publishTutorAgreementVersion';
+const EMAIL_SIGNED_TUTOR_AGREEMENT_ENDPOINT = import.meta.env.VITE_EMAIL_SIGNED_TUTOR_AGREEMENT_ENDPOINT || '/emailSignedTutorAgreement';
+const CLOUD_FUNCTIONS_BASE_URL = String(import.meta.env.VITE_CLOUD_FUNCTIONS_URL || '').trim();
+const PUBLISH_TUTOR_AGREEMENT_FALLBACK_ENDPOINT = CLOUD_FUNCTIONS_BASE_URL
+  ? `${CLOUD_FUNCTIONS_BASE_URL.replace(/\/+$/, '')}/publishTutorAgreementVersion`
+  : 'https://us-central1-parakleo.cloudfunctions.net/publishTutorAgreementVersion';
 
 export const LEGAL_ENTITY_NAME = 'Parakleo, operated by Jabu Msiza';
 export const TUTOR_AGREEMENT_DOCUMENT_ID = 'tutor_agreement';
@@ -120,18 +125,68 @@ export async function publishTutorAgreementVersion(payload = {}) {
     throw new Error('You must be signed in before publishing a Tutor Agreement version.');
   }
 
-  const response = await fetch(PUBLISH_TUTOR_AGREEMENT_ENDPOINT, {
+  const requestOptions = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(payload),
+  };
+
+  let response;
+  let result = {};
+  let networkError = null;
+  try {
+    response = await fetch(PUBLISH_TUTOR_AGREEMENT_ENDPOINT, requestOptions);
+    result = await response.json().catch(() => ({}));
+  } catch (error) {
+    networkError = error;
+  }
+
+  if ((!response || !response.ok) && PUBLISH_TUTOR_AGREEMENT_FALLBACK_ENDPOINT) {
+    try {
+      response = await fetch(PUBLISH_TUTOR_AGREEMENT_FALLBACK_ENDPOINT, requestOptions);
+      result = await response.json().catch(() => ({}));
+      networkError = null;
+    } catch (error) {
+      networkError = networkError || error;
+    }
+  }
+
+  if (!response) {
+    throw new Error(networkError?.message || 'Network request failed while publishing Tutor Agreement version.');
+  }
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || networkError?.message || 'Unable to publish Tutor Agreement version.');
+  }
+
+  return result;
+}
+
+export async function emailSignedTutorAgreement({ acceptanceId, destinationEmail } = {}) {
+  const clients = await getFirebaseClients();
+  const token = await clients?.auth?.currentUser?.getIdToken?.();
+
+  if (!token) {
+    throw new Error('You must be signed in before emailing a signed Tutor Agreement.');
+  }
+
+  const response = await fetch(EMAIL_SIGNED_TUTOR_AGREEMENT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      acceptanceId,
+      destinationEmail,
+    }),
   });
 
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result?.success) {
-    throw new Error(result?.message || 'Unable to publish Tutor Agreement version.');
+    throw new Error(result?.message || 'Unable to email the signed Tutor Agreement.');
   }
 
   return result;

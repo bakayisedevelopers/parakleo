@@ -376,6 +376,11 @@ const ACTIVE_REQUEST_STATUSES = new Set([
   REQUEST_STATUS.NO_TUTOR_AVAILABLE,
 ]);
 let visionClient = null;
+const ZAR_PER_USD = 17;
+const CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE = 0.0015;
+const GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS = 0.3;
+const GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS = 2.5;
+const GEMINI_FLASH_EXTRACTION_SOURCE = 'gemini_2_5_flash_after_tutor_accept';
 
 function getVisionClient() {
   if (!visionClient) {
@@ -1311,6 +1316,234 @@ exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', 
   }
 });
 
+exports.contentExtractionForWhiteboard = onDocumentWritten({
+  document: 'classRequests/{requestId}',
+  secrets: [PARAKLEO_AI_KEYS],
+}, async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+
+  const beforeStatus = String(before?.status || '').toLowerCase();
+  const afterStatus = String(after?.status || '').toLowerCase();
+  if (afterStatus !== REQUEST_STATUS.ACCEPTED || beforeStatus === REQUEST_STATUS.ACCEPTED) {
+    return;
+  }
+
+  const requestId = event.params.requestId;
+  const requestRef = db.collection('classRequests').doc(requestId);
+  const sessionId = String(after?.sessionId || '').trim();
+  const sessionRef = sessionId ? db.collection('sessions').doc(sessionId) : null;
+
+  const attachments = normalizeUploadedAttachmentList(after);
+  const startedAt = Date.now();
+
+  if (!attachments.length) {
+    await requestRef.set({
+      documentAiExtractionStatus: 'skipped_no_attachments',
+      documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    if (sessionRef) {
+      await sessionRef.set({
+        documentAiExtractionStatus: 'skipped_no_attachments',
+        documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    return;
+  }
+
+  await requestRef.set({
+    documentAiExtractionStatus: 'processing',
+    documentAiExtractionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+    documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    documentAiExtractionError: '',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  if (sessionRef) {
+    await sessionRef.set({
+      documentAiExtractionStatus: 'processing',
+      documentAiExtractionStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      documentAiExtractionError: '',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  try {
+    const aiSecrets = getAiSecrets();
+    let payloadImages = [];
+    for (const attachment of attachments.slice(0, 8)) {
+      // eslint-disable-next-line no-await-in-loop
+      const nextImages = await convertAttachmentToGeminiPayloadImages(attachment);
+      payloadImages = payloadImages.concat(nextImages);
+    }
+    payloadImages = payloadImages.slice(0, 8);
+    if (!payloadImages.length) {
+      throw new Error('No usable attachment images were generated for Gemini extraction.');
+    }
+
+    const events = [];
+    const streamMeta = await getAiSubjectExtractionModule().streamBoardExtractionWithAI({
+      images: payloadImages,
+      requestContext: {
+        topic: String(after?.topic || ''),
+        description: String(after?.description || ''),
+      },
+      firebaseConfig: aiSecrets,
+      logger,
+      onEvent: async (evt) => {
+        events.push(evt);
+      },
+    });
+
+    const questionEvents = events.filter((evt) => String(evt?.type || '').toLowerCase() === 'question');
+    const classificationEvent = events.find((evt) => String(evt?.type || '').toLowerCase() === 'classification') || {};
+    const byPage = new Map();
+    let visualRegionCount = 0;
+    questionEvents.forEach((question, index) => {
+      const pageNumber = Number(question?.pageNumber || 1) > 0 ? Number(question.pageNumber) : 1;
+      if (!byPage.has(pageNumber)) byPage.set(pageNumber, []);
+      const visualRegions = Array.isArray(question?.visualRegions) ? question.visualRegions : [];
+      visualRegionCount += visualRegions.length;
+      byPage.get(pageNumber).push({
+        questionId: String(question?.questionId || `q_${String(index + 1).padStart(3, '0')}`),
+        questionNumber: question?.questionNumber || null,
+        questionType: String(question?.questionType || 'other'),
+        text: String(question?.text || ''),
+        marks: Number.isFinite(Number(question?.marks)) ? Number(question.marks) : null,
+        options: Array.isArray(question?.options) ? question.options : [],
+        sourceImageIndex: Number.isFinite(Number(question?.sourceImageIndex)) ? Number(question.sourceImageIndex) : null,
+        visualRegions,
+        hasVisuals: visualRegions.length > 0,
+        images: [],
+        type: 'question',
+      });
+    });
+    const mergedPages = Array.from(byPage.keys()).sort((a, b) => a - b).map((pageNumber, idx) => ({
+      pageNumber,
+      sourceImageIndex: idx,
+      questions: byPage.get(pageNumber) || [],
+    }));
+    const mergedText = questionEvents.map((question) => String(question?.text || '').trim()).filter(Boolean).join('\n\n').trim();
+
+    const estimatedInputTokens = Math.max(1, Math.round((Number(streamMeta?.prompt?.length || 0) + (payloadImages.length * 1200)) / 4));
+    const estimatedOutputTokens = Math.max(1, Math.round(JSON.stringify(questionEvents).length / 4));
+    const geminiFlashPricing = buildGeminiFlashPricing({
+      inputTokens: estimatedInputTokens,
+      outputTokens: estimatedOutputTokens,
+    });
+    const existingExtractions = Array.isArray(after?.boardPreparationSource?.attachmentExtractions)
+      ? after.boardPreparationSource.attachmentExtractions
+      : [];
+    const cloudVisionUsd = toMoney(existingExtractions.reduce((sum, item = {}) => {
+      const direct = Number(item?.cloudVisionPriceUsd || 0);
+      const fromPricing = Number(item?.pricing?.cloudVision?.usdTotal || 0);
+      const fallback = Number(item?.pageCount || item?.selectedPages?.length || 1) * CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE;
+      const picked = direct || fromPricing || fallback;
+      return sum + (Number.isFinite(picked) ? picked : 0);
+    }, 0));
+    const cloudVisionPricing = {
+      provider: 'google-vision',
+      operation: 'document_text_detection',
+      pageCount: existingExtractions.reduce((sum, item = {}) => sum + Math.max(1, Number(item?.pageCount || item?.selectedPages?.length || 1)), 0),
+      usdPerPage: CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE,
+      usdTotal: cloudVisionUsd,
+      zarPerUsd: ZAR_PER_USD,
+      zarTotal: usdToZar(cloudVisionUsd),
+      estimated: true,
+    };
+    const combinedPricing = {
+      fxRateZarPerUsd: ZAR_PER_USD,
+      cloudVision: cloudVisionPricing,
+      geminiFlash: geminiFlashPricing,
+      totalUsd: toMoney(cloudVisionPricing.usdTotal + geminiFlashPricing.usdTotal),
+      totalZar: usdToZar(cloudVisionPricing.usdTotal + geminiFlashPricing.usdTotal),
+      estimated: true,
+    };
+
+    const documentAiExtraction = {
+      provider: 'google-gemini',
+      model: 'gemini-2.5-flash',
+      extractionMethod: 'gemini_flash_stream',
+      extractionStatus: mergedText ? 'SUCCESS' : 'FAILED',
+      extractedText: mergedText,
+      text: mergedText,
+      textLength: mergedText.length,
+      pageCount: mergedPages.length,
+      pages: mergedPages,
+      summary: {
+        pageCount: mergedPages.length,
+        questionsCount: questionEvents.length,
+        visualRegionCount,
+      },
+      classification: classificationEvent,
+      pricing: geminiFlashPricing,
+      fxRateZarPerUsd: ZAR_PER_USD,
+      source: GEMINI_FLASH_EXTRACTION_SOURCE,
+      processedAt: Date.now(),
+      durationMs: Math.max(0, Date.now() - startedAt),
+      streamStats: streamMeta?.streamStats || {},
+      attachments: attachments.map((entry) => ({
+        fileName: entry.fileName || '',
+        objectPath: entry.objectPath || '',
+      })),
+    };
+
+    const boardPreparationSource = {
+      ...(after?.boardPreparationSource || {}),
+      extractedText: mergedText || after?.boardPreparationSource?.extractedText || '',
+      documentAiExtraction,
+      extractionPricing: combinedPricing,
+      cloudVisionPriceUsd: cloudVisionPricing.usdTotal,
+      cloudVisionPriceZar: cloudVisionPricing.zarTotal,
+      documentAiPriceUsd: geminiFlashPricing.usdTotal,
+      documentAiPriceZar: geminiFlashPricing.zarTotal,
+      totalExtractionPriceUsd: combinedPricing.totalUsd,
+      totalExtractionPriceZar: combinedPricing.totalZar,
+      fxRateZarPerUsd: ZAR_PER_USD,
+    };
+
+    const requestPatch = {
+      boardPreparationSource,
+      documentAiExtractionStatus: 'ready',
+      documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      documentAiExtractionCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      documentAiExtractionError: '',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    await requestRef.set(requestPatch, { merge: true });
+    if (sessionRef) {
+      await sessionRef.set({
+        ...requestPatch,
+      }, { merge: true });
+    }
+  } catch (error) {
+    const message = getSafeErrorMessage(error, 'Gemini extraction failed.');
+    logger.error('gemini_accept_extraction_failed', {
+      requestId,
+      sessionId: sessionId || null,
+      message,
+    });
+    await requestRef.set({
+      documentAiExtractionStatus: 'failed',
+      documentAiExtractionError: message,
+      documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    if (sessionRef) {
+      await sessionRef.set({
+        documentAiExtractionStatus: 'failed',
+        documentAiExtractionError: message,
+        documentAiExtractionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+});
+
 exports.trackTutorSessionStats = onDocumentWritten('sessions/{sessionId}', async (event) => {
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
@@ -1923,6 +2156,24 @@ function renderEmailTemplate({
 
 function buildEmailPayload(eventType, payload) {
   switch (eventType) {
+    case 'tutor_agreement_signed':
+      return {
+        to: payload.email,
+        subject: 'Welcome to Parakleo — Your Tutor Agreement',
+        html: renderEmailTemplate({
+          eyebrow: 'Tutor Agreement',
+          title: 'Welcome to Parakleo',
+          intro: 'Thank you for completing your Tutor Agreement.',
+          details: [
+            { label: 'Agreement', value: 'Tutor Agreement' },
+            { label: 'Version', value: payload.version || 'N/A' },
+            { label: 'Accepted at', value: payload.acceptedAt || 'N/A' },
+            { label: 'Legal entity', value: LEGAL_ENTITY_NAME },
+          ],
+          closing: 'Attached is a copy of the agreement entered into between you and Parakleo, operated by Jabu Msiza. Please keep this copy for your records.',
+          tone: 'emerald',
+        }),
+      };
     case 'welcome':
       return {
         to: payload.email,
@@ -2068,6 +2319,18 @@ function getBearerToken(req) {
   return authHeader.substring('Bearer '.length).trim();
 }
 
+function getSafeErrorMessage(error, fallback = 'Unexpected error.') {
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== '{}') return serialized;
+  } catch (_) {
+    // no-op
+  }
+  return fallback;
+}
+
 function isAllowlistedAdminEmail(email = '') {
   const normalized = String(email || '').trim().toLowerCase();
   return ['jabuobed1@gmail.com'].includes(normalized);
@@ -2109,6 +2372,209 @@ function capitalizeTopic(value = '') {
 
 function isPdfAttachmentBuffer(buffer) {
   return Buffer.isBuffer(buffer) && buffer.slice(0, 5).toString('utf8') === '%PDF-';
+}
+
+function toMoney(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Number(numeric.toFixed(6));
+}
+
+function usdToZar(usdValue) {
+  return toMoney(Number(usdValue || 0) * ZAR_PER_USD);
+}
+
+function buildCloudVisionPricing({ pageCount = 1 } = {}) {
+  const safePageCount = Math.max(1, Number(pageCount || 1));
+  const usd = toMoney(safePageCount * CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE);
+  return {
+    provider: 'google-vision',
+    operation: 'document_text_detection',
+    pageCount: safePageCount,
+    usdPerPage: CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE,
+    usdTotal: usd,
+    zarPerUsd: ZAR_PER_USD,
+    zarTotal: usdToZar(usd),
+    estimated: true,
+  };
+}
+
+function buildGeminiFlashPricing({ inputTokens = 0, outputTokens = 0 } = {}) {
+  const safeInputTokens = Math.max(0, Number(inputTokens || 0));
+  const safeOutputTokens = Math.max(0, Number(outputTokens || 0));
+  const inputUsd = toMoney((safeInputTokens / 1000000) * GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS);
+  const outputUsd = toMoney((safeOutputTokens / 1000000) * GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS);
+  const usd = toMoney(inputUsd + outputUsd);
+  return {
+    provider: 'google-gemini',
+    model: 'gemini-2.5-flash',
+    operation: 'structured_question_extraction',
+    inputTokens: safeInputTokens,
+    outputTokens: safeOutputTokens,
+    usdPerMillionInputTokens: GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS,
+    usdPerMillionOutputTokens: GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS,
+    usdInputTotal: inputUsd,
+    usdOutputTotal: outputUsd,
+    usdTotal: usd,
+    zarPerUsd: ZAR_PER_USD,
+    zarTotal: usdToZar(usd),
+    estimated: true,
+  };
+}
+
+function normalizeVertices(vertices = []) {
+  const xs = [];
+  const ys = [];
+  vertices.forEach((vertex = {}) => {
+    const x = Number(vertex.x);
+    const y = Number(vertex.y);
+    if (Number.isFinite(x)) xs.push(x);
+    if (Number.isFinite(y)) ys.push(y);
+  });
+  if (!xs.length || !ys.length) return null;
+
+  const minX = Math.max(0, Math.min(...xs));
+  const minY = Math.max(0, Math.min(...ys));
+  const maxX = Math.min(1, Math.max(...xs));
+  const maxY = Math.min(1, Math.max(...ys));
+  const width = Math.max(0, maxX - minX);
+  const height = Math.max(0, maxY - minY);
+  if (width <= 0 || height <= 0) return null;
+
+  return {
+    x: Number(minX.toFixed(6)),
+    y: Number(minY.toFixed(6)),
+    width: Number(width.toFixed(6)),
+    height: Number(height.toFixed(6)),
+  };
+}
+
+function getLayoutBoundingRegion(layout = {}, page = {}) {
+  const normalizedFromPoly = normalizeVertices(layout?.boundingPoly?.normalizedVertices || []);
+  if (normalizedFromPoly) return normalizedFromPoly;
+
+  const pageWidth = Number(page?.dimension?.width || 0);
+  const pageHeight = Number(page?.dimension?.height || 0);
+  if (!pageWidth || !pageHeight) return null;
+
+  const absoluteVertices = layout?.boundingPoly?.vertices || [];
+  const normalizedVertices = absoluteVertices.map((vertex = {}) => ({
+    x: Number(vertex.x || 0) / pageWidth,
+    y: Number(vertex.y || 0) / pageHeight,
+  }));
+  return normalizeVertices(normalizedVertices);
+}
+
+function getLayoutText(document = {}, layout = {}) {
+  const fullText = String(document?.text || '');
+  const segments = Array.isArray(layout?.textAnchor?.textSegments) ? layout.textAnchor.textSegments : [];
+  if (!segments.length || !fullText) return '';
+  return segments
+    .map((segment = {}) => {
+      const startIndex = Number(segment.startIndex || 0);
+      const endIndex = Number(segment.endIndex || 0);
+      if (!Number.isFinite(endIndex) || endIndex <= startIndex) return '';
+      return fullText.slice(Math.max(0, startIndex), Math.max(0, endIndex));
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitDocumentPageIntoQuestionLines(pageText = '') {
+  const normalized = String(pageText || '').replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
+  const questionRegex = /^((?:question\s*)?\d+(?:\.\d+)*[.)]?)/i;
+  const questions = [];
+  let current = null;
+
+  lines.forEach((line) => {
+    const match = line.match(questionRegex);
+    if (match) {
+      if (current) questions.push(current);
+      current = {
+        questionNumber: String(match[1] || '').replace(/^question\s*/i, '').trim(),
+        text: line,
+      };
+      return;
+    }
+
+    if (!current) {
+      current = {
+        questionNumber: '',
+        text: line,
+      };
+      return;
+    }
+    current.text = `${current.text}\n${line}`.trim();
+  });
+
+  if (current) questions.push(current);
+  return questions;
+}
+
+function normalizeUploadedAttachmentList(requestData = {}) {
+  const directAttachments = Array.isArray(requestData?.attachments) ? requestData.attachments : [];
+  const singleAttachment = requestData?.attachment ? [requestData.attachment] : [];
+  const sourceEntries = Array.isArray(requestData?.boardPreparationSource?.attachmentExtractions)
+    ? requestData.boardPreparationSource.attachmentExtractions
+    : [];
+  const extractionAttachments = sourceEntries
+    .map((entry) => entry?.uploadedAttachment)
+    .filter(Boolean);
+
+  const combined = [...directAttachments, ...singleAttachment, ...extractionAttachments];
+  const deduped = [];
+  const seen = new Set();
+  combined.forEach((item = {}) => {
+    const objectPath = String(item?.objectPath || item?.path || '').trim();
+    const downloadUrl = String(item?.downloadUrl || '').trim();
+    const fileName = String(item?.fileName || '').trim();
+    const contentType = String(item?.contentType || item?.fileType || '').trim();
+    const key = `${objectPath}::${downloadUrl}::${fileName}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push({ objectPath, downloadUrl, fileName, contentType });
+  });
+  return deduped.filter((item) => item.objectPath || item.downloadUrl);
+}
+
+async function downloadAttachmentBuffer(attachment = {}) {
+  const objectPath = String(attachment?.objectPath || '').trim();
+  if (objectPath) {
+    const bucket = admin.storage().bucket();
+    const [bytes] = await bucket.file(objectPath).download();
+    return { buffer: bytes, source: objectPath };
+  }
+
+  const downloadUrl = String(attachment?.downloadUrl || '').trim();
+  if (!downloadUrl) {
+    throw new Error('Attachment is missing both objectPath and downloadUrl.');
+  }
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(`Unable to download attachment: ${response.status}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return { buffer: Buffer.from(arrayBuffer), source: downloadUrl };
+}
+
+async function convertAttachmentToGeminiPayloadImages(attachment = {}) {
+  const { buffer } = await downloadAttachmentBuffer(attachment);
+  const safeMimeType = String(attachment?.contentType || '').trim() || (isPdfAttachmentBuffer(buffer) ? 'application/pdf' : 'image/png');
+  if (safeMimeType === 'application/pdf' || isPdfAttachmentBuffer(buffer)) {
+    const pageBuffers = await getAiSubjectExtractionModule().convertPdfToImages(buffer, {});
+    return pageBuffers.map((pageBuffer) => ({
+      mimeType: 'image/png',
+      base64: pageBuffer.toString('base64'),
+    }));
+  }
+  return [{
+    mimeType: safeMimeType,
+    base64: buffer.toString('base64'),
+  }];
 }
 
 async function runVisionOcrOnBuffer(imageBuffer) {
@@ -2199,6 +2665,71 @@ function getEmailSecrets() {
   return secrets;
 }
 
+function isValidEmailAddress(value = '') {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+async function sendTutorAgreementEmailWithAttachment({
+  acceptance,
+  destinationEmail,
+}) {
+  const emailSecrets = getEmailSecrets();
+  const resend = new Resend(emailSecrets.RESEND_API_KEY);
+  const subject = 'Welcome to Parakleo — Your Tutor Agreement';
+  const destination = String(destinationEmail || '').trim();
+  if (!isValidEmailAddress(destination)) {
+    throw new Error('Please provide a valid email address.');
+  }
+
+  const storagePath = String(acceptance?.pdfStoragePath || '').trim();
+  let pdfBuffer = null;
+  if (storagePath) {
+    const [fileBytes] = await admin.storage().bucket().file(storagePath).download();
+    pdfBuffer = fileBytes;
+  } else if (acceptance?.pdfUrl) {
+    const response = await fetch(String(acceptance.pdfUrl));
+    if (!response.ok) {
+      throw new Error('Unable to read the signed agreement PDF.');
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    pdfBuffer = Buffer.from(arrayBuffer);
+  }
+
+  if (!isPdfAttachmentBuffer(pdfBuffer)) {
+    throw new Error('The signed agreement PDF is unavailable or invalid.');
+  }
+
+  const emailPayload = buildEmailPayload('tutor_agreement_signed', {
+    email: destination,
+    version: acceptance.version,
+    acceptedAt: acceptance.acceptedAt,
+  });
+
+  const response = await resend.emails.send({
+    from: emailSecrets.EMAIL_FROM,
+    to: destination,
+    subject,
+    html: emailPayload.html,
+    attachments: [
+      {
+        filename: `parakleo-tutor-agreement-${acceptance.version || 'signed'}.pdf`,
+        content: pdfBuffer.toString('base64'),
+      },
+    ],
+  });
+
+  if (response?.error) {
+    throw new Error(response.error.message || 'Resend returned an error response.');
+  }
+
+  return {
+    provider: 'resend',
+    providerMessageId: response.data?.id || response.id || null,
+    to: destination,
+    subject,
+  };
+}
+
 function getRealtimeSecrets() {
   const groupedSecrets = parseGroupedSecretJson(
     'PARAKLEO_REALTIME_SECRETS',
@@ -2237,6 +2768,8 @@ function getAiSecrets() {
     PADDLE_OCR_TIMEOUT_MS: groupedSecrets.PADDLE_OCR_TIMEOUT_MS || '',
     PADDLE_OCR_MIN_CONFIDENCE: groupedSecrets.PADDLE_OCR_MIN_CONFIDENCE || '',
     OCR_PROVIDER_MODE: groupedSecrets.OCR_PROVIDER_MODE || '',
+    DOCUMENT_AI_PROCESSOR_ID: groupedSecrets.DOCUMENT_AI_PROCESSOR_ID || '',
+    DOCUMENT_AI_LOCATION: groupedSecrets.DOCUMENT_AI_LOCATION || '',
   };
 
   assertRequiredSecrets('PARAKLEO_AI_KEYS', secrets, ['apiKey', 'projectId', 'appId']);
@@ -2322,7 +2855,7 @@ exports.getTutorAgreement = onRequest({ cors: true }, async (req, res) => {
   });
 });
 
-exports.acceptTutorAgreement = onRequest({ cors: true }, async (req, res) => {
+exports.acceptTutorAgreement = onRequest({ cors: true, memory: '1GiB' }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -2372,21 +2905,156 @@ exports.acceptTutorAgreement = onRequest({ cors: true }, async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
+    let emailDelivery = null;
+    let emailWarning = '';
+    try {
+      const emailOutcome = await sendTutorAgreementEmailWithAttachment({
+        acceptance: acceptanceResult.acceptance,
+        destinationEmail: acceptanceResult.acceptance?.acceptedByEmail || decoded.email || userData.email || '',
+      });
+      emailDelivery = {
+        status: 'sent',
+        ...emailOutcome,
+        sentAt: new Date().toISOString(),
+      };
+    } catch (emailError) {
+      emailDelivery = {
+        status: 'failed',
+        errorMessage: emailError.message || 'Email send failed.',
+        failedAt: new Date().toISOString(),
+      };
+      emailWarning = 'Agreement signed successfully. We could not email the PDF, but you can download your signed copy.';
+      logger.warn('Tutor agreement acceptance email failed.', {
+        uid: decoded.uid,
+        acceptanceId: acceptanceResult.acceptanceId,
+        message: emailError.message,
+      });
+    }
+
+    if (acceptanceResult?.acceptanceId && emailDelivery) {
+      await db.collection('userAgreementAcceptances').doc(acceptanceResult.acceptanceId).set({
+        latestEmailDelivery: emailDelivery,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
     res.json({
       success: true,
-      message: 'Tutor Agreement accepted successfully.',
+      message: emailWarning || 'Tutor Agreement accepted successfully.',
       ...acceptanceResult,
+      emailDelivery,
       tutorProfile: {
         ...(refreshedUser.tutorProfile || {}),
         verificationStatus: shouldBeVerified ? 'verified' : 'pending',
       },
     });
   } catch (error) {
+    const safeMessage = getSafeErrorMessage(error, 'Unable to accept Tutor Agreement.');
     logger.warn('Tutor agreement acceptance failed.', {
       uid: decoded.uid,
-      message: error.message,
+      message: safeMessage,
+      errorType: typeof error,
     });
-    res.status(400).json({ success: false, message: error.message || 'Unable to accept Tutor Agreement.' });
+    res.status(400).json({ success: false, message: safeMessage });
+  }
+});
+
+exports.emailSignedTutorAgreement = onRequest({ cors: true, memory: '1GiB', secrets: [PARAKLEO_EMAIL_SECRETS] }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const acceptanceId = String(req.body?.acceptanceId || req.body?.agreementRecordId || '').trim();
+  if (!acceptanceId) {
+    res.status(400).json({ success: false, message: 'acceptanceId is required.' });
+    return;
+  }
+
+  const acceptanceRef = db.collection('userAgreementAcceptances').doc(acceptanceId);
+  const acceptanceSnap = await acceptanceRef.get();
+  if (!acceptanceSnap.exists) {
+    res.status(404).json({ success: false, message: 'Signed agreement record not found.' });
+    return;
+  }
+
+  const acceptance = acceptanceSnap.data() || {};
+  const requesterIsAdmin = isAdminToken(decoded);
+  const requesterOwnsAgreement = String(acceptance.userId || '').trim() === decoded.uid;
+  if (!requesterIsAdmin && !requesterOwnsAgreement) {
+    res.status(403).json({ success: false, message: 'You are not allowed to email this signed agreement.' });
+    return;
+  }
+
+  const requestedEmail = String(req.body?.destinationEmail || '').trim();
+  let destinationEmail = requestedEmail;
+  if (!destinationEmail) {
+    const ownerUserSnap = await db.collection('users').doc(String(acceptance.userId || '')).get();
+    const ownerUser = ownerUserSnap.data() || {};
+    destinationEmail = String(
+      acceptance.acceptedByEmail
+      || ownerUser.email
+      || (requesterOwnsAgreement ? decoded.email : ''),
+    ).trim();
+  }
+
+  if (!isValidEmailAddress(destinationEmail)) {
+    res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+    return;
+  }
+
+  try {
+    const emailOutcome = await sendTutorAgreementEmailWithAttachment({
+      acceptance,
+      destinationEmail,
+    });
+    const emailDelivery = {
+      status: 'sent',
+      ...emailOutcome,
+      sentAt: new Date().toISOString(),
+      initiatedBy: decoded.uid,
+      acceptanceId,
+    };
+    await acceptanceRef.set({
+      latestEmailDelivery: emailDelivery,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: 'Signed agreement emailed successfully.',
+      emailDelivery,
+    });
+  } catch (error) {
+    const safeMessage = getSafeErrorMessage(error, 'Email send failed.');
+    const emailDelivery = {
+      status: 'failed',
+      errorMessage: safeMessage,
+      failedAt: new Date().toISOString(),
+      initiatedBy: decoded.uid,
+      acceptanceId,
+    };
+    await acceptanceRef.set({
+      latestEmailDelivery: emailDelivery,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    res.status(400).json({
+      success: false,
+      message: 'We could not email the signed agreement. Please try again or download it manually.',
+      emailDelivery,
+      errorMessage: safeMessage,
+    });
   }
 });
 
@@ -2423,6 +3091,10 @@ exports.publishTutorAgreementVersion = onRequest({ cors: true }, async (req, res
       effectiveDate: String(req.body?.effectiveDate || '').trim(),
       contentMarkdown: String(req.body?.contentMarkdown || '').trim() || buildTutorAgreementMarkdown(),
       changeSummary: String(req.body?.changeSummary || '').trim(),
+      reviewedBy: String(req.body?.reviewedBy || 'Parakleo').trim() || 'Parakleo',
+      reviewedAt: String(req.body?.reviewedAt || '').trim(),
+      nextReviewAt: String(req.body?.nextReviewAt || '').trim(),
+      stampLabel: String(req.body?.stampLabel || '').trim(),
       updatedBy: decoded.email || decoded.uid,
       status: String(req.body?.status || TUTOR_AGREEMENT_STATUS.ACTIVE).trim().toLowerCase() === TUTOR_AGREEMENT_STATUS.DRAFT
         ? TUTOR_AGREEMENT_STATUS.DRAFT
@@ -3110,6 +3782,9 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
 
     const extractedText = String(extractionResult?.extractedText || '').trim();
     const textLength = Number(extractionResult?.textLength || extractedText.length || 0);
+    const visionPricing = buildCloudVisionPricing({
+      pageCount: Number(extractionResult?.pageCount || (isPdfInput ? extractionResult?.selectedPages?.length : 1) || 1),
+    });
     trace('ocr_route_completed', 'OCR route completed', {
       providerRoute,
       providerReason,
@@ -3152,6 +3827,12 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       providerReason: providerReason || '',
       ppStructureVersion: extractionResult?.structuredData?.ppStructureVersion || extractionResult?.structuredData?.paddleOcrVlPipelineVersion || '',
       processingTrace,
+      pricing: {
+        cloudVision: visionPricing,
+      },
+      cloudVisionPriceUsd: visionPricing.usdTotal,
+      cloudVisionPriceZar: visionPricing.zarTotal,
+      fxRateZarPerUsd: ZAR_PER_USD,
     });
   } catch (error) {
     const normalizedMessage = String(error?.message || 'unknown_error');
