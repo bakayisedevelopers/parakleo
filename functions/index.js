@@ -2292,24 +2292,15 @@ exports.getTutorAgreement = onRequest({ cors: true }, async (req, res) => {
   }
 
   const token = getBearerToken(req);
-  if (!token) {
-    res.status(401).json({ success: false, message: 'Unauthorized request.' });
-    return;
-  }
-
-  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
-  if (!decoded?.uid) {
-    res.status(401).json({ success: false, message: 'Unauthorized request.' });
-    return;
-  }
+  const decoded = token ? await admin.auth().verifyIdToken(token).catch(() => null) : null;
 
   await ensureTutorAgreementSeeded({ db, admin }).catch((error) => {
     logger.warn('Unable to seed tutor agreement before reading.', { error: error.message });
   });
 
-  const userSnap = await db.collection('users').doc(decoded.uid).get();
+  const userSnap = decoded?.uid ? await db.collection('users').doc(decoded.uid).get() : { exists: () => false, data: () => ({}) };
   const userData = userSnap.data() || {};
-  const bundle = await getTutorAgreementBundle({ db, admin, userId: decoded.uid });
+  const bundle = await getTutorAgreementBundle({ db, admin, userId: decoded?.uid || '' });
 
   res.json({
     success: true,
@@ -2321,9 +2312,9 @@ exports.getTutorAgreement = onRequest({ cors: true }, async (req, res) => {
     versions: bundle.versions,
     acceptances: bundle.acceptances,
     user: {
-      uid: decoded.uid,
-      email: String(decoded.email || userData.email || '').trim(),
-      fullName: String(userData.fullName || userData.displayName || decoded.name || '').trim(),
+      uid: decoded?.uid || null,
+      email: String(decoded?.email || userData.email || '').trim(),
+      fullName: String(userData.fullName || userData.displayName || decoded?.name || '').trim(),
       tutorAgreement: userData.tutorAgreement || {},
       tutorProfile: userData.tutorProfile || {},
       activeRole: userData.activeRole || userData.role || null,

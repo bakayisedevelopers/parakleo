@@ -38,24 +38,20 @@ export async function getTutorAgreementBundle() {
   const authUser = clients.auth.currentUser;
   const token = await authUser?.getIdToken?.();
 
-  if (token) {
-    const response = await fetch(GET_TUTOR_AGREEMENT_ENDPOINT, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+  const response = await fetch(GET_TUTOR_AGREEMENT_ENDPOINT, {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 
-    const result = await response.json().catch(() => ({}));
-    if (response.ok && result?.success) {
-      return {
-        document: result.document ? { id: result.document.id || result.document.documentId || TUTOR_AGREEMENT_DOCUMENT_ID, ...result.document } : null,
-        activeVersion: result.activeVersion ? { id: result.activeVersion.id || result.activeVersion.versionId || '', ...result.activeVersion } : null,
-        versions: Array.isArray(result.versions) ? result.versions : [],
-        acceptances: Array.isArray(result.acceptances) ? result.acceptances : [],
-        user: result.user || null,
-      };
-    }
+  const result = await response.json().catch(() => ({}));
+  if (response.ok && result?.success) {
+    return {
+      document: result.document ? { id: result.document.id || result.document.documentId || TUTOR_AGREEMENT_DOCUMENT_ID, ...result.document } : null,
+      activeVersion: result.activeVersion ? { id: result.activeVersion.id || result.activeVersion.versionId || '', ...result.activeVersion } : null,
+      versions: Array.isArray(result.versions) ? result.versions : [],
+      acceptances: Array.isArray(result.acceptances) ? result.acceptances : [],
+      user: result.user || null,
+    };
   }
 
   const [documentSnap, versionsSnap, acceptancesSnap, userSnap] = await Promise.all([
