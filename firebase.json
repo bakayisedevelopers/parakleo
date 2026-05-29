@@ -74,6 +74,18 @@
         "function": "mobileWebviewAuth"
       },
       {
+        "source": "/getTutorAgreement",
+        "function": "getTutorAgreement"
+      },
+      {
+        "source": "/acceptTutorAgreement",
+        "function": "acceptTutorAgreement"
+      },
+      {
+        "source": "/publishTutorAgreementVersion",
+        "function": "publishTutorAgreementVersion"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
