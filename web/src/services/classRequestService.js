@@ -7,7 +7,7 @@ import {
   SESSION_STATUS,
   canTransitionRequest,
 } from '../constants/lifecycle';
-import { PLATFORM_FEE_RATE, TUTOR_PAYOUT_RATE } from '../utils/onboarding';
+import { PLATFORM_FEE_RATE, TUTOR_PAYOUT_RATE, isTutorAgreementCurrent } from '../utils/onboarding';
 import { normalizePricingSnapshot } from '../utils/pricing';
 import { getWeekKey } from '../utils/payouts';
 import { createNotification } from './notificationService';
@@ -79,15 +79,7 @@ function getStatusDelayElapsed(request, delayMs) {
 }
 
 function hasCurrentTutorAgreement(tutor = {}) {
-  const tutorAgreement = tutor?.tutorAgreement || {};
-  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
-  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
-  return Boolean(
-    tutorAgreement.currentVersionAccepted === true
-      && requiredVersion
-      && acceptedVersion
-      && requiredVersion === acceptedVersion,
-  );
+  return isTutorAgreementCurrent(tutor?.tutorAgreement || {});
 }
 
 function isRequestExpired(request) {

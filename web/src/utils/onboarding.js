@@ -55,17 +55,9 @@ export function getStudentOnboardingStatus(user) {
 
 export function getTutorOnboardingStatus(user) {
   const tutorProfile = user?.tutorProfile || {};
-  const tutorAgreement = user?.tutorAgreement || {};
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
-  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
-  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
-  const hasCurrentAgreement = Boolean(
-    tutorAgreement.currentVersionAccepted === true
-      && requiredVersion
-      && acceptedVersion
-      && requiredVersion === acceptedVersion,
-  );
+  const hasCurrentAgreement = isTutorAgreementCurrent(user?.tutorAgreement || {});
   const hasQualification = qualifiedSubjects.length > 0;
   const qualified = hasQualification;
   const hasPayout = Boolean(
@@ -130,11 +122,15 @@ export function getProfileStatusByRole(user, role) {
 }
 
 export function hasCurrentTutorAgreement(user) {
-  const tutorAgreement = user?.tutorAgreement || {};
+  return isTutorAgreementCurrent(user?.tutorAgreement || {});
+}
+
+export function isTutorAgreementCurrent(tutorAgreement = {}) {
   const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
   const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
+  const acceptedCurrentVersion = tutorAgreement.currentVersionAccepted === true || tutorAgreement.acceptedCurrentVersion === true;
   return Boolean(
-    tutorAgreement.currentVersionAccepted === true
+    acceptedCurrentVersion
       && requiredVersion
       && acceptedVersion
       && requiredVersion === acceptedVersion,

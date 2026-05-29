@@ -1,5 +1,6 @@
 import { getFirebaseClients } from '../firebase/config';
 import { DEFAULT_SUBJECTS } from '../constants/subjects';
+import { isTutorAgreementCurrent } from '../utils/onboarding';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
 const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.0';
@@ -68,6 +69,7 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
       latestAcceptedAt: null,
       latestAcceptanceId: '',
       latestAcceptancePdfUrl: '',
+      acceptedCurrentVersion: false,
     },
     paymentMethods: [],
     wallet: {
@@ -230,15 +232,7 @@ function resolveTutorScore(tutor = {}) {
 }
 
 function hasCurrentTutorAgreement(tutor = {}) {
-  const tutorAgreement = tutor?.tutorAgreement || {};
-  const requiredVersion = String(tutorAgreement.requiredVersion || TUTOR_AGREEMENT_DEFAULT_VERSION).trim();
-  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
-  return Boolean(
-    tutorAgreement.currentVersionAccepted === true
-      && requiredVersion
-      && acceptedVersion
-      && requiredVersion === acceptedVersion,
-  );
+  return isTutorAgreementCurrent(tutor?.tutorAgreement || {});
 }
 
 export async function getTutorCandidatesForRequest({ subject }) {

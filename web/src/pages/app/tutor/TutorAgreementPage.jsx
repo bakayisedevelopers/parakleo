@@ -11,7 +11,7 @@ import {
   formatAgreementDate,
   getTutorAgreementBundle,
 } from '../../../services/legalAgreementService';
-import { getTutorOnboardingStatus } from '../../../utils/onboarding';
+import { getTutorOnboardingStatus, hasCurrentTutorAgreement } from '../../../utils/onboarding';
 
 function formatTimestamp(value) {
   if (!value) return 'Not available';
@@ -35,6 +35,7 @@ export default function TutorAgreementPage() {
   const activeVersion = bundle.activeVersion || null;
   const acceptances = bundle.acceptances || [];
   const currentAcceptance = acceptances[0] || null;
+  const agreementAccepted = hasCurrentTutorAgreement(currentUser);
   const canSubmit = Boolean(
     user?.uid
       && activeVersion
@@ -97,6 +98,7 @@ export default function TutorAgreementPage() {
           tutorAgreement: {
             ...(prev?.tutorAgreement || {}),
             currentVersionAccepted: true,
+            acceptedCurrentVersion: true,
             acceptedVersion: result?.activeVersion?.version || activeVersion?.version,
             currentVersion: result?.activeVersion?.version || activeVersion?.version,
             latestAcceptedVersion: result?.activeVersion?.version || activeVersion?.version,
@@ -221,7 +223,7 @@ export default function TutorAgreementPage() {
                 <div className="mt-3 space-y-2 text-sm text-zinc-700">
                   <p><span className="font-semibold">Current version:</span> {currentUser?.tutorAgreement?.acceptedVersion || 'Not accepted yet'}</p>
                   <p><span className="font-semibold">Accepted at:</span> {formatTimestamp(currentUser?.tutorAgreement?.acceptedAt)}</p>
-                  <p><span className="font-semibold">Verification gate:</span> {onboardingStatus.complete ? 'Open' : 'Blocked until agreement accepted'}</p>
+                  <p><span className="font-semibold">Verification gate:</span> {agreementAccepted ? 'Open' : 'Blocked until agreement accepted'}</p>
                 </div>
               </div>
 

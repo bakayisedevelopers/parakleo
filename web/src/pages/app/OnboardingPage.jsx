@@ -14,6 +14,7 @@ import { listTutorPayoutBanks, verifyTutorPayoutAccount } from '../../services/t
 import {
   getStudentOnboardingStatus,
   getTutorOnboardingStatus,
+  hasCurrentTutorAgreement,
   TUTOR_VERIFICATION_STATUSES,
 } from '../../utils/onboarding';
 import PaymentMethodsManager from '../../components/app/PaymentMethodsManager';
@@ -53,11 +54,7 @@ export default function OnboardingPage() {
   const payoutDocumentNumberLabel = payoutDocumentType === 'passportNumber' ? 'Passport number' : 'South African ID number';
   const payoutVerificationState = String(currentUser?.tutorProfile?.payout?.verificationStatus || '').trim().toLowerCase();
   const payoutVerificationMessage = currentUser?.tutorProfile?.payout?.verificationMessage || '';
-  const hasCurrentTutorAgreement = Boolean(
-    currentUser?.tutorAgreement?.currentVersionAccepted === true
-      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim()
-      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim() === String(currentUser?.tutorAgreement?.acceptedVersion || '').trim(),
-  );
+  const tutorAgreementAccepted = hasCurrentTutorAgreement(currentUser);
 
   useEffect(() => {
     if (role !== 'tutor' || !user?.uid) return undefined;
@@ -125,7 +122,7 @@ export default function OnboardingPage() {
       setStatusMessage('Saving tutor profile details...');
 
       const gradesToTutor = (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean);
-      const verificationStatus = hasCurrentTutorAgreement && (currentUser?.qualifiedSubjects || []).length
+      const verificationStatus = tutorAgreementAccepted && (currentUser?.qualifiedSubjects || []).length
         ? TUTOR_VERIFICATION_STATUSES.VERIFIED
         : TUTOR_VERIFICATION_STATUSES.PENDING;
       const existingTutorProfile = currentUser?.tutorProfile || {};
@@ -254,7 +251,7 @@ export default function OnboardingPage() {
         </>
       ) : (
         <SectionCard title="Tutor setup" subtitle={tutorStatus.message}>
-          {!hasCurrentTutorAgreement ? (
+          {!tutorAgreementAccepted ? (
             <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               Please review and accept the latest Tutor Agreement to complete your tutor profile.{' '}
               <a className="font-semibold underline" href="/app/tutor/agreement">Open agreement</a>

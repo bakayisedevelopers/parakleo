@@ -327,8 +327,9 @@ function isTutorAgreementCurrent(user = {}) {
   const tutorAgreement = user?.tutorAgreement || {};
   const requiredVersion = normalizeVersionInput(tutorAgreement.requiredVersion || TUTOR_AGREEMENT_DEFAULT_VERSION);
   const acceptedVersion = normalizeVersionInput(tutorAgreement.acceptedVersion || '');
+  const acceptedCurrentVersion = tutorAgreement.currentVersionAccepted === true || tutorAgreement.acceptedCurrentVersion === true;
   return Boolean(
-    tutorAgreement.acceptedCurrentVersion === true
+    acceptedCurrentVersion
       && requiredVersion
       && acceptedVersion
       && requiredVersion === acceptedVersion,
@@ -356,6 +357,7 @@ function buildUserAgreementSnapshot({
       currentVersionId: activeVersion?.id || makeVersionDocId(activeVersion?.version || TUTOR_AGREEMENT_DEFAULT_VERSION),
       currentVersionEffectiveDate: activeVersion?.effectiveDate || '',
       currentVersionContentHash: activeVersion?.contentHash || computeContentHash(activeVersion?.contentMarkdown || ''),
+      currentVersionAccepted: true,
       acceptedCurrentVersion: true,
       acceptedVersion: activeVersion?.version || TUTOR_AGREEMENT_DEFAULT_VERSION,
       acceptedAt: new Date().toISOString(),
@@ -637,6 +639,7 @@ async function publishTutorAgreementVersion({
             currentVersionId: versionId,
             currentVersionEffectiveDate: effectiveDate || now.toISOString(),
             currentVersionContentHash: contentHash,
+            currentVersionAccepted: false,
             acceptedCurrentVersion: false,
             acceptedVersion: item.data()?.tutorAgreement?.acceptedVersion || '',
             acceptedAt: item.data()?.tutorAgreement?.acceptedAt || null,

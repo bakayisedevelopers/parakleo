@@ -39,6 +39,7 @@ functions/.env.local
 .firebase/
 .firebase-config/
 .gcloud/
+.gemini/
 firebase-debug.log
 firebase-debug.*.log
 

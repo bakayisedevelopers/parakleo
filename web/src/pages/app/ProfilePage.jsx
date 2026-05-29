@@ -10,7 +10,7 @@ import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsMana
 import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
 import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
-import { getStudentOnboardingStatus, getTutorOnboardingStatus } from '../../utils/onboarding';
+import { getStudentOnboardingStatus, getTutorOnboardingStatus, hasCurrentTutorAgreement } from '../../utils/onboarding';
 import { getUserProfile, updateUserProfile } from '../../services/userService';
 
 export default function ProfilePage() {
@@ -99,11 +99,7 @@ export default function ProfilePage() {
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
   const isTutorOnline = currentUser?.onlineStatus === 'online';
   const tutorProfileData = currentUser?.tutorProfile || {};
-  const tutorAgreementAccepted = Boolean(
-    currentUser?.tutorAgreement?.currentVersionAccepted === true
-      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim()
-      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim() === String(currentUser?.tutorAgreement?.acceptedVersion || '').trim(),
-  );
+  const tutorAgreementAccepted = hasCurrentTutorAgreement(currentUser);
   const formatPercent = (value) => `${(Math.max(0, Number(value || 0) <= 1 ? Number(value || 0) * 100 : Number(value || 0))).toFixed(1)}%`;
   const formatDateTime = (value) => {
     if (!value) return 'Not available yet';
