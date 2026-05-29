@@ -53,6 +53,11 @@ export default function OnboardingPage() {
   const payoutDocumentNumberLabel = payoutDocumentType === 'passportNumber' ? 'Passport number' : 'South African ID number';
   const payoutVerificationState = String(currentUser?.tutorProfile?.payout?.verificationStatus || '').trim().toLowerCase();
   const payoutVerificationMessage = currentUser?.tutorProfile?.payout?.verificationMessage || '';
+  const hasCurrentTutorAgreement = Boolean(
+    currentUser?.tutorAgreement?.currentVersionAccepted === true
+      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim()
+      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim() === String(currentUser?.tutorAgreement?.acceptedVersion || '').trim(),
+  );
 
   useEffect(() => {
     if (role !== 'tutor' || !user?.uid) return undefined;
@@ -120,7 +125,7 @@ export default function OnboardingPage() {
       setStatusMessage('Saving tutor profile details...');
 
       const gradesToTutor = (formData.get('gradesToTutor')?.toString() || '').split(',').map((item) => item.trim()).filter(Boolean);
-      const verificationStatus = (currentUser?.qualifiedSubjects || []).length
+      const verificationStatus = hasCurrentTutorAgreement && (currentUser?.qualifiedSubjects || []).length
         ? TUTOR_VERIFICATION_STATUSES.VERIFIED
         : TUTOR_VERIFICATION_STATUSES.PENDING;
       const existingTutorProfile = currentUser?.tutorProfile || {};
@@ -249,6 +254,12 @@ export default function OnboardingPage() {
         </>
       ) : (
         <SectionCard title="Tutor setup" subtitle={tutorStatus.message}>
+          {!hasCurrentTutorAgreement ? (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              Please review and accept the latest Tutor Agreement to complete your tutor profile.{' '}
+              <a className="font-semibold underline" href="/app/tutor/agreement">Open agreement</a>
+            </div>
+          ) : null}
           <form className="grid gap-4 md:grid-cols-2" onSubmit={saveTutorProfile}>
             <div className="md:col-span-2">
               <label className="mb-2 block text-sm font-semibold text-zinc-700">Live selfie verification</label>

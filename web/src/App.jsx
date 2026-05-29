@@ -15,11 +15,13 @@ import AvailableRequestsPage from './pages/app/tutor/AvailableRequestsPage';
 import MyClassesPage from './pages/app/tutor/MyClassesPage';
 import TutorSessionsPage from './pages/app/tutor/TutorSessionsPage';
 import TutorPaymentsPage from './pages/app/tutor/TutorPaymentsPage';
+import TutorAgreementPage from './pages/app/tutor/TutorAgreementPage';
 import ProfilePage from './pages/app/ProfilePage';
 import OnboardingPage from './pages/app/OnboardingPage';
 import SessionRoomPage from './pages/app/SessionRoomPage';
 import AdminDashboardPage from './pages/app/admin/AdminDashboardPage';
 import AdminTutorsPage from './pages/app/admin/AdminTutorsPage';
+import AdminTutorAgreementsPage from './pages/app/admin/AdminTutorAgreementsPage';
 import AdminPaymentsPage from './pages/app/admin/AdminPaymentsPage';
 import AdminUnsupportedSubjectsPage from './pages/app/admin/AdminUnsupportedSubjectsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
@@ -161,6 +163,14 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="tutor/agreement"
+            element={
+              <ProtectedRoute allowedRoles={['tutor']}>
+                <TutorAgreementPage />
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="admin"
@@ -175,6 +185,14 @@ export default function App() {
             element={
               <ProtectedRoute requireAdmin>
                 <AdminTutorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/tutor-agreements"
+            element={
+              <ProtectedRoute requireAdmin>
+                <AdminTutorAgreementsPage />
               </ProtectedRoute>
             }
           />

@@ -4,6 +4,7 @@ export const STUDENT_PROFILE_STEPS = {
 };
 
 export const TUTOR_PROFILE_STEPS = {
+  AGREEMENT: 'agreement',
   QUALIFICATIONS: 'qualifications',
   PAYOUT: 'payout_setup',
   PROFILE: 'profile_setup',
@@ -54,8 +55,17 @@ export function getStudentOnboardingStatus(user) {
 
 export function getTutorOnboardingStatus(user) {
   const tutorProfile = user?.tutorProfile || {};
+  const tutorAgreement = user?.tutorAgreement || {};
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
+  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
+  const hasCurrentAgreement = Boolean(
+    tutorAgreement.currentVersionAccepted === true
+      && requiredVersion
+      && acceptedVersion
+      && requiredVersion === acceptedVersion,
+  );
   const hasQualification = qualifiedSubjects.length > 0;
   const qualified = hasQualification;
   const hasPayout = Boolean(
@@ -67,6 +77,15 @@ export function getTutorOnboardingStatus(user) {
     && (tutorProfile.payout?.verificationStatus === 'verified' || tutorProfile.payout?.verified === true),
   );
   const hasProfile = Boolean(user?.selfieVerified && user?.selfieUrl && tutorProfile.gradesToTutor?.length && activeSubjects.length);
+  if (!hasCurrentAgreement) {
+    return {
+      complete: false,
+      step: TUTOR_PROFILE_STEPS.AGREEMENT,
+      title: 'Accept the Tutor Agreement',
+      message: 'Please review and accept the latest Tutor Agreement to complete your tutor profile.',
+    };
+  }
+
   if (qualified && hasPayout && hasProfile) {
     return {
       complete: true,
@@ -97,9 +116,9 @@ export function getTutorOnboardingStatus(user) {
 
   return {
     complete: false,
-      step: TUTOR_PROFILE_STEPS.PROFILE,
-      title: 'Complete tutor profile',
-      message: 'Capture a live selfie, add grades, and choose active subjects to finish setup.',
+    step: TUTOR_PROFILE_STEPS.PROFILE,
+    title: 'Complete tutor profile',
+    message: 'Capture a live selfie, add grades, and choose active subjects to finish setup.',
   };
 }
 

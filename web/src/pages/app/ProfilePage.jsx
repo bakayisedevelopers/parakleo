@@ -99,6 +99,11 @@ export default function ProfilePage() {
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
   const isTutorOnline = currentUser?.onlineStatus === 'online';
   const tutorProfileData = currentUser?.tutorProfile || {};
+  const tutorAgreementAccepted = Boolean(
+    currentUser?.tutorAgreement?.currentVersionAccepted === true
+      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim()
+      && String(currentUser?.tutorAgreement?.requiredVersion || '1.0.0').trim() === String(currentUser?.tutorAgreement?.acceptedVersion || '').trim(),
+  );
   const formatPercent = (value) => `${(Math.max(0, Number(value || 0) <= 1 ? Number(value || 0) * 100 : Number(value || 0))).toFixed(1)}%`;
   const formatDateTime = (value) => {
     if (!value) return 'Not available yet';
@@ -152,6 +157,27 @@ export default function ProfilePage() {
 
       {isTutorRole ? (
         <>
+          <SectionCard
+            title="Tutor Agreement"
+            subtitle={tutorAgreementAccepted ? 'Your current agreement is signed and active.' : 'Please review and accept the latest Tutor Agreement to complete your tutor profile.'}
+            action={<Link to="/app/tutor/agreement" className="rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white">Open agreement</Link>}
+          >
+            <div className="grid gap-3 text-sm text-zinc-700 md:grid-cols-3">
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Current version</p>
+                <p className="mt-1 font-semibold text-zinc-900">{currentUser?.tutorAgreement?.requiredVersion || '1.0.0'}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Accepted version</p>
+                <p className="mt-1 font-semibold text-zinc-900">{currentUser?.tutorAgreement?.acceptedVersion || 'Not accepted yet'}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Status</p>
+                <p className="mt-1 font-semibold text-zinc-900">{tutorAgreementAccepted ? 'Signed' : 'Action required'}</p>
+              </div>
+            </div>
+          </SectionCard>
+
           <SectionCard title="Tutor verification" subtitle="Capture a live selfie and upload results so Parakleo can verify your subject eligibility.">
             <div className="grid gap-5 lg:grid-cols-2">
               <div>

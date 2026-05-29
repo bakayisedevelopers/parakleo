@@ -2,6 +2,7 @@ import { getFirebaseClients } from '../firebase/config';
 import { DEFAULT_SUBJECTS } from '../constants/subjects';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
+const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.0';
 const MOCK_USER_KEY = 'parakleo_mock_user';
 
 function buildReferralSlug() {
@@ -50,6 +51,23 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
         accountNumber: '',
         accountHolder: '',
       },
+    },
+    tutorAgreement: {
+      documentId: 'tutor_agreement',
+      title: 'Tutor Agreement',
+      legalEntityName: 'Parakleo, operated by Jabu Msiza',
+      requiredVersion: TUTOR_AGREEMENT_DEFAULT_VERSION,
+      requiredVersionId: `tutor_agreement_${TUTOR_AGREEMENT_DEFAULT_VERSION}`,
+      currentVersion: TUTOR_AGREEMENT_DEFAULT_VERSION,
+      currentVersionId: `tutor_agreement_${TUTOR_AGREEMENT_DEFAULT_VERSION}`,
+      currentVersionAccepted: false,
+      acceptedVersion: '',
+      acceptedAt: null,
+      acceptanceId: '',
+      latestAcceptedVersion: '',
+      latestAcceptedAt: null,
+      latestAcceptanceId: '',
+      latestAcceptancePdfUrl: '',
     },
     paymentMethods: [],
     wallet: {
@@ -211,6 +229,18 @@ function resolveTutorScore(tutor = {}) {
   };
 }
 
+function hasCurrentTutorAgreement(tutor = {}) {
+  const tutorAgreement = tutor?.tutorAgreement || {};
+  const requiredVersion = String(tutorAgreement.requiredVersion || TUTOR_AGREEMENT_DEFAULT_VERSION).trim();
+  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
+  return Boolean(
+    tutorAgreement.currentVersionAccepted === true
+      && requiredVersion
+      && acceptedVersion
+      && requiredVersion === acceptedVersion,
+  );
+}
+
 export async function getTutorCandidatesForRequest({ subject }) {
   const clients = await getFirebaseClients();
 
@@ -236,7 +266,7 @@ export async function getTutorCandidatesForRequest({ subject }) {
       const isVerified = tutorProfile.verificationStatus === 'verified';
       const normalizedSubjects = (tutor.activeSubjects || tutor.subjects || []).map((item) => String(item || '').trim().toLowerCase());
       const requestSubject = String(subject || 'Mathematics').trim().toLowerCase();
-      return isVerified && normalizedSubjects.includes(requestSubject) && !tutor.activeSessionId;
+      return isVerified && hasCurrentTutorAgreement(tutor) && normalizedSubjects.includes(requestSubject) && !tutor.activeSessionId;
     })
     .sort((a, b) => resolveTutorScore(b).composite - resolveTutorScore(a).composite);
 }
@@ -283,6 +313,9 @@ export async function getStudentsForAdmin() {
 
 export async function setTutorVerificationStatus(uid, verificationStatus) {
   const existing = await getUserProfile(uid);
+  if (String(verificationStatus || '').toLowerCase() === 'verified' && !hasCurrentTutorAgreement(existing || {})) {
+    throw new Error('Tutor must accept the current Tutor Agreement before being marked verified.');
+  }
   return updateUserProfile(uid, {
     tutorProfile: {
       ...(existing?.tutorProfile || {}),

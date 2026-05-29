@@ -1,14 +1,49 @@
-node_modules
-.env
-web/.env.local
-.firebase
-web/node_models
-web/dist
+# Dependencies
+node_modules/
+web/node_modules/
+mobile/node_modules/
+functions/node_modules/
+
+# Build outputs
+web/dist/
+web/build/
+mobile/dist/
+mobile/build/
+mobile/android/app/build/
+mobile/android/.gradle/
 mobile/.expo/
-.firebase-config/
-commands.txt
-.gcloud/
+mobile/.expo-shared/
+
+# Python
+__pycache__/
 **/__pycache__/
 *.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+services/**/.venv/
+services/**/venv/
+services/**/env/
 
+# Environment files
+.env
+.env.*
+!.env.example
+web/.env.local
+mobile/.env.local
+functions/.env.local
+
+# Firebase / cloud tooling
+.firebase/
+.firebase-config/
+.gcloud/
+firebase-debug.log
+firebase-debug.*.log
+
+# Editor / OS / misc
+.DS_Store
+*.log
+commands.txt
 .tools/

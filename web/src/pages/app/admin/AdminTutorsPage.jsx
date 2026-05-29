@@ -28,6 +28,12 @@ export default function AdminTutorsPage() {
     await load();
   };
 
+  const hasCurrentAgreement = (tutor = {}) => Boolean(
+    tutor?.tutorAgreement?.currentVersionAccepted === true
+      && String(tutor?.tutorAgreement?.requiredVersion || '1.0.0').trim()
+      && String(tutor?.tutorAgreement?.requiredVersion || '1.0.0').trim() === String(tutor?.tutorAgreement?.acceptedVersion || '').trim(),
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader title="Tutor Verification" description="Review and update tutor verification statuses." />
@@ -41,8 +47,9 @@ export default function AdminTutorsPage() {
                 <p className="font-semibold text-zinc-900">{tutor.fullName || tutor.displayName || tutor.email}</p>
                 <p className="text-sm text-zinc-600">{tutor.email}</p>
                 <p className="text-xs text-zinc-500">Status: {tutor?.tutorProfile?.verificationStatus || 'pending'}</p>
+                <p className="text-xs text-zinc-500">Agreement: {hasCurrentAgreement(tutor) ? `Accepted v${tutor?.tutorAgreement?.acceptedVersion || ''}` : 'Pending acceptance'}</p>
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => updateStatus(tutor.uid, 'verified')} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Verify</button>
+                  <button disabled={!hasCurrentAgreement(tutor)} onClick={() => updateStatus(tutor.uid, 'verified')} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Verify</button>
                   <button onClick={() => updateStatus(tutor.uid, 'rejected')} className="rounded-xl border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-600">Reject</button>
                   <button onClick={() => updateStatus(tutor.uid, 'pending')} className="rounded-xl border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700">Reset</button>
                 </div>

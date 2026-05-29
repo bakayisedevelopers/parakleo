@@ -77,6 +77,9 @@ export default function AdminDashboardPage() {
               <Link to="/app/admin/tutors" className="rounded-2xl border border-zinc-300 bg-white p-4 text-sm font-semibold text-zinc-800 hover:border-emerald-300">
                 Tutor verification and profiles
               </Link>
+              <Link to="/app/admin/tutor-agreements" className="rounded-2xl border border-zinc-300 bg-white p-4 text-sm font-semibold text-zinc-800 hover:border-emerald-300">
+                Tutor agreement versioning
+              </Link>
               <Link to="/app/admin/payments" className="rounded-2xl border border-zinc-300 bg-white p-4 text-sm font-semibold text-zinc-800 hover:border-emerald-300">
                 Weekly manual payout management
               </Link>

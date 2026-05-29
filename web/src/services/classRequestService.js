@@ -11,7 +11,7 @@ import { PLATFORM_FEE_RATE, TUTOR_PAYOUT_RATE } from '../utils/onboarding';
 import { normalizePricingSnapshot } from '../utils/pricing';
 import { getWeekKey } from '../utils/payouts';
 import { createNotification } from './notificationService';
-import { getTutorCandidatesForRequest } from './userService';
+import { getTutorCandidatesForRequest, getUserProfile } from './userService';
 import { debugError, debugLog } from '../utils/devLogger';
 
 const MOCK_REQUESTS_KEY = 'parakleo_mock_requests';
@@ -76,6 +76,18 @@ function getStatusDelayElapsed(request, delayMs) {
   const updatedAtMs = normalizeTimestamp(request.updatedAt);
   if (!updatedAtMs) return true;
   return Date.now() - updatedAtMs >= delayMs;
+}
+
+function hasCurrentTutorAgreement(tutor = {}) {
+  const tutorAgreement = tutor?.tutorAgreement || {};
+  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.0').trim();
+  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
+  return Boolean(
+    tutorAgreement.currentVersionAccepted === true
+      && requiredVersion
+      && acceptedVersion
+      && requiredVersion === acceptedVersion,
+  );
 }
 
 function isRequestExpired(request) {
@@ -570,12 +582,17 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
 
   const responsePromise = (async () => {
     const clients = await getFirebaseClients();
+    const tutorProfile = response === 'accept' ? await getUserProfile(tutorId).catch(() => null) : null;
 
   if (!clients) {
     const existing = getMockRequests().find((item) => item.id === requestId);
     if (!existing) return;
 
     if (response === 'accept') {
+      if (!hasCurrentTutorAgreement(tutorProfile || {})) {
+        throw new Error('You must accept the current Tutor Agreement before accepting class requests.');
+      }
+
       const existingSessionId = existing.sessionId || requestId;
       const existingSession = getMockSessions().find(
         (item) =>
@@ -743,6 +760,10 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
   });
 
   try {
+    if (response === 'accept' && !hasCurrentTutorAgreement(tutorProfile || {})) {
+      throw new Error('You must accept the current Tutor Agreement before accepting class requests.');
+    }
+
     const transactionResult = await runTransaction(db, async (transaction) => {
       const requestRef = doc(db, 'classRequests', requestId);
       const requestSnap = await transaction.get(requestRef);

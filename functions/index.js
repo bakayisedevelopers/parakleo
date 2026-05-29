@@ -28,6 +28,20 @@ const { runAcademicBrainMini } = require('./academicBrain/engine');
 const { saveAcademicBrainFeedback } = require('./academicBrain/feedback');
 const { AcademicBrain, SUBJECTS } = require('./ai/AcademicBrain');
 const { TrainingPipeline } = require('./ai/TrainingPipeline');
+const {
+  LEGAL_ENTITY_NAME,
+  TUTOR_AGREEMENT_DOCUMENT_ID,
+  TUTOR_AGREEMENT_TITLE,
+  TUTOR_AGREEMENT_DEFAULT_VERSION,
+  TUTOR_AGREEMENT_STATUS,
+  buildTutorAgreementMarkdown,
+  ensureTutorAgreementSeeded,
+  getTutorAgreementBundle,
+  isTutorAgreementCurrent,
+  acceptTutorAgreement,
+  publishTutorAgreementVersion,
+  makeVersionDocId,
+} = require('./legalAgreements');
 
 let aiSubjectExtractionModule = null;
 let geminiExtractionModule = null;
@@ -684,6 +698,28 @@ function hasCompletedTutorProfile(user = {}) {
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
 
   return Boolean(
+    isTutorAgreementCurrent(user)
+      && qualifiedSubjects.length > 0
+      && user?.selfieVerified
+      && String(user?.selfieUrl || '').trim()
+      && Array.isArray(tutorProfile.gradesToTutor)
+      && tutorProfile.gradesToTutor.length > 0
+      && activeSubjects.length > 0
+      && tutorProfile.payout?.bankName
+      && tutorProfile.payout?.accountNumber
+      && tutorProfile.payout?.accountHolder
+      && tutorProfile.payout?.bankCode
+      && tutorProfile.payout?.paystackRecipientCode
+      && tutorProfile.payout?.verified,
+  );
+}
+
+function hasCompletedTutorProfileWithoutAgreement(user = {}) {
+  const tutorProfile = user?.tutorProfile || {};
+  const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
+  const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+
+  return Boolean(
     qualifiedSubjects.length > 0
       && user?.selfieVerified
       && String(user?.selfieUrl || '').trim()
@@ -861,6 +897,7 @@ function isTutorDispatchEligible(tutor = {}, subjectKey) {
   );
 
   return tutor?.tutorProfile?.verificationStatus === 'verified'
+    && isTutorAgreementCurrent(tutor)
     && !tutor.activeSessionId
     && normalizedSubjects.includes(subjectKey)
     && !isDispatchPaused
@@ -2031,6 +2068,26 @@ function getBearerToken(req) {
   return authHeader.substring('Bearer '.length).trim();
 }
 
+function isAllowlistedAdminEmail(email = '') {
+  const normalized = String(email || '').trim().toLowerCase();
+  return ['jabuobed1@gmail.com'].includes(normalized);
+}
+
+function isAdminToken(decoded = {}) {
+  return Boolean(
+    decoded?.admin === true
+      || decoded?.isAdmin === true
+      || isAllowlistedAdminEmail(decoded?.email),
+  );
+}
+
+function getRequestMetadata(req = {}) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const ipAddress = forwardedFor || String(req.headers['x-real-ip'] || req.ip || '').trim();
+  const userAgent = String(req.headers['user-agent'] || '').trim();
+  return { ipAddress, userAgent };
+}
+
 function escapeHtml(value = '') {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -2212,14 +2269,188 @@ async function getPricingSignalContext(subject) {
     db.collection('users').where('activeRole', '==', 'tutor').where('tutorProfile.verificationStatus', '==', 'verified').get(),
   ]);
 
+  const onlineTutors = onlineTutorsSnap.docs
+    .map((item) => ({ uid: item.id, ...item.data() }))
+    .filter((tutor) => isTutorAgreementCurrent(tutor));
+  const verifiedTutors = verifiedTutorsSnap.docs
+    .map((item) => ({ uid: item.id, ...item.data() }))
+    .filter((tutor) => isTutorAgreementCurrent(tutor));
+
   return {
     now: new Date(),
     subject,
     activeRequests: activeRequestsSnap.size,
-    onlineTutors: onlineTutorsSnap.size,
-    verifiedTutors: verifiedTutorsSnap.size,
+    onlineTutors: onlineTutors.length,
+    verifiedTutors: verifiedTutors.length,
   };
 }
+
+exports.getTutorAgreement = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'GET') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  await ensureTutorAgreementSeeded({ db, admin }).catch((error) => {
+    logger.warn('Unable to seed tutor agreement before reading.', { error: error.message });
+  });
+
+  const userSnap = await db.collection('users').doc(decoded.uid).get();
+  const userData = userSnap.data() || {};
+  const bundle = await getTutorAgreementBundle({ db, admin, userId: decoded.uid });
+
+  res.json({
+    success: true,
+    legalEntityName: LEGAL_ENTITY_NAME,
+    documentId: TUTOR_AGREEMENT_DOCUMENT_ID,
+    title: TUTOR_AGREEMENT_TITLE,
+    activeVersion: bundle.activeVersion,
+    document: bundle.document,
+    versions: bundle.versions,
+    acceptances: bundle.acceptances,
+    user: {
+      uid: decoded.uid,
+      email: String(decoded.email || userData.email || '').trim(),
+      fullName: String(userData.fullName || userData.displayName || decoded.name || '').trim(),
+      tutorAgreement: userData.tutorAgreement || {},
+      tutorProfile: userData.tutorProfile || {},
+      activeRole: userData.activeRole || userData.role || null,
+    },
+  });
+});
+
+exports.acceptTutorAgreement = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const userSnap = await db.collection('users').doc(decoded.uid).get();
+  const userData = userSnap.data() || {};
+  const isTutor = String(userData.activeRole || userData.role || '').toLowerCase() === 'tutor';
+  if (!isTutor) {
+    res.status(403).json({ success: false, message: 'Only tutors can accept the Tutor Agreement.' });
+    return;
+  }
+
+  const { ipAddress, userAgent } = getRequestMetadata(req);
+  try {
+    const acceptanceResult = await acceptTutorAgreement({
+      db,
+      admin,
+      user: { uid: decoded.uid, ...userData },
+      typedSignatureName: req.body?.typedSignatureName,
+      checkboxAccepted: req.body?.checkboxAccepted === true || String(req.body?.checkboxAccepted).toLowerCase() === 'true',
+      ipAddress,
+      userAgent,
+    });
+
+    const refreshedSnap = await db.collection('users').doc(decoded.uid).get();
+    const refreshedUser = refreshedSnap.data() || {};
+    const shouldBeVerified = hasCompletedTutorProfile(refreshedUser);
+
+    await db.collection('users').doc(decoded.uid).set({
+      tutorProfile: {
+        ...(refreshedUser.tutorProfile || {}),
+        verificationStatus: shouldBeVerified ? 'verified' : 'pending',
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: 'Tutor Agreement accepted successfully.',
+      ...acceptanceResult,
+      tutorProfile: {
+        ...(refreshedUser.tutorProfile || {}),
+        verificationStatus: shouldBeVerified ? 'verified' : 'pending',
+      },
+    });
+  } catch (error) {
+    logger.warn('Tutor agreement acceptance failed.', {
+      uid: decoded.uid,
+      message: error.message,
+    });
+    res.status(400).json({ success: false, message: error.message || 'Unable to accept Tutor Agreement.' });
+  }
+});
+
+exports.publishTutorAgreementVersion = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid || !isAdminToken(decoded)) {
+    res.status(403).json({ success: false, message: 'Admin access required.' });
+    return;
+  }
+
+  const version = String(req.body?.version || '').trim();
+  if (!version) {
+    res.status(400).json({ success: false, message: 'version is required.' });
+    return;
+  }
+
+  try {
+    const result = await publishTutorAgreementVersion({
+      db,
+      admin,
+      version,
+      title: String(req.body?.title || TUTOR_AGREEMENT_TITLE).trim() || TUTOR_AGREEMENT_TITLE,
+      effectiveDate: String(req.body?.effectiveDate || '').trim(),
+      contentMarkdown: String(req.body?.contentMarkdown || '').trim() || buildTutorAgreementMarkdown(),
+      changeSummary: String(req.body?.changeSummary || '').trim(),
+      updatedBy: decoded.email || decoded.uid,
+      status: String(req.body?.status || TUTOR_AGREEMENT_STATUS.ACTIVE).trim().toLowerCase() === TUTOR_AGREEMENT_STATUS.DRAFT
+        ? TUTOR_AGREEMENT_STATUS.DRAFT
+        : TUTOR_AGREEMENT_STATUS.ACTIVE,
+    });
+
+    res.json({
+      success: true,
+      message: 'Tutor Agreement version published.',
+      ...result,
+    });
+  } catch (error) {
+    logger.warn('Failed to publish tutor agreement version.', {
+      uid: decoded.uid,
+      message: error.message,
+    });
+    res.status(400).json({ success: false, message: error.message || 'Unable to publish version.' });
+  }
+});
 
 exports.getPricingQuote = onRequest({ cors: true }, async (req, res) => {
   if (req.method !== 'POST') {
@@ -3711,6 +3942,7 @@ exports.verifyPaystack = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SEC
 
     const usersRef = db.collection('users').doc(uid);
     const userSnap = await usersRef.get();
+    const studentData = userSnap.data() || {};
     const existingMethods = Array.isArray(userSnap.data()?.paymentMethods)
       ? userSnap.data().paymentMethods
       : [];
