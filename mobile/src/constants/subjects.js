@@ -1,22 +1,13 @@
 export const SOUTH_AFRICAN_SUBJECTS = [
-  'Mathematics',
-  'Mathematical Literacy',
+  'Maths',
+  'Maths Lit',
   'Physical Sciences',
-  'Life Sciences',
-  'English',
-  'IsiZulu',
-  'XiTsonga',
-  'Afrikaans',
-  'Geography',
-  'History',
-  'Accounting',
   'Business Studies',
   'Economics',
-  'Agricultural Sciences',
-  'Computer Applications Technology',
-  'Information Technology',
-  'Tourism',
-  'Life Orientation',
+  'Accounting',
+  'Life Sciences',
+  'Agriculture',
+  'English',
 ];
 
 export function normalizeSubjectList(values = []) {

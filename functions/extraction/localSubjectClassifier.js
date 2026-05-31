@@ -3,20 +3,15 @@ function normalizeText(value = '') {
 }
 
 const SUBJECT_RULES = {
-  Mathematics: ['algebra', 'equation', 'solve for x', 'trigonometry', 'calculus', 'geometry', 'probability', 'factorise', 'ratio', 'linear', 'quadratic', 'graph'],
-  'Mathematical Literacy': ['maths lit', 'mathematical literacy', 'interest rate', 'budget', 'measurement', 'scale drawing', 'currency conversion'],
+  Maths: ['algebra', 'equation', 'solve for x', 'trigonometry', 'calculus', 'geometry', 'probability', 'factorise', 'ratio', 'linear', 'quadratic', 'graph'],
+  'Maths Lit': ['maths lit', 'mathematical literacy', 'interest rate', 'budget', 'measurement', 'scale drawing', 'currency conversion'],
   'Physical Sciences': ['physics', 'chemistry', 'newton', 'mole', 'energy', 'acid', 'base', 'reaction', 'force', 'stoichiometry', 'ohm', 'voltage'],
   'Life Sciences': ['biology', 'cell', 'photosynthesis', 'genetics', 'ecosystem', 'organism', 'respiration', 'mitosis'],
-  'Natural Sciences': ['natural sciences', 'matter and materials', 'energy and change', 'planet earth', 'life and living'],
-  Technology: ['technology', 'design process', 'materials', 'systems and control', 'mechanical systems'],
-  EMS: ['economic and management sciences', 'ems', 'entrepreneurship', 'accounting basics', 'business cycle'],
+  Agriculture: ['agriculture', 'agricultural science', 'agricultural sciences', 'crop', 'soil', 'livestock', 'farming'],
   Accounting: ['balance sheet', 'ledger', 'debit', 'credit', 'trial balance', 'income statement'],
   Economics: ['supply', 'demand', 'inflation', 'gdp', 'market', 'fiscal', 'monetary'],
-  Geography: ['map', 'climate', 'erosion', 'topography', 'latitude', 'longitude'],
-  History: ['source', 'historical', 'war', 'timeline', 'apartheid', 'revolution'],
+  'Business Studies': ['business', 'entrepreneurship', 'management', 'marketing', 'production', 'business plan'],
   English: ['essay', 'grammar', 'comprehension', 'poem', 'literature', 'language', 'transactional writing', 'summary writing'],
-  Afrikaans: ['afrikaans', 'begripstoets', 'taal', 'opstel', 'gedig', 'letterkunde'],
-  isiZulu: ['isizulu', 'ulimi', 'inkondlo', 'isifaniso', 'isiqalo', 'indaba'],
 };
 
 function mapSupportedSubjects(supportedSubjects = []) {

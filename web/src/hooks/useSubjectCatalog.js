@@ -6,6 +6,11 @@ export function useSubjectCatalog() {
   const [subjectNames, setSubjectNames] = useState(FALLBACK_SUBJECTS);
   const subjectOptions = useMemo(() => toSubjectOptions(subjectNames), [subjectNames]);
 
+  const allowedSet = useMemo(
+    () => new Set(FALLBACK_SUBJECTS.map((subject) => String(subject).trim().toLowerCase())),
+    [],
+  );
+
   useEffect(() => {
     let unsubscribe = null;
     let isMounted = true;
@@ -24,8 +29,10 @@ export function useSubjectCatalog() {
             return;
           }
 
-          const names = normalizeSubjectList(snapshot.data()?.subjectNames || []);
-          setSubjectNames(names.length ? names : FALLBACK_SUBJECTS);
+          const names = normalizeSubjectList(snapshot.data()?.subjectNames || [])
+            .filter((name) => allowedSet.has(String(name).trim().toLowerCase()));
+          const merged = normalizeSubjectList([...FALLBACK_SUBJECTS, ...names]);
+          setSubjectNames(merged.length ? merged : FALLBACK_SUBJECTS);
         },
         () => setSubjectNames(FALLBACK_SUBJECTS),
       );
@@ -35,7 +42,7 @@ export function useSubjectCatalog() {
       isMounted = false;
       unsubscribe?.();
     };
-  }, []);
+  }, [allowedSet]);
 
   return {
     subjectNames,

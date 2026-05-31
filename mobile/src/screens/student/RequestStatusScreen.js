@@ -10,7 +10,7 @@ import { subscribeToRequestById, cancelClassRequest } from '../../services/class
 import { subscribeToStudentSessions } from '../../services/sessionService';
 import { getUserProfile } from '../../services/userService';
 import { colors } from '../../theme/colors';
-import { isRequestJoinable, TERMINAL_REQUEST_STATUSES } from '../../utils/requestStatus';
+import { TERMINAL_REQUEST_STATUSES } from '../../utils/requestStatus';
 
 function getStatusCopy(status) {
   const normalized = String(status || '').toLowerCase();
@@ -217,13 +217,16 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
 
   const relatedSessionStatus = String(relatedSession?.status || '').toLowerCase();
   const relatedSessionIsActive = ['waiting_student', 'in_progress', 'in_session'].includes(relatedSessionStatus);
-  const canJoin = isRequestJoinable(request?.status) && Boolean(relatedSession?.id) && relatedSessionIsActive;
-  const shouldAutoOpenSession = canJoin && Boolean(relatedSession?.id);
+  const joinSessionId = relatedSession?.id || request?.sessionId || '';
+  const normalizedStatus = String(request?.status || '').toLowerCase();
+  const hasActiveSession = Boolean(joinSessionId) && (relatedSession ? relatedSessionIsActive : true);
+  const canJoin = hasActiveSession && !TERMINAL_REQUEST_STATUSES.includes(normalizedStatus);
+  const shouldAutoOpenSession = canJoin && Boolean(joinSessionId);
 
   useEffect(() => {
-    if (!shouldAutoOpenSession || !relatedSession?.id) return;
-    navigate({ key: 'SessionRoom', params: { sessionId: relatedSession.id, parentTab: 'Sessions' } });
-  }, [navigate, relatedSession?.id, shouldAutoOpenSession]);
+    if (!shouldAutoOpenSession || !joinSessionId) return;
+    navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
+  }, [joinSessionId, navigate, shouldAutoOpenSession]);
 
   if (loading) {
     return <LoadingState label="Loading request status" />;
@@ -241,8 +244,11 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     return null;
   }
 
-  const statusText = getStatusCopy(request.status);
-  const statusMeta = getStatusMeta(request.status);
+  const effectiveStatus = hasActiveSession && ['pending', 'matching', 'offered', 'no_tutor_available'].includes(normalizedStatus)
+    ? (relatedSessionStatus === 'in_progress' ? 'in_progress' : 'waiting_student')
+    : request.status;
+  const statusText = getStatusCopy(effectiveStatus);
+  const statusMeta = getStatusMeta(effectiveStatus);
   const tone = getToneStyles(statusMeta.tone);
   const isWaitingTutorAcceptance = String(request?.status || '').toLowerCase() === 'offered';
   const tutorDisplayName = offeredTutorProfile?.fullName || offeredTutorProfile?.displayName || request?.tutorName || 'Tutor';
@@ -300,6 +306,16 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
               </View>
             </View>
             <Text style={styles.currentStateBadge}>{statusMeta.badge}</Text>
+            {canJoin && joinSessionId ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } })}
+                style={styles.topJoinButton}
+              >
+                <Text style={styles.topJoinButtonText}>Join session</Text>
+                <Ionicons name="arrow-forward" size={14} color="#ffffff" />
+              </Pressable>
+            ) : null}
 
             {isWaitingTutorAcceptance ? (
               <View style={styles.tutorCard}>
@@ -363,7 +379,7 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
           {canJoin ? (
             <Pressable
               accessibilityRole="button"
-              onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: relatedSession.id, parentTab: 'Sessions' } })}
+              onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } })}
               style={styles.joinButton}
             >
               <Text style={styles.joinButtonText}>Join session</Text>
@@ -506,6 +522,26 @@ const styles = StyleSheet.create({
   currentStateBadge: {
     color: 'rgba(255,255,255,0.9)',
     fontSize: 13,
+  },
+  topJoinButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  topJoinButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   tutorCard: {
     alignItems: 'center',

@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import TldrawSdkEmbed from '../../components/app/TldrawSdkEmbed';
+import AiClassWhiteboard from '../../components/ai/AiClassWhiteboard';
 import { useAuth } from '../../hooks/useAuth';
 import { useClassRequest } from '../../hooks/useClassRequests';
 import { useStudentSessions, useTutorSessions } from '../../hooks/useSessions';
@@ -26,6 +27,7 @@ import {
   updateSession,
 } from '../../services/sessionService';
 import { createWebRtcSessionController } from '../../services/webrtcService';
+import { createAiLiveSessionController } from '../../services/aiLiveSessionService';
 import { fetchIceServers } from '../../services/iceServerService';
 import { debugLog } from '../../utils/devLogger';
 import { parseQuestionsFromExtraction, parseQuestionsFromGptExtraction } from '../../services/questionParsingService';
@@ -477,6 +479,7 @@ export default function SessionRoomPage() {
   const remoteScreenVideoRef = useRef(null);
 
   const rtcRef = useRef(null);
+  const aiLiveRef = useRef(null);
   const autoJoinAttemptedRef = useRef(false);
   const autoScreenShareAttemptedRef = useRef(false);
   const connectionStartRecordedRef = useRef(false);
@@ -488,6 +491,16 @@ export default function SessionRoomPage() {
   const boardContentLoadedRef = useRef(false);
   const boardEditorRef = useRef(null);
   const previousStatusRef = useRef(null);
+  const [aiLiveStatus, setAiLiveStatus] = useState('idle');
+  const [aiTranscript, setAiTranscript] = useState('');
+  const [aiBoardActions, setAiBoardActions] = useState([]);
+  const [aiActiveQuestionId, setAiActiveQuestionId] = useState(null);
+  const [aiQuestionOrder, setAiQuestionOrder] = useState([]);
+  const [aiAnswersByQuestion, setAiAnswersByQuestion] = useState({});
+  const [aiConversationEvents, setAiConversationEvents] = useState([]);
+  const [aiAudioState, setAiAudioState] = useState({ audioInActive: false, audioOutActive: false });
+  const [aiLastError, setAiLastError] = useState('');
+  const isAiSession = String(session?.sessionType || '').toLowerCase() === 'ai';
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
   const hasLiveRemoteScreenTrack = Boolean(
@@ -497,9 +510,9 @@ export default function SessionRoomPage() {
   );
   const isStudentBillableActive = role === 'student'
     && session?.status === SESSION_STATUS.IN_PROGRESS
-    && isPeerConnected
-    && isRemoteScreenSharing
-    && hasLiveRemoteScreenTrack;
+    && (isAiSession
+      ? ['connected', 'listening', 'speaking'].includes(aiLiveStatus)
+      : (isPeerConnected && isRemoteScreenSharing && hasLiveRemoteScreenTrack));
   const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
   const ratingStatus = session?.ratingStatus?.[role] || 'pending';
   const needsRating = Boolean(session?.id)
@@ -558,6 +571,12 @@ export default function SessionRoomPage() {
     boardContentLoadedRef.current = false;
     previousStatusRef.current = session?.status || null;
     setIsRatingPromptOpen(false);
+    setAiTranscript('');
+    setAiBoardActions([]);
+    setAiConversationEvents([]);
+    setAiAnswersByQuestion({});
+    setAiQuestionOrder([]);
+    setAiActiveQuestionId(null);
   }, [session?.id, role]);
 
   const getSessionBoardSeedContent = useCallback(() => {
@@ -603,6 +622,48 @@ export default function SessionRoomPage() {
       gptExtraction,
     };
   }, [request, session]);
+
+  const aiParsedQuestions = useMemo(() => {
+    if (!isAiSession) return [];
+    const {
+      extractedText,
+      attachments,
+      attachmentExtractions,
+      ocrImageReferences,
+      documentAiExtraction,
+      gptExtraction,
+    } = getSessionBoardSeedContent();
+    const fromDoc = parseQuestionsFromGptExtraction({
+      gptExtraction: documentAiExtraction || gptExtraction || null,
+      attachments,
+    });
+    if (Array.isArray(fromDoc) && fromDoc.some((question) => String(question?.text || '').trim())) {
+      return fromDoc.map((question, index) => ({
+        ...question,
+        questionId: question?.questionId || `q${index + 1}`,
+      }));
+    }
+    const fromText = parseQuestionsFromExtraction({
+      extractedText,
+      attachments,
+      attachmentExtractions,
+      ocrImageReferences,
+    });
+    return (Array.isArray(fromText) ? fromText : []).map((question, index) => ({
+      ...question,
+      questionId: question?.questionId || `q${index + 1}`,
+    }));
+  }, [getSessionBoardSeedContent, isAiSession]);
+
+  useEffect(() => {
+    if (!isAiSession) return;
+    if (!aiParsedQuestions.length) return;
+    const ids = aiParsedQuestions.map((question, index) => String(question?.questionId || `q${index + 1}`));
+    setAiQuestionOrder(ids);
+    if (!aiActiveQuestionId) {
+      setAiActiveQuestionId(ids[0] || null);
+    }
+  }, [aiActiveQuestionId, aiParsedQuestions, isAiSession]);
 
   const injectPreparedBoardContent = useCallback(async (editor) => {
     if (!editor || boardContentLoadedRef.current || role !== 'tutor') return;
@@ -700,6 +761,7 @@ export default function SessionRoomPage() {
   }, [role, session?.id]);
 
   useEffect(() => {
+    if (isAiSession) return;
     if (!boardEditorRef.current) return;
     injectPreparedBoardContent(boardEditorRef.current).catch((error) => {
       debugLog('sessionRoom', '[whiteboardPreparation] board injection effect failed.', {
@@ -707,7 +769,7 @@ export default function SessionRoomPage() {
         message: error?.message,
       });
     });
-  }, [injectPreparedBoardContent, request?.boardPreparationSource, session?.boardPreparationSource, session?.id]);
+  }, [injectPreparedBoardContent, isAiSession, request?.boardPreparationSource, session?.boardPreparationSource, session?.id]);
 
   useEffect(() => {
     if (!session?.id) return;
@@ -732,6 +794,7 @@ export default function SessionRoomPage() {
   }, [ratingStatus, session?.id, session?.status]);
 
   useEffect(() => {
+    if (isAiSession) return;
     if (role !== 'student') return;
     if (!session?.id) return;
     if (![SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)) return;
@@ -769,12 +832,15 @@ export default function SessionRoomPage() {
     session?.billedSeconds,
     session?.id,
     session?.status,
+    isAiSession,
   ]);
 
   useEffect(() => {
     return () => {
       rtcRef.current?.close?.();
+      aiLiveRef.current?.close?.();
       rtcRef.current = null;
+      aiLiveRef.current = null;
       rtcInitStartedRef.current = false;
       setRemoteScreenStreamObj(null);
       if (studentControlsTimeoutRef.current) {
@@ -784,6 +850,7 @@ export default function SessionRoomPage() {
   }, []);
 
   useEffect(() => {
+    if (isAiSession) return;
     const videoEl = remoteScreenVideoRef.current;
     debugLog('sessionRoom', '[parakleo:screen:ui] remote screen srcObject effect.', {
       hasVideoElement: Boolean(videoEl),
@@ -831,7 +898,7 @@ export default function SessionRoomPage() {
     debugLog('sessionRoom', 'Attached remote screen stream to student video element.', {
       hasStream: Boolean(remoteScreenStreamObj),
     });
-  }, [remoteScreenStreamObj, isRemoteScreenSharing]);
+  }, [isAiSession, remoteScreenStreamObj, isRemoteScreenSharing]);
 
   useEffect(() => {
     const updateViewportFlags = () => {
@@ -898,6 +965,7 @@ export default function SessionRoomPage() {
   }, [role, showStudentControls]);
 
   const initializeCall = useCallback(async ({ shouldJoinStudent }) => {
+    if (isAiSession) return;
     if (!session || !user?.uid) return;
 
     const initKey = `${session.id}:${role}`;
@@ -1035,16 +1103,109 @@ export default function SessionRoomPage() {
       activeInitKeyRef.current = '';
       setIsBusy(false);
     }
-  }, [forceRelayOnly, role, selectedCardId, session, user]);
+  }, [forceRelayOnly, isAiSession, role, selectedCardId, session, user]);
+
+  const initializeAiLive = useCallback(async () => {
+    if (!isAiSession || !session?.id || role !== 'student') return;
+    if (aiLiveRef.current) return;
+    setIsBusy(true);
+    setAiLastError('');
+    setNetworkError('');
+    try {
+      if (session.status === SESSION_STATUS.WAITING_STUDENT) {
+        const selected =
+          (user?.paymentMethods || []).find((card) => card.id === selectedCardId)
+          || (user?.paymentMethods || []).find((card) => card.isDefault)
+          || user?.paymentMethods?.[0];
+        await joinSessionAsStudent(session, selected?.id || null, selected?.last4 || null);
+      }
+      const controller = await createAiLiveSessionController({
+        sessionId: session.id,
+        callbacks: {
+          onStatusChange: ({ status }) => {
+            setAiLiveStatus(status || 'connected');
+            setConnectionMessage(
+              status === 'speaking' ? 'AI speaking' : status === 'listening' ? 'AI listening' : 'Connected',
+            );
+          },
+          onTranscriptDelta: (payload) => {
+            const text = typeof payload === 'string' ? payload : String(payload?.text || '');
+            setAiTranscript((prev) => `${prev}${text}`);
+          },
+          onTranscriptFinal: (payload) => {
+            const text = typeof payload === 'string' ? payload : String(payload?.text || '');
+            const textMode = typeof payload === 'string' ? 'readonly' : String(payload?.textMode || 'readonly');
+            const questionId = typeof payload === 'string'
+              ? (aiActiveQuestionId || aiQuestionOrder[0] || 'q1')
+              : String(payload?.questionId || aiActiveQuestionId || aiQuestionOrder[0] || 'q1');
+            if (!text.trim()) return;
+            setAiTranscript((prev) => `${prev}${prev ? '\n' : ''}${text}`);
+            setAiAnswersByQuestion((prev) => ({
+              ...prev,
+              [questionId]: [...(prev[questionId] || []), { text, textMode, createdAt: Date.now() }],
+            }));
+          },
+          onBoardAction: (action) => {
+            if (!action) return;
+            setAiBoardActions((prev) => [...prev, action]);
+            if (action.type === 'setCurrentQuestion' || action.type === 'showQuestion') {
+              setAiActiveQuestionId(String(action.questionId || ''));
+            }
+            if (action.type === 'appendText' || action.type === 'replaceText') {
+              const qid = String(action.questionId || aiActiveQuestionId || aiQuestionOrder[0] || 'q1');
+              const text = String(action.text || action.content || '').trim();
+              if (!text) return;
+              setAiAnswersByQuestion((prev) => {
+                const current = prev[qid] || [];
+                if (action.type === 'replaceText') {
+                  return { ...prev, [qid]: [{ text, textMode: 'readwrite', createdAt: Date.now() }] };
+                }
+                return { ...prev, [qid]: [...current, { text, textMode: 'readwrite', createdAt: Date.now() }] };
+              });
+            }
+          },
+          onConversationEvent: (event) => {
+            if (!event) return;
+            setAiConversationEvents((prev) => [...prev, event]);
+          },
+          onAudioStateChange: (state) => setAiAudioState((prev) => ({ ...prev, ...state })),
+          onError: (message) => {
+            setAiLastError(String(message || 'AI live error'));
+            setNetworkError(String(message || 'AI live error'));
+          },
+          onClose: () => setAiLiveStatus('disconnected'),
+        },
+      });
+      aiLiveRef.current = controller;
+      controller.sendInitContext({
+        topic: String(session?.topic || request?.topic || ''),
+        description: String(session?.requestDescription || request?.description || ''),
+        extractedText: String(session?.boardPreparationSource?.extractedText || request?.boardPreparationSource?.extractedText || ''),
+        questions: aiParsedQuestions.map((question, index) => ({
+          questionId: String(question?.questionId || `q${index + 1}`),
+          questionNumber: question?.questionNumber || null,
+          text: String(question?.text || ''),
+        })),
+        activeQuestionId: aiActiveQuestionId || aiQuestionOrder[0] || (aiParsedQuestions[0]?.questionId || 'q1'),
+      });
+    } catch (error) {
+      setAiLastError(error.message || 'Unable to start AI live session.');
+      setNetworkError(error.message || 'Unable to start AI live session.');
+    } finally {
+      setIsBusy(false);
+    }
+  }, [aiActiveQuestionId, aiParsedQuestions, aiQuestionOrder, isAiSession, request?.boardPreparationSource?.extractedText, request?.description, request?.topic, role, selectedCardId, session, user?.paymentMethods]);
 
   useEffect(() => {
+    if (isAiSession) return;
     if (!session) return;
     if (role !== 'tutor') return;
     if (![SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)) return;
     initializeCall({ shouldJoinStudent: false });
-  }, [initializeCall, role, session]);
+  }, [initializeCall, isAiSession, role, session]);
 
   useEffect(() => {
+    if (isAiSession) return;
     if (!session) return;
     if (role !== 'student') return;
     if (![SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)) return;
@@ -1052,14 +1213,23 @@ export default function SessionRoomPage() {
 
     autoJoinAttemptedRef.current = true;
     initializeCall({ shouldJoinStudent: session.status === SESSION_STATUS.WAITING_STUDENT });
-  }, [initializeCall, isBusy, role, session]);
+  }, [initializeCall, isAiSession, isBusy, role, session]);
+
+  useEffect(() => {
+    if (!isAiSession || !session) return;
+    if (role !== 'student') return;
+    if (![SESSION_STATUS.WAITING_STUDENT, SESSION_STATUS.IN_PROGRESS].includes(session.status)) return;
+    initializeAiLive();
+  }, [initializeAiLive, isAiSession, role, session]);
 
   useEffect(() => {
     if (!session?.status) return;
     if (!RATABLE_STATUSES.has(session.status)) return;
 
     rtcRef.current?.close?.();
+    aiLiveRef.current?.close?.();
     rtcRef.current = null;
+    aiLiveRef.current = null;
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     setShowStudentControls(false);
@@ -1074,7 +1244,9 @@ export default function SessionRoomPage() {
     if (!hadSessionRef.current) return;
 
     rtcRef.current?.close?.();
+    aiLiveRef.current?.close?.();
     rtcRef.current = null;
+    aiLiveRef.current = null;
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     setShowStudentControls(false);
@@ -1108,7 +1280,9 @@ export default function SessionRoomPage() {
     if (!cancellationReason) return;
 
     rtcRef.current?.close?.();
+    aiLiveRef.current?.close?.();
     rtcRef.current = null;
+    aiLiveRef.current = null;
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     setShowStudentControls(false);
@@ -1122,7 +1296,9 @@ export default function SessionRoomPage() {
 
   const endCurrentSession = async () => {
     rtcRef.current?.close?.();
+    aiLiveRef.current?.close?.();
     rtcRef.current = null;
+    aiLiveRef.current = null;
     rtcInitStartedRef.current = false;
     setRemoteScreenStreamObj(null);
     await endSession(session);
@@ -1187,7 +1363,9 @@ export default function SessionRoomPage() {
   };
 
   const toggleMute = () => {
-    const enabled = rtcRef.current?.toggleAudio?.();
+    const enabled = isAiSession
+      ? aiLiveRef.current?.toggleMute?.()
+      : rtcRef.current?.toggleAudio?.();
     if (typeof enabled === 'boolean') {
       setIsMuted(!enabled);
     }
@@ -1339,6 +1517,26 @@ export default function SessionRoomPage() {
     </div>
   );
 
+  const renderAiStage = () => (
+    <div className="relative h-full w-full overflow-hidden bg-white">
+      <div className="absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2">
+        <StageBadge icon={Wifi} tone={aiLastError ? 'danger' : 'success'}>{aiLastError ? 'Error' : 'Connected'}</StageBadge>
+        <StageBadge icon={Mic} tone={aiLiveStatus === 'listening' ? 'success' : 'info'}>{aiLiveStatus === 'speaking' ? 'AI speaking' : 'AI listening'}</StageBadge>
+        <StageBadge tone={aiAudioState.audioInActive || aiAudioState.audioOutActive ? 'success' : 'warning'}>
+          {aiAudioState.audioInActive || aiAudioState.audioOutActive ? 'Audio live' : 'Preparing audio'}
+        </StageBadge>
+        <StageBadge tone="info">Preparing whiteboard</StageBadge>
+      </div>
+      <AiClassWhiteboard
+        boardPreparationSource={session?.boardPreparationSource || request?.boardPreparationSource || null}
+        transcript={aiTranscript}
+        boardActions={aiBoardActions}
+        activeQuestionId={aiActiveQuestionId}
+        answersByQuestion={aiAnswersByQuestion}
+      />
+    </div>
+  );
+
   if (!session) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white p-6">
@@ -1369,7 +1567,7 @@ export default function SessionRoomPage() {
       />
 
       <div className="relative h-full w-full">
-        {role === 'tutor' ? renderTutorStage() : renderStudentStage()}
+        {isAiSession ? renderAiStage() : (role === 'tutor' ? renderTutorStage() : renderStudentStage())}
 
         <div
           className={`absolute z-30 ${
@@ -1394,12 +1592,12 @@ export default function SessionRoomPage() {
               onClick={toggleMute}
               icon={isMuted ? MicOff : Mic}
               label={isMuted ? 'Unmute' : 'Mute'}
-              disabled={!rtcRef.current}
+              disabled={isAiSession ? !aiLiveRef.current : !rtcRef.current}
               active={!isMuted}
               compact={controlsCompact}
             />
 
-            {role === 'tutor' ? (
+            {role === 'tutor' && !isAiSession ? (
               <RailButton
                 onClick={shareScreen}
                 icon={MonitorUp}
@@ -1429,7 +1627,7 @@ export default function SessionRoomPage() {
           </div>
         </div>
 
-        {role === 'student' && !rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? (
+        {role === 'student' && !isAiSession && !rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? (
           <div
             className={`absolute bottom-4 right-4 z-30 transition-opacity duration-200 ${
               showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'

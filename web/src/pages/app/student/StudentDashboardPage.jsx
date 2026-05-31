@@ -42,6 +42,8 @@ const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need a normal lesson', value: 'I need a normal lesson.' },
 ];
 
+const PENDING_STATUS_REDIRECT_KEY = 'parakleo_pending_request_status_redirect';
+
 const SUBJECT_ALIASES = {
   Mathematics: ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'trigonometry', 'statistics', 'stats'],
 };
@@ -292,6 +294,55 @@ function buildBoardPreparationSource({ attachments = [], uploadedAttachments = [
   };
 }
 
+function buildAttachmentUploadFallback(file, error) {
+  return {
+    fileName: file?.name || 'Attachment',
+    contentType: file?.type || '',
+    size: Number(file?.size || 0),
+    path: '',
+    downloadUrl: '',
+    uploadError: String(error?.code || error?.message || 'upload_failed'),
+  };
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
+async function uploadRequestAttachment({ userId, file }) {
+  try {
+    const uploadResult = await withTimeout(
+      uploadUserFile({
+        userId,
+        file,
+        pathPrefix: 'request-attachments',
+      }),
+      12000,
+      'attachment_upload_timeout',
+    );
+
+    return {
+      fileName: file.name,
+      contentType: file.type || '',
+      size: Number(file.size || 0),
+      path: uploadResult.objectPath,
+      downloadUrl: uploadResult.downloadUrl,
+    };
+  } catch (error) {
+    console.debug('[studentRequestAI] attachment upload skipped; continuing with extracted context', {
+      fileName: file?.name || '',
+      size: Number(file?.size || 0),
+      error: error?.message || String(error || ''),
+    });
+    return buildAttachmentUploadFallback(file, error);
+  }
+}
+
 function normalizeEstimatedDuration(estimatedMinutes) {
   const numeric = Number(estimatedMinutes || 0);
   if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_LESSON_DURATION;
@@ -367,6 +418,10 @@ export default function StudentDashboardPage() {
   const [extractionOverlayState, setExtractionOverlayState] = useState('idle');
   const [extractionStatusEvents, setExtractionStatusEvents] = useState([]);
   const [extractionErrors, setExtractionErrors] = useState([]);
+  const [pendingStatusRequestId, setPendingStatusRequestId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.sessionStorage.getItem(PENDING_STATUS_REDIRECT_KEY) || '';
+  });
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
   const { subjectOptions } = useSubjectCatalog();
@@ -866,21 +921,7 @@ export default function StudentDashboardPage() {
       let uploadedAttachments = [];
       if (attachments.length) {
         uploadedAttachments = await Promise.all(
-          attachments.map(async (file) => {
-            const uploadResult = await uploadUserFile({
-              userId: user.uid,
-              file,
-              pathPrefix: 'request-attachments',
-            });
-
-            return {
-              fileName: file.name,
-              contentType: file.type || '',
-              size: Number(file.size || 0),
-              path: uploadResult.objectPath,
-              downloadUrl: uploadResult.downloadUrl,
-            };
-          }),
+          attachments.map((file) => uploadRequestAttachment({ userId: user.uid, file })),
         );
       }
 
@@ -912,6 +953,11 @@ export default function StudentDashboardPage() {
         pricingSnapshot: quoteWithDiscount,
         boardPreparationSource,
       });
+
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(PENDING_STATUS_REDIRECT_KEY, requestId);
+      }
+      setPendingStatusRequestId(requestId);
 
       const predicted = latestClassification?.academicBrainOutput || null;
       if (predicted) {
@@ -947,6 +993,7 @@ export default function StudentDashboardPage() {
       }
 
       navigate(`/app/student/request/${requestId}`, {
+        replace: true,
         state: {
           requestId,
           topic: reviewTopic,
@@ -961,6 +1008,23 @@ export default function StudentDashboardPage() {
       setIsSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (!pendingStatusRequestId) return;
+    const targetRequest = requests.find((request) => request.id === pendingStatusRequestId);
+    if (!targetRequest) return;
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(PENDING_STATUS_REDIRECT_KEY);
+    }
+    setPendingStatusRequestId('');
+    navigate(`/app/student/request/${pendingStatusRequestId}`, {
+      replace: true,
+      state: {
+        requestId: pendingStatusRequestId,
+        topic: targetRequest.topic || topic,
+      },
+    });
+  }, [navigate, pendingStatusRequestId, requests, topic]);
 
   useEffect(() => {
     if (!paymentMethods.length) {

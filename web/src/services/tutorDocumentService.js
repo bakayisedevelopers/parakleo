@@ -1,8 +1,9 @@
 import { getFirebaseClients } from '../firebase/config';
 import { appendUserAiLog } from './aiLogService';
-import { normalizeSubjectList } from '../constants/subjects';
+import { normalizeSubjectList, SUPPORTED_TUTOR_SUBJECTS } from '../constants/subjects';
 
 const DOCUMENT_STATUSES = new Set(['UPLOADED', 'PROCESSING', 'VERIFIED', 'FAILED']);
+const ALLOWED_TUTOR_SUBJECTS = new Set(SUPPORTED_TUTOR_SUBJECTS.map((subject) => String(subject).trim().toLowerCase()));
 
 function sanitizeFileName(fileName = 'document') {
   return String(fileName || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -137,8 +138,10 @@ function sanitizeQualifiedSubjects(values = []) {
   const bySubject = new Map();
   (values || []).forEach((item) => {
     const subject = String(item?.subject || item || '').trim();
+    const subjectKey = subject.toLowerCase();
     const numericMark = Number(item?.mark);
     if (!subject) return;
+    if (!ALLOWED_TUTOR_SUBJECTS.has(subjectKey)) return;
     if (!Number.isFinite(numericMark)) return;
     const mark = Math.max(0, Math.min(100, Math.round(numericMark)));
     const existing = bySubject.get(subject);

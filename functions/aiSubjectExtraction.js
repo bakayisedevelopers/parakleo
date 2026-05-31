@@ -1,3 +1,4 @@
+
 const { initializeApp, getApp, getApps } = require('firebase/app');
 const { getAI, getGenerativeModel, GoogleAIBackend } = require('firebase/ai');
 const { pdfToPng } = require('pdf-to-png-converter');

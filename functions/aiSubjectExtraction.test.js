@@ -8,17 +8,17 @@ const {
 test('validates and normalizes AI subject mark output', () => {
   const result = validateSubjectMarks([
     { subject: 'Maths', mark: 78.4 },
-    { subject: 'Zulu', mark: '66' },
+    { subject: 'English', mark: '66' },
     { subject: 'Physics', mark: 61 },
     { subject: 'Chemistry', mark: 74 },
     { subject: '', mark: 80 },
-    { subject: 'History', mark: 101 },
+    { subject: 'Economics', mark: 101 },
     { subject: 'English', mark: -1 },
   ]);
 
   assert.deepEqual(result, [
-    { subject: 'IsiZulu', mark: 66 },
-    { subject: 'Mathematics', mark: 78 },
+    { subject: 'English', mark: 66 },
+    { subject: 'Maths', mark: 78 },
     { subject: 'Physical Sciences', mark: 74 },
   ]);
 });
@@ -33,7 +33,7 @@ test('validates object-shaped AI subject mark output', () => {
 
   assert.deepEqual(result, [
     { subject: 'English', mark: 59 },
-    { subject: 'Mathematical Literacy', mark: 71 },
+    { subject: 'Maths Lit', mark: 71 },
   ]);
 });
 
@@ -45,12 +45,12 @@ test('validates Gemini subject classification output against supported subjects'
     subjectConfidence: 'high',
     needsManualSubjectSelection: false,
   }, [
-    { value: 'Mathematics', label: 'Mathematics' },
+    { value: 'Maths', label: 'Maths' },
     { value: 'English', label: 'English' },
   ]);
 
   assert.deepEqual(result, {
-    subject: 'Mathematics',
+    subject: 'Maths',
     unsupportedSubject: '',
     topic: 'quadratic equations',
     estimatedMinutes: 32,
@@ -63,19 +63,19 @@ test('validates Gemini subject classification output against supported subjects'
 test('identifies unsupported requested subjects separately from fallback', () => {
   const result = validateSubjectClassification({
     subject: '',
-    unsupportedSubject: 'Music',
+    unsupportedSubject: 'unsupported_subject_x',
     topic: 'scales',
     estimatedMinutes: 20,
     subjectConfidence: 'high',
     needsManualSubjectSelection: true,
   }, [
-    { value: 'Mathematics', label: 'Mathematics' },
+    { value: 'Maths', label: 'Maths' },
     { value: 'English', label: 'English' },
   ]);
 
   assert.deepEqual(result, {
     subject: '',
-    unsupportedSubject: 'Music',
+    unsupportedSubject: 'unsupported_subject_x',
     topic: 'scales',
     estimatedMinutes: 20,
     subjectConfidence: 'high',
@@ -86,7 +86,7 @@ test('identifies unsupported requested subjects separately from fallback', () =>
 
 test('falls back to manual subject selection when classification is invalid', () => {
   const result = validateSubjectClassification(null, [
-    { value: 'Mathematics', label: 'Mathematics' },
+    { value: 'Maths', label: 'Maths' },
   ]);
 
   assert.deepEqual(result, {

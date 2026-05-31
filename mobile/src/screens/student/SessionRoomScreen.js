@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { StudentRtcSessionView } from '../../components/student/StudentRtcSessionView';
+import { StudentAiSessionView } from '../../components/student/StudentAiSessionView';
 import { Card } from '../../components/ui/Card';
 import { ErrorState, LoadingState } from '../../components/ui/States';
 import { useAuth } from '../../context/AuthContext';
@@ -66,11 +67,14 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
   const selectedDurationMinutes = Number(session?.durationMinutes || session?.pricingSnapshot?.durationMinutes || 0);
   const selectedDurationSeconds = Math.max(0, Math.round(selectedDurationMinutes * 60));
+  const isAiSession = String(session?.sessionType || '').toLowerCase() === 'ai';
   const isWebRtcConnected = String(session?.webrtc?.status || '').toLowerCase() === 'connected';
   const isTutorScreenSharingActive = session?.webrtc?.screenShare?.active === true;
-  const isStudentBillableActive = session?.status === 'in_progress'
-    && isWebRtcConnected
-    && isTutorScreenSharingActive;
+  const isStudentBillableActive = session?.status === 'in_progress' && (
+    isAiSession
+      ? ['connected', 'listening', 'speaking'].includes(String(session?.aiLive?.status || '').toLowerCase())
+      : (isWebRtcConnected && isTutorScreenSharingActive)
+  );
   const billedSeconds = useBillableSeconds(session, isStudentBillableActive);
   useEffect(() => subscribeToSessionById(
     sessionId,
@@ -93,6 +97,10 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   }, [session?.id]);
 
   useEffect(() => {
+    if (isAiSession) {
+      setHasMicPermission(true);
+      return () => {};
+    }
     let active = true;
     const ensureMicPermission = async () => {
       if (Platform.OS !== 'android') {
@@ -122,7 +130,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isAiSession]);
 
   useEffect(() => {
     let active = true;
@@ -334,7 +342,13 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
 
         <Pressable style={styles.stage}>
           {['waiting_student', 'in_progress'].includes(String(session.status || '')) ? (
-            hasMicPermission ? (
+            isAiSession ? (
+              <StudentAiSessionView
+                authHandoff={authHandoff}
+                onBridgeMessage={handleBridgeMessage}
+                sessionId={session.id}
+              />
+            ) : hasMicPermission ? (
               <StudentRtcSessionView
                 authHandoff={authHandoff}
                 bridgeRef={bridgeRef}

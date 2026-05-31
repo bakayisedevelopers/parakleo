@@ -3,14 +3,14 @@ function normalizeText(value = '') {
 }
 
 const TOPIC_RULES = {
-  Mathematics: {
+  Maths: {
     Algebra: ['algebra', 'equation', 'factorise', 'quadratic', 'simultaneous'],
     Trigonometry: ['trig', 'sine', 'cosine', 'tangent'],
     Geometry: ['angle', 'triangle', 'circle', 'theorem'],
     Calculus: ['differentiate', 'integrate', 'derivative', 'limit'],
     Probability: ['probability', 'random', 'outcome', 'tree diagram'],
   },
-  'Mathematical Literacy': {
+  'Maths Lit': {
     Finance: ['interest', 'budget', 'loan', 'repayment', 'profit', 'loss'],
     Measurement: ['area', 'volume', 'perimeter', 'scale drawing', 'distance'],
     DataHandling: ['table', 'graph', 'mean', 'median', 'mode', 'percentage'],
@@ -25,9 +25,17 @@ const TOPIC_RULES = {
     Ecology: ['ecosystem', 'food chain', 'biodiversity', 'population'],
     Cells: ['cell', 'organelle', 'mitosis', 'meiosis'],
   },
-  'Natural Sciences': {
-    MatterAndMaterials: ['states of matter', 'mixture', 'compound', 'element'],
-    EarthAndBeyond: ['planet', 'solar system', 'earth', 'atmosphere'],
+  Agriculture: {
+    CropProduction: ['crop', 'soil', 'fertilizer', 'irrigation', 'pest'],
+    AnimalProduction: ['livestock', 'animal', 'breed', 'dairy', 'poultry'],
+  },
+  'Business Studies': {
+    Entrepreneurship: ['entrepreneurship', 'business plan', 'venture', 'startup'],
+    Operations: ['production', 'operations', 'quality control', 'procurement'],
+  },
+  Economics: {
+    Microeconomics: ['supply', 'demand', 'elasticity', 'market'],
+    Macroeconomics: ['inflation', 'gdp', 'fiscal', 'monetary'],
   },
   Accounting: {
     Bookkeeping: ['ledger', 'debit', 'credit', 'journal'],

@@ -215,6 +215,27 @@ function buildQuoteWithDiscount(quote, requestedDurationMinutes, freeMinutesRema
   };
 }
 
+function buildAttachmentUploadFallback(attachment, error) {
+  return {
+    downloadUrl: '',
+    objectPath: '',
+    fileName: attachment?.name || 'Attachment',
+    fileType: attachment?.type || 'application/octet-stream',
+    size: Number(attachment?.size || 0),
+    uploadedAt: new Date().toISOString(),
+    uploadError: String(error?.code || error?.message || 'upload_failed'),
+  };
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
 export function StudentRequestComposer({
   navigate,
   requests = [],
@@ -259,6 +280,7 @@ export function StudentRequestComposer({
   const [showAttachmentProcessingOverlay, setShowAttachmentProcessingOverlay] = useState(false);
   const [typedSubjectStatus, setTypedSubjectStatus] = useState('');
   const [typedTopicStatus, setTypedTopicStatus] = useState('');
+  const [pendingStatusRequestId, setPendingStatusRequestId] = useState('');
   const lastAutoReviewSignatureRef = useRef('');
   const typingClassificationRunRef = useRef(0);
   const processingRedirectTimeoutRef = useRef(null);
@@ -589,11 +611,15 @@ export function StudentRequestComposer({
       const uploadedAttachments = [];
       for (const attachment of attachments) {
         try {
-          const uploadResult = await uploadUserFile({
-            userId: user.uid,
-            attachment,
-            pathPrefix: 'request-attachments',
-          });
+          const uploadResult = await withTimeout(
+            uploadUserFile({
+              userId: user.uid,
+              attachment,
+              pathPrefix: 'request-attachments',
+            }),
+            12000,
+            'attachment_upload_timeout',
+          );
           uploadedAttachments.push(uploadResult);
         } catch (uploadError) {
           const uploadMessage = String(uploadError?.message || '').toLowerCase();
@@ -610,7 +636,7 @@ export function StudentRequestComposer({
             });
             continue;
           }
-          throw uploadError;
+          uploadedAttachments.push(buildAttachmentUploadFallback(attachment, uploadError));
         }
       }
       const boardPreparationSource = buildBoardPreparationSource({
@@ -635,6 +661,7 @@ export function StudentRequestComposer({
         pricingSnapshot: quoteWithDiscount,
         boardPreparationSource,
       });
+      setPendingStatusRequestId(requestId);
 
       const predicted = latestClassification?.academicBrainOutput || null;
       if (predicted) {
@@ -684,6 +711,14 @@ export function StudentRequestComposer({
   useEffect(() => {
     onStageChange?.(stage);
   }, [onStageChange, stage]);
+
+  useEffect(() => {
+    if (!pendingStatusRequestId) return;
+    const targetRequest = requests.find((request) => request.id === pendingStatusRequestId);
+    if (!targetRequest) return;
+    setPendingStatusRequestId('');
+    navigate({ key: 'RequestStatus', params: { requestId: pendingStatusRequestId, parentTab: 'Requests' } });
+  }, [navigate, pendingStatusRequestId, requests]);
 
   useEffect(() => () => {
     if (processingRedirectTimeoutRef.current) {

@@ -18,6 +18,7 @@ const {
 const {
   normalizeSubjectName,
   isAllowedGrade1To12Subject,
+  GRADE_1_TO_12_SUBJECT_NAMES,
 } = require('./subjectExtraction');
 const { classifySubjectLocally } = require('./extraction/localSubjectClassifier');
 const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
@@ -374,6 +375,17 @@ const ACTIVE_REQUEST_STATUSES = new Set([
   REQUEST_STATUS.MATCHING,
   REQUEST_STATUS.OFFERED,
   REQUEST_STATUS.NO_TUTOR_AVAILABLE,
+]);
+const AI_FALLBACK_SUBJECT_ALLOWLIST = new Set([
+  'maths',
+  'mathematics',
+  'mathematical literacy',
+  'physics',
+  'physical sciences',
+  'chemistry',
+  'english',
+  'business studies',
+  'economics',
 ]);
 let visionClient = null;
 const ZAR_PER_USD = 17;
@@ -1106,6 +1118,88 @@ async function getTutorQueueForSubject(subject) {
   return rankTutorsWithFairness(eligibleTutors);
 }
 
+function normalizeSubjectForAiFallback(subject) {
+  return String(subject || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isAiFallbackSubjectEligible(subject) {
+  return AI_FALLBACK_SUBJECT_ALLOWLIST.has(normalizeSubjectForAiFallback(subject));
+}
+
+async function createAiFallbackSessionInTransaction(transaction, requestRef, requestId, request = {}) {
+  const fallbackSessionId = String(request.sessionId || `ai_${requestId}`).trim();
+  const sessionRef = db.collection('sessions').doc(fallbackSessionId);
+  const sessionSnap = await transaction.get(sessionRef);
+  const existingSession = sessionSnap.exists ? (sessionSnap.data() || {}) : null;
+
+  if (existingSession && existingSession.sessionType && existingSession.sessionType !== 'ai') {
+    return false;
+  }
+
+  const nowMs = Date.now();
+  transaction.set(sessionRef, {
+    requestId,
+    studentId: request.studentId || null,
+    studentName: request.studentName || '',
+    studentEmail: request.studentEmail || '',
+    tutorId: null,
+    tutorName: 'Parakleo AI Tutor',
+    tutorEmail: '',
+    subject: request.subject || 'Mathematics',
+    topic: request.topic || '',
+    duration: request.duration || '',
+    durationMinutes: Number(request.durationMinutes || 10),
+    pricingSnapshot: request.pricingSnapshot || null,
+    pricingQuoteId: request.pricingQuoteId || request?.pricingSnapshot?.quoteId || null,
+    meetingProvider: 'gemini_live',
+    meetingLink: '',
+    meetingId: '',
+    meetingPassword: '',
+    sessionType: 'ai',
+    sessionProvider: 'gemini_live',
+    whiteboardRoomId: request.whiteboardRoomId || requestId,
+    notes: '',
+    requestAttachment: request.attachment || null,
+    attachments: Array.isArray(request.attachments) ? request.attachments : (request.attachment ? [request.attachment] : []),
+    requestDescription: request.description || '',
+    boardPreparationSource: request.boardPreparationSource || null,
+    status: SESSION_STATUS.WAITING_STUDENT,
+    joinGraceEndsAt: nowMs + (2 * 60 * 1000),
+    callStartedAt: null,
+    studentJoinedAt: null,
+    billingStartedAt: null,
+    billedSeconds: 0,
+    totalAmount: 0,
+    aiLive: {
+      status: 'idle',
+      wsConnected: false,
+      audioInActive: false,
+      audioOutActive: false,
+      transcriptStatus: 'idle',
+      startedAt: null,
+      endedAt: null,
+      lastError: '',
+    },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: existingSession?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  transaction.update(requestRef, {
+    sessionId: fallbackSessionId,
+    status: REQUEST_STATUS.ACCEPTED,
+    statusDetail: 'No tutor available. AI live tutor is ready.',
+    tutorId: null,
+    tutorName: 'Parakleo AI Tutor',
+    tutorEmail: '',
+    currentOfferTutorId: null,
+    offerExpiresAt: null,
+    offerToken: null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return true;
+}
+
 exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}', async (event) => {
   const afterData = event.data.after.exists ? event.data.after.data() : null;
   if (!afterData) return;
@@ -1155,6 +1249,11 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
     }
 
     if (!queue.length) {
+      if (isAiFallbackSubjectEligible(request.subject)) {
+        const createdAiFallback = await createAiFallbackSessionInTransaction(transaction, requestRef, requestId, request);
+        if (createdAiFallback) return;
+      }
+
       transaction.update(requestRef, {
         status: REQUEST_STATUS.NO_TUTOR_AVAILABLE,
         statusDetail: 'No tutor accepted. Looking for another tutor.',
@@ -2601,15 +2700,7 @@ async function runPdfVisionOcr(pdfBuffer) {
 }
 
 async function getGlobalSubjectOptions() {
-  const snapshot = await db.collection('system').doc('subjects').get();
-  const subjectNames = snapshot.exists && Array.isArray(snapshot.data()?.subjectNames)
-    ? snapshot.data().subjectNames
-    : [];
-
-  return subjectNames
-    .map((subject) => normalizeExtractedText(subject))
-    .filter(Boolean)
-    .slice(0, 100)
+  return [...new Set((GRADE_1_TO_12_SUBJECT_NAMES || []).map((subject) => normalizeExtractedText(subject)).filter(Boolean))]
     .map((subject) => ({ value: subject, label: subject }));
 }
 

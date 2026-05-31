@@ -1,59 +1,19 @@
-export const FALLBACK_SUBJECTS = [
-  'Mathematics',
+export const ALLOWED_SUBJECTS = [
+  'Maths',
+  'Maths Lit',
   'Physical Sciences',
-  'Life Sciences',
-  'English',
-];
-
-export const SOUTH_AFRICAN_SUBJECTS = [
-  'Mathematics',
-  'Mathematical Literacy',
-  'Physical Sciences',
-  'Life Sciences',
-  'English',
-  'IsiZulu',
-  'XiTsonga',
-  'Afrikaans',
-  'Geography',
-  'History',
-  'Accounting',
   'Business Studies',
   'Economics',
-  'Agricultural Sciences',
-  'Computer Applications Technology',
-  'Information Technology',
-  'Tourism',
-  'Life Orientation',
+  'Accounting',
+  'Life Sciences',
+  'Agriculture',
+  'English',
 ];
 
-export const SUPPORTED_TUTOR_SUBJECTS = [
-  ...SOUTH_AFRICAN_SUBJECTS,
-  'Sesotho',
-  'Sepedi',
-  'Setswana',
-  'Siswati',
-  'Tshivenda',
-  'Xitsonga',
-  'Ndebele',
-  'French',
-  'German',
-  'Portuguese',
-  'Latin',
-  'Arabic',
-  'Music',
-  'Dance Studies',
-  'Dramatic Arts',
-  'Visual Arts',
-  'Religion Studies',
-  'Technology',
-  'Natural Sciences',
-  'Social Sciences',
-  'Economic and Management Sciences',
-  'Creative Arts',
-  'Life Skills',
-  'Electrical Technology',
-  'Engineering Graphics and Design',
-];
+export const FALLBACK_SUBJECTS = ALLOWED_SUBJECTS;
+export const SOUTH_AFRICAN_SUBJECTS = ALLOWED_SUBJECTS;
+
+export const SUPPORTED_TUTOR_SUBJECTS = ALLOWED_SUBJECTS;
 
 export const SUBJECT_OPTIONS = FALLBACK_SUBJECTS.map((subject) => ({
   value: subject,

@@ -10,6 +10,8 @@ import { REQUEST_STATUSES } from '../../../utils/requestStatus';
 import { cancelClassRequest } from '../../../services/classRequestService';
 import { getUserProfile } from '../../../services/userService';
 
+const PENDING_STATUS_REDIRECT_KEY = 'parakleo_pending_request_status_redirect';
+
 function getStatusCopy(status) {
   if ([REQUEST_STATUSES.PENDING, REQUEST_STATUSES.MATCHING].includes(status)) return 'Searching for a tutor';
   if (status === REQUEST_STATUSES.OFFERED) return 'Waiting for tutor to accept';
@@ -146,23 +148,32 @@ export default function StudentRequestStatusPage() {
   }
 
   const currentStatus = request?.status;
-  const statusText = getStatusCopy(currentStatus);
-  const meta = getStatusMeta(currentStatus);
-  const tone = getToneClasses(meta.tone);
-  const StatusIcon = meta.icon;
-
-  const topic = request?.topic || state?.topic || 'Your request';
-  const duration = request?.duration || 'Per-minute billing';
-  const canJoin =
-    currentStatus === REQUEST_STATUSES.ACCEPTED ||
-    currentStatus === REQUEST_STATUSES.WAITING_STUDENT ||
-    currentStatus === REQUEST_STATUSES.IN_PROGRESS ||
-    currentStatus === REQUEST_STATUSES.IN_SESSION;
   const matchingSession = useMemo(
     () => sessions.find((item) => item.requestId === requestId),
     [requestId, sessions],
   );
-  const shouldAutoOpenSession = canJoin && Boolean(matchingSession?.id);
+  const joinSessionId = matchingSession?.id || request?.sessionId || '';
+  const normalizedStatus = String(currentStatus || '').toLowerCase();
+  const sessionStatus = String(matchingSession?.status || '').toLowerCase();
+  const hasActiveSession =
+    Boolean(joinSessionId)
+    && (!matchingSession || ['waiting_student', 'in_progress', 'in_session'].includes(sessionStatus));
+  const canJoin = hasActiveSession && ![
+    REQUEST_STATUSES.CANCELED,
+    REQUEST_STATUSES.CANCELED_DURING,
+    REQUEST_STATUSES.COMPLETED,
+    REQUEST_STATUSES.EXPIRED,
+  ].includes(currentStatus);
+  const effectiveStatus = hasActiveSession && ['pending', 'matching', 'offered', 'no_tutor_available'].includes(normalizedStatus)
+    ? (sessionStatus === 'in_progress' ? REQUEST_STATUSES.IN_PROGRESS : REQUEST_STATUSES.WAITING_STUDENT)
+    : currentStatus;
+  const statusText = getStatusCopy(effectiveStatus);
+  const meta = getStatusMeta(effectiveStatus);
+  const tone = getToneClasses(meta.tone);
+  const StatusIcon = meta.icon;
+  const topic = request?.topic || state?.topic || 'Your request';
+  const duration = request?.duration || 'Per-minute billing';
+  const shouldAutoOpenSession = canJoin && Boolean(joinSessionId);
   const isWaitingTutorAcceptance = currentStatus === REQUEST_STATUSES.OFFERED;
   const offeredTutorId = isWaitingTutorAcceptance ? (request?.currentOfferTutorId || request?.tutorId || null) : null;
   const tutorDisplayName = offeredTutorProfile?.fullName || offeredTutorProfile?.displayName || request?.tutorName || 'Tutor';
@@ -170,9 +181,16 @@ export default function StudentRequestStatusPage() {
   const tutorRating = Number(offeredTutorProfile?.tutorProfile?.overallRating ?? offeredTutorProfile?.ratings?.asTutor?.average ?? 0);
 
   useEffect(() => {
+    if (!requestId || typeof window === 'undefined') return;
+    if (window.sessionStorage.getItem(PENDING_STATUS_REDIRECT_KEY) === requestId) {
+      window.sessionStorage.removeItem(PENDING_STATUS_REDIRECT_KEY);
+    }
+  }, [requestId]);
+
+  useEffect(() => {
     if (!shouldAutoOpenSession) return;
-    navigate(`/app/session/${matchingSession.id}`, { replace: true });
-  }, [matchingSession?.id, navigate, shouldAutoOpenSession]);
+    navigate(`/app/session/${joinSessionId}`, { replace: true });
+  }, [joinSessionId, navigate, shouldAutoOpenSession]);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -259,6 +277,16 @@ export default function StudentRequestStatusPage() {
                 </div>
               </div>
               <p className="mt-3 text-sm text-white/85">{meta.badge}</p>
+              {canJoin && joinSessionId ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/app/session/${joinSessionId}`)}
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white transition hover:bg-white/25"
+                >
+                  Join Session
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
               {isWaitingTutorAcceptance ? (
                 <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/15 bg-white/10 p-3">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/15">

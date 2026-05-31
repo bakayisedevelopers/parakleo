@@ -283,6 +283,18 @@ export async function finalizeSessionClosure(session, options = {}) {
       },
       paymentStatus: PAYMENT_STATUS.PAID,
       paymentTransactionId: null,
+      ...(String(session.sessionType || '').toLowerCase() === 'ai'
+        ? {
+            aiLive: {
+              ...(session.aiLive || {}),
+              status: 'ended',
+              wsConnected: false,
+              audioInActive: false,
+              audioOutActive: false,
+              endedAt,
+            },
+          }
+        : {}),
     });
   } else {
     const idToken = await clients?.auth?.currentUser?.getIdToken?.();
