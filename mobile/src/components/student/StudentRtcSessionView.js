@@ -23,7 +23,7 @@ export function StudentRtcSessionView({
 
   const sessionUrl = useMemo(() => {
     const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
-    const webBaseUrl = String(process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://parakleo.co.za').trim().replace(/\/+$/, '');
+    const webBaseUrl = String(process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://parakleo.bakayise.com').trim().replace(/\/+$/, '');
     const sessionPath = `/app/session/${encodeURIComponent(String(sessionId || ''))}`;
     const params = new URLSearchParams({
       sessionId: String(sessionId || ''),

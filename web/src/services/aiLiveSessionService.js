@@ -9,6 +9,12 @@ function toWebSocketUrl(raw) {
   return input;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export async function createAiLiveSessionController({ sessionId, callbacks = {} }) {
   const clients = await getFirebaseClients();
   const auth = clients?.auth;
@@ -71,22 +77,16 @@ export async function createAiLiveSessionController({ sessionId, callbacks = {} 
     }
   };
 
-  const openSocket = () => new Promise((resolve, reject) => {
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      emitStatus('connected', { wsConnected: true });
-      callbacks.onAudioStateChange?.({ audioInActive: true });
-      resolve();
-    };
-
-    ws.onerror = () => {
-      reject(new Error('AI websocket failed to connect.'));
-    };
-
+  const attachSocketHandlers = () => {
     ws.onclose = () => {
       if (closed) return;
       emitStatus('disconnected', { wsConnected: false });
       callbacks.onClose?.();
+    };
+
+    ws.onerror = () => {
+      if (closed) return;
+      callbacks.onError?.('AI websocket connection interrupted.');
     };
 
     ws.onmessage = (event) => {
@@ -141,7 +141,55 @@ export async function createAiLiveSessionController({ sessionId, callbacks = {} 
         callbacks.onError?.(String(message.message || 'AI live error'));
       }
     };
+  };
+
+  const openSocketOnce = (attempt) => new Promise((resolve, reject) => {
+    const candidate = new WebSocket(wsUrl);
+    let settled = false;
+
+    candidate.onopen = () => {
+      settled = true;
+      ws = candidate;
+      attachSocketHandlers();
+      emitStatus('connected', { wsConnected: true, attempt });
+      callbacks.onAudioStateChange?.({ audioInActive: true });
+      resolve();
+    };
+
+    candidate.onerror = () => {
+      if (settled) return;
+      settled = true;
+      try { candidate.close(); } catch {}
+      reject(new Error('AI websocket failed to connect.'));
+    };
+
+    candidate.onclose = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('AI websocket closed before connecting.'));
+    };
   });
+
+  const openSocket = async () => {
+    const delays = [0, 800, 1600, 3200, 5000, 8000];
+    let lastError = null;
+
+    for (let index = 0; index < delays.length; index += 1) {
+      if (closed) throw new Error('AI websocket connection canceled.');
+      if (delays[index] > 0) await wait(delays[index]);
+      const attempt = index + 1;
+      emitStatus('connecting', { wsConnected: false, attempt });
+      try {
+        await openSocketOnce(attempt);
+        return;
+      } catch (error) {
+        lastError = error;
+        callbacks.onError?.(`AI websocket reconnecting (${attempt}/${delays.length})...`);
+      }
+    }
+
+    throw lastError || new Error('AI websocket failed to connect.');
+  };
 
   emitStatus('connecting', { wsConnected: false });
   await openSocket();

@@ -262,6 +262,20 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
+function writeUpgradeError(socket, statusCode, message) {
+  try {
+    socket.write([
+      `HTTP/1.1 ${statusCode} ${message}`,
+      'Connection: close',
+      'Content-Type: text/plain; charset=utf-8',
+      `Content-Length: ${Buffer.byteLength(message)}`,
+      '',
+      message,
+    ].join('\r\n'));
+  } catch {}
+  try { socket.destroy(); } catch {}
+}
+
 wss.on('connection', async (ws, request, context) => {
   const { sessionId, uid, session } = context;
   const writers = createBufferedWriters(sessionId);
@@ -362,6 +376,12 @@ wss.on('connection', async (ws, request, context) => {
   };
 
   try {
+    console.log(JSON.stringify({
+      event: 'gemini_live_connect_start',
+      sessionId,
+      project: process.env.GOOGLE_CLOUD_PROJECT || '',
+      location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+    }));
     geminiLiveSession = await ai.live.connect({
       model: 'gemini-live-2.5-flash-preview',
       config: {
@@ -372,7 +392,16 @@ wss.on('connection', async (ws, request, context) => {
       },
       callbacks: { onmessage: onGeminiMessage },
     });
+    console.log(JSON.stringify({
+      event: 'gemini_live_connect_success',
+      sessionId,
+    }));
   } catch (error) {
+    console.error(JSON.stringify({
+      event: 'gemini_live_connect_failed',
+      sessionId,
+      message: error?.message || 'Unknown Gemini connection error',
+    }));
     send(ws, { type: 'error', message: `Gemini connection failed: ${error.message}` });
   }
 
@@ -491,21 +520,31 @@ server.on('upgrade', async (request, socket, head) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (url.pathname !== '/live') {
-      socket.destroy();
+      writeUpgradeError(socket, 404, 'Not found');
       return;
     }
     const sessionId = String(url.searchParams.get('sessionId') || '').trim();
     const token = String(url.searchParams.get('token') || '').trim();
     if (!sessionId || !token) {
-      socket.destroy();
+      writeUpgradeError(socket, 400, 'Missing sessionId or token');
       return;
     }
     const { uid, session } = await verifyAndLoadSession(token, sessionId);
+    console.log(JSON.stringify({
+      event: 'ai_live_upgrade_allowed',
+      sessionId,
+      uid,
+      sessionType: session.sessionType || null,
+    }));
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request, { sessionId, uid, session });
     });
-  } catch {
-    socket.destroy();
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'ai_live_upgrade_rejected',
+      message: error?.message || 'Unknown upgrade error',
+    }));
+    writeUpgradeError(socket, 401, 'Unauthorized');
   }
 });
 

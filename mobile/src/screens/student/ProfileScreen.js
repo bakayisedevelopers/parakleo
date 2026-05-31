@@ -53,7 +53,7 @@ export function ProfileScreen({ navigate }) {
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
   const referralSlug = String(currentUser?.referralSlug || currentUser?.referralCode || '').trim();
   const referralLink = useMemo(
-    () => (referralSlug ? `https://parakleo.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : ''),
+    () => (referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : ''),
     [referralSlug],
   );
   const referralPreview = referralLink.length > 42 ? `${referralLink.slice(0, 42)}...` : referralLink;

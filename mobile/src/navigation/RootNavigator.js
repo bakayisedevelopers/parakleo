@@ -288,7 +288,7 @@ export function RootNavigator() {
   const isFullscreenRoute = activeRoute.key === 'SessionRoom';
   const unreadCount = notifications.filter((item) => !item?.read).length;
   const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://parakleo.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
+  const referralLink = referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : '';
 
   const handleLogout = async () => {
     setAuthRoute('Home');

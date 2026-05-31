@@ -19,7 +19,7 @@ export function DashboardScreen({ navigate }) {
   const [composerStage, setComposerStage] = useState('input');
   const [shareFeedback, setShareFeedback] = useState('');
   const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://parakleo.co.za/signup?ref=${encodeURIComponent(referralSlug)}` : '';
+  const referralLink = referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : '';
   const referralPreview = referralLink.length > 42 ? `${referralLink.slice(0, 42)}...` : referralLink;
 
   useEffect(() => subscribeToStudentRequests(
