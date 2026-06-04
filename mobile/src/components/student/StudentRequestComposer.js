@@ -14,7 +14,7 @@ import { AttachmentPickerModal } from './AttachmentPickerModal';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { StatusBadge } from '../ui/StatusBadge';
-import { SOUTH_AFRICAN_SUBJECTS } from '../../constants/subjects';
+import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import { createClassRequest } from '../../services/classRequestService';
 import { extractAttachments } from '../../services/attachmentExtractionService';
 import { fetchPricingQuote } from '../../services/pricingService';
@@ -243,6 +243,7 @@ export function StudentRequestComposer({
   user,
   onStageChange,
 }) {
+  const { subjectOptions } = useSubjectCatalog();
   const paymentMethods = user?.paymentMethods || [];
   const freeMinutesRemaining = Number(user?.freeMinutesRemaining || 0);
   const onboardingStatus = getStudentOnboardingStatus(user);
@@ -269,7 +270,6 @@ export function StudentRequestComposer({
     paymentMethods.find((card) => card.isDefault)?.id || paymentMethods[0]?.id || '',
   );
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [quote, setQuote] = useState(null);
   const [pickerMode, setPickerMode] = useState('');
   const [isTextEntryOpen, setIsTextEntryOpen] = useState(false);
@@ -300,6 +300,11 @@ export function StudentRequestComposer({
     : null;
   const hasRequestContent = Boolean(topic.trim()) || attachments.length > 0;
 
+  function openRequestStatus(requestId) {
+    if (!requestId) return;
+    navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
+  }
+
   function buildReviewSignature() {
     const attachmentSignature = attachments.map((file) => buildAttachmentKey(file)).join('|');
     return [
@@ -312,35 +317,17 @@ export function StudentRequestComposer({
   }
 
   async function refreshQuote(minutes, subject) {
+    const nextSubject = String(subject || selectedSubject || '').trim();
+    if (!nextSubject) {
+      setQuote(null);
+      return null;
+    }
     const nextQuote = await fetchPricingQuote({
       durationMinutes: minutes,
-      subject: subject || selectedSubject || 'Mathematics',
+      subject: nextSubject,
     });
     setQuote(nextQuote);
     return nextQuote;
-  }
-
-  function resetComposerState() {
-    if (processingRedirectTimeoutRef.current) {
-      clearTimeout(processingRedirectTimeoutRef.current);
-      processingRedirectTimeoutRef.current = null;
-    }
-    setStage('input');
-    setTopic('');
-    setAttachments([]);
-    setAttachmentExtractionByKey({});
-    setAttachmentExtractionStatusByKey({});
-    setSelectedSubject('');
-    setClassifiedTopic('');
-    setEstimatedMinutes(DEFAULT_LESSON_DURATION);
-    setDurationMinutes(DEFAULT_LESSON_DURATION);
-    setHasManualDurationOverride(false);
-    setError('');
-    setQuote(null);
-    setIsTextEntryOpen(false);
-    setTypedSubjectStatus('');
-    setTypedTopicStatus('');
-    setShowProcessingComplete(false);
   }
 
   function proceedToReviewFromOverlay() {
@@ -374,7 +361,6 @@ export function StudentRequestComposer({
     setStage('input');
     resetProcessingFlowState();
     setError('');
-    setSuccessMessage('');
     setShowAttachmentProcessingOverlay(true);
     setIsExtracting(true);
     let extractionCompleted = false;
@@ -454,7 +440,6 @@ export function StudentRequestComposer({
     if (!hasRequestContentInput || ((!skipExtractingGuard && isExtracting) || isPreparingReview)) return;
 
     setError('');
-    setSuccessMessage('');
     setIsPreparingReview(true);
     const reviewSignature = [
       topic.trim(),
@@ -468,7 +453,6 @@ export function StudentRequestComposer({
       const attachmentExtractions = attachmentsInput
         .map((file) => extractionByKeyInput[buildAttachmentKey(file)])
         .filter(Boolean);
-      const subjectOptions = SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }));
       const classificationInput = buildSubjectClassificationInput({
         typedText: topic,
         attachmentExtractions,
@@ -546,7 +530,6 @@ export function StudentRequestComposer({
 
     const timeoutId = setTimeout(async () => {
       try {
-        const subjectOptions = SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }));
         const classificationInput = buildSubjectClassificationInput({
           typedText: trimmedTopic,
           attachmentExtractions: [],
@@ -603,8 +586,6 @@ export function StudentRequestComposer({
 
     setIsSubmitting(true);
     setError('');
-    setSuccessMessage('');
-
     try {
       const activeQuote = quote || (await refreshQuote(durationMinutes, selectedSubject));
       const quoteWithDiscount = buildQuoteWithDiscount(activeQuote, durationMinutes, freeMinutesRemaining);
@@ -662,6 +643,7 @@ export function StudentRequestComposer({
         boardPreparationSource,
       });
       setPendingStatusRequestId(requestId);
+      openRequestStatus(requestId);
 
       const predicted = latestClassification?.academicBrainOutput || null;
       if (predicted) {
@@ -695,10 +677,6 @@ export function StudentRequestComposer({
           sessionId: '',
         }).catch(() => null);
       }
-
-      resetComposerState();
-      setSuccessMessage('Your class request is live and matching tutors.');
-      navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
     } catch (nextError) {
       setError(nextError.message || 'Unable to submit request right now.');
     } finally {
@@ -717,7 +695,7 @@ export function StudentRequestComposer({
     const targetRequest = requests.find((request) => request.id === pendingStatusRequestId);
     if (!targetRequest) return;
     setPendingStatusRequestId('');
-    navigate({ key: 'RequestStatus', params: { requestId: pendingStatusRequestId, parentTab: 'Requests' } });
+    openRequestStatus(pendingStatusRequestId);
   }, [navigate, pendingStatusRequestId, requests]);
 
   useEffect(() => () => {
@@ -728,12 +706,6 @@ export function StudentRequestComposer({
 
   return (
     <View style={styles.wrap}>
-      {successMessage ? (
-        <Card style={styles.feedbackCard}>
-          <Text style={styles.successText}>{successMessage}</Text>
-        </Card>
-      ) : null}
-
       {flowState === 'blocked_onboarding' ? (
         <Card style={styles.heroCard}>
           <StatusBadge label="Complete profile" tone="warning" />
@@ -903,7 +875,7 @@ export function StudentRequestComposer({
                   selectedValue={selectedSubject}
                   valueLabel={selectedSubject}
                   placeholder="Select subject"
-                  options={SOUTH_AFRICAN_SUBJECTS.map((subject) => ({ value: subject, label: subject }))}
+                  options={subjectOptions}
                   onSelect={async (value) => {
                     const nextSubject = String(value || '');
                     setSelectedSubject(nextSubject);

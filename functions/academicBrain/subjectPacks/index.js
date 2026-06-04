@@ -54,7 +54,7 @@ function createPack({
 const SUBJECT_PACKS = [
   createPack({
     subjectId: 'mathematics',
-    displayName: 'Maths',
+    displayName: 'Mathematics',
     aliases: ['math', 'maths', 'mathematics', 'paper 1', 'paper 2', 'algebra', 'calculus', 'trigonometry', 'geometry'],
     keywords: [
       'equation', 'inequality', 'factorise', 'simplify', 'graph', 'gradient', 'intercept', 'domain', 'range',
@@ -113,7 +113,7 @@ const SUBJECT_PACKS = [
   }),
   createPack({
     subjectId: 'mathematical_literacy',
-    displayName: 'Maths Lit',
+    displayName: 'Maths Literacy',
     aliases: ['math lit', 'mat lit', 'math literacy', 'maths lit', 'mathematical literacy'],
     keywords: [
       'budget', 'income', 'expenditure', 'profit', 'loss', 'simple interest', 'compound interest',

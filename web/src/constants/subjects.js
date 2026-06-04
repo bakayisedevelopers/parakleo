@@ -1,6 +1,6 @@
 export const ALLOWED_SUBJECTS = [
-  'Maths',
-  'Maths Lit',
+  'Mathematics',
+  'Maths Literacy',
   'Physical Sciences',
   'Business Studies',
   'Economics',

@@ -18,7 +18,7 @@ test('validates and normalizes AI subject mark output', () => {
 
   assert.deepEqual(result, [
     { subject: 'English', mark: 66 },
-    { subject: 'Maths', mark: 78 },
+    { subject: 'Mathematics', mark: 78 },
     { subject: 'Physical Sciences', mark: 74 },
   ]);
 });
@@ -33,7 +33,7 @@ test('validates object-shaped AI subject mark output', () => {
 
   assert.deepEqual(result, [
     { subject: 'English', mark: 59 },
-    { subject: 'Maths Lit', mark: 71 },
+    { subject: 'Maths Literacy', mark: 71 },
   ]);
 });
 
@@ -45,12 +45,12 @@ test('validates Gemini subject classification output against supported subjects'
     subjectConfidence: 'high',
     needsManualSubjectSelection: false,
   }, [
-    { value: 'Maths', label: 'Maths' },
+    { value: 'Mathematics', label: 'Mathematics' },
     { value: 'English', label: 'English' },
   ]);
 
   assert.deepEqual(result, {
-    subject: 'Maths',
+    subject: 'Mathematics',
     unsupportedSubject: '',
     topic: 'quadratic equations',
     estimatedMinutes: 32,
@@ -69,7 +69,7 @@ test('identifies unsupported requested subjects separately from fallback', () =>
     subjectConfidence: 'high',
     needsManualSubjectSelection: true,
   }, [
-    { value: 'Maths', label: 'Maths' },
+    { value: 'Mathematics', label: 'Mathematics' },
     { value: 'English', label: 'English' },
   ]);
 
@@ -86,7 +86,7 @@ test('identifies unsupported requested subjects separately from fallback', () =>
 
 test('falls back to manual subject selection when classification is invalid', () => {
   const result = validateSubjectClassification(null, [
-    { value: 'Maths', label: 'Maths' },
+    { value: 'Mathematics', label: 'Mathematics' },
   ]);
 
   assert.deepEqual(result, {

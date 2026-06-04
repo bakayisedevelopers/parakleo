@@ -1,10 +1,10 @@
 const SUBJECT_ALIASES = [
-  ['Maths Lit', ['mathematical literacy', 'math literacy', 'math lit', 'maths literacy', 'maths lit']],
+  ['Maths Literacy', ['mathematical literacy', 'math literacy', 'math lit', 'maths literacy', 'maths lit']],
   ['Physical Sciences', ['physical sciences', 'physical science', 'physics', 'chemistry', 'phys sci']],
   ['Life Sciences', ['life sciences', 'life science', 'biology']],
   ['Agriculture', ['agricultural sciences', 'agricultural science', 'agriculture']],
   ['Business Studies', ['business studies', 'business study', 'business']],
-  ['Maths', ['mathematics', 'maths', 'math', 'algebra', 'geometry']],
+  ['Mathematics', ['mathematics', 'maths', 'math', 'algebra', 'geometry']],
   ['English', ['english', 'english home language', 'english first additional language', 'eng']],
   ['Accounting', ['accounting']],
   ['Economics', ['economics']],
@@ -12,8 +12,8 @@ const SUBJECT_ALIASES = [
 
 const SUBJECT_NAMES = SUBJECT_ALIASES.map(([subject]) => subject);
 const GRADE_1_TO_12_SUBJECT_NAMES = [
-  'Maths',
-  'Maths Lit',
+  'Mathematics',
+  'Maths Literacy',
   'Physical Sciences',
   'Business Studies',
   'Economics',

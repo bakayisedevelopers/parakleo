@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const { extractSubjectsAndMarks, normalizeSubjectName, isAllowedGrade1To12Subject } = require('./subjectExtraction');
 
 test('normalizes common South African subject aliases', () => {
-  assert.equal(normalizeSubjectName('Maths'), 'Maths');
+  assert.equal(normalizeSubjectName('Maths'), 'Mathematics');
   assert.equal(normalizeSubjectName('Physical Science'), 'Physical Sciences');
-  assert.equal(normalizeSubjectName('Math Lit'), 'Maths Lit');
+  assert.equal(normalizeSubjectName('Math Lit'), 'Maths Literacy');
   assert.equal(normalizeSubjectName('English FAL'), 'English');
   assert.equal(normalizeSubjectName('Agricultural Sciences'), 'Agriculture');
 });
@@ -30,7 +30,7 @@ test('extracts subjects and percentage marks from result text', () => {
   assert.deepEqual(result, [
     { subject: 'Business Studies', mark: 42 },
     { subject: 'English', mark: 70 },
-    { subject: 'Maths', mark: 78 },
+    { subject: 'Mathematics', mark: 78 },
     { subject: 'Physical Sciences', mark: 65 },
   ]);
 });
@@ -61,6 +61,6 @@ test('prefers the trailing tabular mark for subject rows', () => {
   assert.deepEqual(result, [
     { subject: 'English', mark: 70 },
     { subject: 'Life Sciences', mark: 64 },
-    { subject: 'Maths', mark: 78 },
+    { subject: 'Mathematics', mark: 78 },
   ]);
 });

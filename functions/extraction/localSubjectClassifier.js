@@ -3,8 +3,8 @@ function normalizeText(value = '') {
 }
 
 const SUBJECT_RULES = {
-  Maths: ['algebra', 'equation', 'solve for x', 'trigonometry', 'calculus', 'geometry', 'probability', 'factorise', 'ratio', 'linear', 'quadratic', 'graph'],
-  'Maths Lit': ['maths lit', 'mathematical literacy', 'interest rate', 'budget', 'measurement', 'scale drawing', 'currency conversion'],
+  Mathematics: ['algebra', 'equation', 'solve for x', 'trigonometry', 'calculus', 'geometry', 'probability', 'factorise', 'ratio', 'linear', 'quadratic', 'graph'],
+  'Maths Literacy': ['maths literacy', 'maths lit', 'mathematical literacy', 'math literacy', 'math lit', 'interest rate', 'budget', 'measurement', 'scale drawing', 'currency conversion'],
   'Physical Sciences': ['physics', 'chemistry', 'newton', 'mole', 'energy', 'acid', 'base', 'reaction', 'force', 'stoichiometry', 'ohm', 'voltage'],
   'Life Sciences': ['biology', 'cell', 'photosynthesis', 'genetics', 'ecosystem', 'organism', 'respiration', 'mitosis'],
   Agriculture: ['agriculture', 'agricultural science', 'agricultural sciences', 'crop', 'soil', 'livestock', 'farming'],
@@ -25,14 +25,16 @@ function mapSupportedSubjects(supportedSubjects = []) {
   return map;
 }
 
-function classifySubjectLocally({ text = '', supportedSubjects = [] } = {}) {
+function classifySubjectLocally({ text = '', supportedSubjects = [], enforceSupportedList = false } = {}) {
   const normalizedText = normalizeText(text);
   const supportedMap = mapSupportedSubjects(supportedSubjects);
+  const restrictToSupported = Boolean(enforceSupportedList);
   const scoreBySubject = new Map();
   const matchedBySubject = new Map();
 
   Object.entries(SUBJECT_RULES).forEach(([subject, keywords]) => {
-    const canonical = supportedMap.get(subject.toLowerCase()) || subject;
+    const canonical = supportedMap.get(subject.toLowerCase()) || (!restrictToSupported ? subject : '');
+    if (!canonical) return;
     let score = 0;
     const matched = [];
     keywords.forEach((keyword) => {

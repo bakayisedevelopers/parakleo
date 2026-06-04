@@ -1,5 +1,4 @@
 import { getFirebaseClients } from '../firebase/config';
-import { DEFAULT_SUBJECTS } from '../constants/subjects';
 import { isTutorAgreementCurrent } from '../utils/onboarding';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
@@ -17,7 +16,7 @@ function buildReferralSlug() {
 function buildDefaultProfile({ uid, email, displayName, role, referralSlug, referredBy = null, pendingReferralSlug = null }) {
   const normalizedRole = role || 'student';
   const safeReferralSlug = String(referralSlug || buildReferralSlug()).trim().toLowerCase();
-  const defaultSubjects = normalizedRole === 'student' ? [] : DEFAULT_SUBJECTS;
+  const defaultSubjects = normalizedRole === 'student' ? [] : [];
 
   return {
     uid,
@@ -258,7 +257,8 @@ export async function getTutorCandidatesForRequest({ subject }) {
     .filter((tutor) => {
       const tutorProfile = tutor.tutorProfile || {};
       const isVerified = tutorProfile.verificationStatus === 'verified';
-      const normalizedSubjects = (tutor.activeSubjects || tutor.subjects || []).map((item) => String(item || '').trim().toLowerCase());
+      const normalizedSubjects = (Array.isArray(tutor.activeSubjects) ? tutor.activeSubjects : [])
+        .map((item) => String(item || '').trim().toLowerCase());
       const requestSubject = String(subject || 'Mathematics').trim().toLowerCase();
       return isVerified && hasCurrentTutorAgreement(tutor) && normalizedSubjects.includes(requestSubject) && !tutor.activeSessionId;
     })

@@ -8,9 +8,9 @@ const { estimateMinutesLocally } = require('./extraction/minutesEstimator');
 test('local subject classifier detects maths', () => {
   const result = classifySubjectLocally({
     text: 'Solve this algebra equation and factorise the quadratic expression.',
-    supportedSubjects: [{ value: 'Maths', label: 'Maths' }],
+    supportedSubjects: [{ value: 'Mathematics', label: 'Mathematics' }],
   });
-  assert.equal(result.subject, 'Maths');
+  assert.equal(result.subject, 'Mathematics');
   assert.ok(['high', 'low', 'unknown'].includes(result.subjectConfidence));
   assert.equal(result.method, 'local');
 });
@@ -18,7 +18,7 @@ test('local subject classifier detects maths', () => {
 test('local topic detector returns topics for maths', () => {
   const result = detectTopicsLocally({
     text: 'Use sine and cosine to solve the trig problem.',
-    subject: 'Maths',
+    subject: 'Mathematics',
   });
   assert.ok(Array.isArray(result.topics));
   assert.equal(result.method, 'local');

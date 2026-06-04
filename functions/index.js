@@ -20,6 +20,15 @@ const {
   isAllowedGrade1To12Subject,
   GRADE_1_TO_12_SUBJECT_NAMES,
 } = require('./subjectExtraction');
+const {
+  GOOGLE_CLOUD_SKU_IDS,
+  computeLinearChargeFromPrice,
+  computeTieredChargeFromPrice,
+  getCloudVisionDocumentTextPrice,
+  getGeminiFlashImageInputPrice,
+  getGeminiFlashTextInputPrice,
+  getGeminiFlashTextOutputPrice,
+} = require('./googleCloudPricing');
 const { classifySubjectLocally } = require('./extraction/localSubjectClassifier');
 const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
 const { estimateMinutesLocally, clampMinutes } = require('./extraction/minutesEstimator');
@@ -388,11 +397,8 @@ const AI_FALLBACK_SUBJECT_ALLOWLIST = new Set([
   'economics',
 ]);
 let visionClient = null;
-const ZAR_PER_USD = 17;
-const CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE = 0.0015;
-const GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS = 0.3;
-const GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS = 2.5;
 const GEMINI_FLASH_EXTRACTION_SOURCE = 'gemini_2_5_flash_after_tutor_accept';
+const BOOKING_FEE_BUFFER_RATE = 0.10;
 
 function getVisionClient() {
   if (!visionClient) {
@@ -896,7 +902,8 @@ function isTruthyFlag(value) {
 }
 
 function isTutorDispatchEligible(tutor = {}, subjectKey) {
-  const normalizedSubjects = (tutor.activeSubjects || tutor.subjects || []).map((entry) => String(entry || '').trim().toLowerCase());
+  const normalizedSubjects = (Array.isArray(tutor.activeSubjects) ? tutor.activeSubjects : [])
+    .map((entry) => String(entry || '').trim().toLowerCase());
   const isDispatchPaused = isTruthyFlag(
     tutor.dispatchPaused
       ?? tutor.isDispatchPaused
@@ -1033,10 +1040,13 @@ async function refreshGlobalSubjects() {
   const counts = new Map();
 
   tutorsSnap.docs.forEach((docSnap) => {
-    const qualifiedSubjects = Array.isArray(docSnap.data().qualifiedSubjects)
-      ? docSnap.data().qualifiedSubjects.map((item) => item?.subject || '')
-      : [];
-    const uniqueSubjects = [...new Set(normalizeActiveSubjects(qualifiedSubjects))];
+    const tutor = docSnap.data() || {};
+    if (String(tutor?.tutorProfile?.verificationStatus || '').toLowerCase() !== 'verified') {
+      return;
+    }
+    const activeSubjects = Array.isArray(tutor.activeSubjects) ? tutor.activeSubjects : [];
+    const uniqueSubjects = [...new Set(normalizeActiveSubjects(activeSubjects))]
+      .filter((subject) => isAllowedGrade1To12Subject(subject));
     uniqueSubjects.forEach((subject) => {
       counts.set(subject, (counts.get(subject) || 0) + 1);
     });
@@ -1527,39 +1537,41 @@ exports.contentExtractionForWhiteboard = onDocumentWritten({
     }));
     const mergedText = questionEvents.map((question) => String(question?.text || '').trim()).filter(Boolean).join('\n\n').trim();
 
-    const estimatedInputTokens = Math.max(1, Math.round((Number(streamMeta?.prompt?.length || 0) + (payloadImages.length * 1200)) / 4));
-    const estimatedOutputTokens = Math.max(1, Math.round(JSON.stringify(questionEvents).length / 4));
-    const geminiFlashPricing = buildGeminiFlashPricing({
-      inputTokens: estimatedInputTokens,
-      outputTokens: estimatedOutputTokens,
+    const geminiFlashPricing = await buildLiveGeminiFlashPricing({
+      usageMetadata: streamMeta?.usageMetadata || {},
+      promptText: streamMeta?.prompt || '',
+      imageCount: payloadImages.length,
     });
     const existingExtractions = Array.isArray(after?.boardPreparationSource?.attachmentExtractions)
       ? after.boardPreparationSource.attachmentExtractions
       : [];
-    const cloudVisionUsd = toMoney(existingExtractions.reduce((sum, item = {}) => {
-      const direct = Number(item?.cloudVisionPriceUsd || 0);
-      const fromPricing = Number(item?.pricing?.cloudVision?.usdTotal || 0);
-      const fallback = Number(item?.pageCount || item?.selectedPages?.length || 1) * CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE;
-      const picked = direct || fromPricing || fallback;
+    const cloudVisionZar = toRand(existingExtractions.reduce((sum, item = {}) => {
+      const direct = Number(item?.cloudVisionPriceZar || 0);
+      const fromPricing = Number(item?.pricing?.cloudVision?.zarTotal || 0);
+      const picked = direct || fromPricing;
       return sum + (Number.isFinite(picked) ? picked : 0);
     }, 0));
     const cloudVisionPricing = {
       provider: 'google-vision',
       operation: 'document_text_detection',
+      currency: 'ZAR',
+      livePrice: true,
+      estimated: false,
       pageCount: existingExtractions.reduce((sum, item = {}) => sum + Math.max(1, Number(item?.pageCount || item?.selectedPages?.length || 1)), 0),
-      usdPerPage: CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE,
-      usdTotal: cloudVisionUsd,
-      zarPerUsd: ZAR_PER_USD,
-      zarTotal: usdToZar(cloudVisionUsd),
-      estimated: true,
+      zarTotal: cloudVisionZar,
     };
+    const bookingFeePricing = buildBookingFeePricing({
+      cloudVisionZar: cloudVisionPricing.zarTotal,
+      geminiZar: geminiFlashPricing.zarTotal,
+    });
     const combinedPricing = {
-      fxRateZarPerUsd: ZAR_PER_USD,
+      currency: 'ZAR',
       cloudVision: cloudVisionPricing,
       geminiFlash: geminiFlashPricing,
-      totalUsd: toMoney(cloudVisionPricing.usdTotal + geminiFlashPricing.usdTotal),
-      totalZar: usdToZar(cloudVisionPricing.usdTotal + geminiFlashPricing.usdTotal),
-      estimated: true,
+      bookingFee: bookingFeePricing,
+      totalZar: toRand(cloudVisionPricing.zarTotal + geminiFlashPricing.zarTotal),
+      estimated: false,
+      livePrice: true,
     };
 
     const documentAiExtraction = {
@@ -1579,7 +1591,6 @@ exports.contentExtractionForWhiteboard = onDocumentWritten({
       },
       classification: classificationEvent,
       pricing: geminiFlashPricing,
-      fxRateZarPerUsd: ZAR_PER_USD,
       source: GEMINI_FLASH_EXTRACTION_SOURCE,
       processedAt: Date.now(),
       durationMs: Math.max(0, Date.now() - startedAt),
@@ -1595,13 +1606,11 @@ exports.contentExtractionForWhiteboard = onDocumentWritten({
       extractedText: mergedText || after?.boardPreparationSource?.extractedText || '',
       documentAiExtraction,
       extractionPricing: combinedPricing,
-      cloudVisionPriceUsd: cloudVisionPricing.usdTotal,
       cloudVisionPriceZar: cloudVisionPricing.zarTotal,
-      documentAiPriceUsd: geminiFlashPricing.usdTotal,
       documentAiPriceZar: geminiFlashPricing.zarTotal,
-      totalExtractionPriceUsd: combinedPricing.totalUsd,
       totalExtractionPriceZar: combinedPricing.totalZar,
-      fxRateZarPerUsd: ZAR_PER_USD,
+      bookingFeePriceZar: bookingFeePricing.totalZar,
+      bookingFeePricing,
     };
 
     const requestPatch = {
@@ -2479,45 +2488,232 @@ function toMoney(value) {
   return Number(numeric.toFixed(6));
 }
 
-function usdToZar(usdValue) {
-  return toMoney(Number(usdValue || 0) * ZAR_PER_USD);
+function toRand(value) {
+  return Number(toMoney(value).toFixed(2));
 }
 
-function buildCloudVisionPricing({ pageCount = 1 } = {}) {
-  const safePageCount = Math.max(1, Number(pageCount || 1));
-  const usd = toMoney(safePageCount * CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE);
+function getUsageMonthKey(value = Date.now()) {
+  const date = new Date(value);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function estimateTokenCountFromText(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.round(normalized.length / 4));
+}
+
+function normalizeUsageTokenCount(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.round(numeric);
+}
+
+function normalizeGeminiPromptTokenBreakdown(usageMetadata = {}, { promptText = '', imageCount = 0 } = {}) {
+  const promptTokenCount = normalizeUsageTokenCount(
+    usageMetadata?.promptTokenCount
+      ?? usageMetadata?.inputTokenCount
+      ?? usageMetadata?.prompt_tokens,
+  );
+  const outputTokenCount = normalizeUsageTokenCount(
+    usageMetadata?.candidatesTokenCount
+      ?? usageMetadata?.outputTokenCount
+      ?? usageMetadata?.candidates_tokens,
+  );
+  const promptDetails = Array.isArray(
+    usageMetadata?.promptTokensDetails
+      ?? usageMetadata?.promptTokenDetails
+      ?? usageMetadata?.inputTokensDetails,
+  )
+    ? (usageMetadata.promptTokensDetails || usageMetadata.promptTokenDetails || usageMetadata.inputTokensDetails)
+    : [];
+
+  let textInputTokens = 0;
+  let imageInputTokens = 0;
+  promptDetails.forEach((detail = {}) => {
+    const tokenCount = normalizeUsageTokenCount(
+      detail?.tokenCount
+        ?? detail?.tokens
+        ?? detail?.count
+        ?? detail?.token_count,
+    );
+    const modality = String(
+      detail?.modality
+        || detail?.type
+        || detail?.mediaType
+        || detail?.tokenType
+        || detail?.channel
+        || '',
+    ).toLowerCase();
+    if (!tokenCount) return;
+    if (modality.includes('image')) {
+      imageInputTokens += tokenCount;
+      return;
+    }
+    if (modality.includes('text')) {
+      textInputTokens += tokenCount;
+    }
+  });
+
+  let splitStrategy = promptDetails.length ? 'usage_metadata_details' : 'prompt_estimate_fallback';
+  if (!textInputTokens && !imageInputTokens) {
+    const estimatedPromptTextTokens = estimateTokenCountFromText(promptText);
+    if (imageCount > 0) {
+      textInputTokens = Math.min(promptTokenCount, estimatedPromptTextTokens);
+      imageInputTokens = Math.max(0, promptTokenCount - textInputTokens);
+    } else {
+      textInputTokens = promptTokenCount;
+      imageInputTokens = 0;
+    }
+  }
+
+  const totalSplitTokens = textInputTokens + imageInputTokens;
+  if (totalSplitTokens !== promptTokenCount) {
+    const delta = promptTokenCount - totalSplitTokens;
+    if (delta > 0) {
+      if (imageCount > 0) {
+        imageInputTokens += delta;
+      } else {
+        textInputTokens += delta;
+      }
+    } else if (delta < 0) {
+      const correction = Math.abs(delta);
+      if (imageInputTokens >= correction) {
+        imageInputTokens -= correction;
+      } else {
+        textInputTokens = Math.max(0, textInputTokens - (correction - imageInputTokens));
+        imageInputTokens = 0;
+      }
+    }
+    splitStrategy = `${splitStrategy}_normalized`;
+  }
+
   return {
-    provider: 'google-vision',
-    operation: 'document_text_detection',
-    pageCount: safePageCount,
-    usdPerPage: CLOUD_VISION_TEXT_DETECTION_USD_PER_PAGE,
-    usdTotal: usd,
-    zarPerUsd: ZAR_PER_USD,
-    zarTotal: usdToZar(usd),
-    estimated: true,
+    promptTokenCount,
+    outputTokenCount,
+    textInputTokens,
+    imageInputTokens,
+    splitStrategy,
   };
 }
 
-function buildGeminiFlashPricing({ inputTokens = 0, outputTokens = 0 } = {}) {
-  const safeInputTokens = Math.max(0, Number(inputTokens || 0));
-  const safeOutputTokens = Math.max(0, Number(outputTokens || 0));
-  const inputUsd = toMoney((safeInputTokens / 1000000) * GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS);
-  const outputUsd = toMoney((safeOutputTokens / 1000000) * GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS);
-  const usd = toMoney(inputUsd + outputUsd);
+async function buildLiveCloudVisionPricing({
+  pageCount = 1,
+  usageMonthKey = getUsageMonthKey(),
+} = {}) {
+  const safePageCount = Math.max(1, Math.round(Number(pageCount || 1)));
+  const price = await getCloudVisionDocumentTextPrice('ZAR');
+  const usageRef = db.collection('systemUsage').doc(`cloudVisionDocumentTextDetection_${usageMonthKey}`);
+  const pricing = await db.runTransaction(async (transaction) => {
+    const usageSnap = await transaction.get(usageRef);
+    const priorUsageAmount = Math.max(0, Number(usageSnap.data()?.usageAmount || 0));
+    const chargeZar = computeTieredChargeFromPrice({
+      price,
+      priorUsageAmount,
+      usageAmount: safePageCount,
+    });
+    const nextUsageAmount = priorUsageAmount + safePageCount;
+    transaction.set(usageRef, {
+      service: 'cloud_vision_document_text_detection',
+      skuId: GOOGLE_CLOUD_SKU_IDS.cloudVisionDocumentTextDetection,
+      monthKey: usageMonthKey,
+      currency: 'ZAR',
+      usageAmount: nextUsageAmount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: usageSnap.exists ? (usageSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp()) : admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return {
+      priorUsageAmount,
+      nextUsageAmount,
+      chargeZar,
+    };
+  });
+
+  return {
+    provider: 'google-vision',
+    operation: 'document_text_detection',
+    currency: 'ZAR',
+    livePrice: true,
+    estimated: false,
+    pageCount: safePageCount,
+    monthKey: usageMonthKey,
+    skuId: GOOGLE_CLOUD_SKU_IDS.cloudVisionDocumentTextDetection,
+    unitQuantity: Number(price?.rate?.unitInfo?.unitQuantity?.value || 1),
+    priorMonthlyUsageCount: pricing.priorUsageAmount,
+    nextMonthlyUsageCount: pricing.nextUsageAmount,
+    zarTotal: toRand(pricing.chargeZar),
+    billingPrice: price,
+  };
+}
+
+async function buildLiveGeminiFlashPricing({
+  usageMetadata = {},
+  promptText = '',
+  imageCount = 0,
+} = {}) {
+  const [textInputPrice, imageInputPrice, textOutputPrice] = await Promise.all([
+    getGeminiFlashTextInputPrice('ZAR'),
+    getGeminiFlashImageInputPrice('ZAR'),
+    getGeminiFlashTextOutputPrice('ZAR'),
+  ]);
+  const tokenBreakdown = normalizeGeminiPromptTokenBreakdown(usageMetadata, { promptText, imageCount });
+  const textInputChargeZar = computeLinearChargeFromPrice({
+    price: textInputPrice,
+    usageAmount: tokenBreakdown.textInputTokens,
+  });
+  const imageInputChargeZar = computeLinearChargeFromPrice({
+    price: imageInputPrice,
+    usageAmount: tokenBreakdown.imageInputTokens,
+  });
+  const outputChargeZar = computeLinearChargeFromPrice({
+    price: textOutputPrice,
+    usageAmount: tokenBreakdown.outputTokenCount,
+  });
+  const totalZar = toRand(textInputChargeZar + imageInputChargeZar + outputChargeZar);
   return {
     provider: 'google-gemini',
     model: 'gemini-2.5-flash',
     operation: 'structured_question_extraction',
-    inputTokens: safeInputTokens,
-    outputTokens: safeOutputTokens,
-    usdPerMillionInputTokens: GEMINI_FLASH_INPUT_USD_PER_1M_TOKENS,
-    usdPerMillionOutputTokens: GEMINI_FLASH_OUTPUT_USD_PER_1M_TOKENS,
-    usdInputTotal: inputUsd,
-    usdOutputTotal: outputUsd,
-    usdTotal: usd,
-    zarPerUsd: ZAR_PER_USD,
-    zarTotal: usdToZar(usd),
-    estimated: true,
+    currency: 'ZAR',
+    livePrice: true,
+    estimated: false,
+    usageMetadata,
+    promptTokenCount: tokenBreakdown.promptTokenCount,
+    outputTokens: tokenBreakdown.outputTokenCount,
+    textInputTokens: tokenBreakdown.textInputTokens,
+    imageInputTokens: tokenBreakdown.imageInputTokens,
+    tokenSplitStrategy: tokenBreakdown.splitStrategy,
+    textInputSkuId: GOOGLE_CLOUD_SKU_IDS.geminiFlashTextInput,
+    imageInputSkuId: GOOGLE_CLOUD_SKU_IDS.geminiFlashImageInput,
+    textOutputSkuId: GOOGLE_CLOUD_SKU_IDS.geminiFlashTextOutput,
+    textInputZarTotal: toRand(textInputChargeZar),
+    imageInputZarTotal: toRand(imageInputChargeZar),
+    outputZarTotal: toRand(outputChargeZar),
+    zarTotal: totalZar,
+    pricingBreakdown: {
+      textInputPrice,
+      imageInputPrice,
+      textOutputPrice,
+    },
+  };
+}
+
+function buildBookingFeePricing({ cloudVisionZar = 0, geminiZar = 0, bufferRate = BOOKING_FEE_BUFFER_RATE } = {}) {
+  const cloudVisionAmount = toRand(cloudVisionZar);
+  const geminiAmount = toRand(geminiZar);
+  const subtotalZar = toRand(cloudVisionAmount + geminiAmount);
+  const bufferAmountZar = toRand(subtotalZar * Number(bufferRate || 0));
+  return {
+    currency: 'ZAR',
+    bookingFeeLabel: 'booking_fee',
+    cloudVisionZar: cloudVisionAmount,
+    geminiZar: geminiAmount,
+    subtotalZar,
+    bufferRate: Number(bufferRate || 0),
+    bufferAmountZar,
+    totalZar: toRand(subtotalZar + bufferAmountZar),
   };
 }
 
@@ -2700,7 +2896,19 @@ async function runPdfVisionOcr(pdfBuffer) {
 }
 
 async function getGlobalSubjectOptions() {
-  return [...new Set((GRADE_1_TO_12_SUBJECT_NAMES || []).map((subject) => normalizeExtractedText(subject)).filter(Boolean))]
+  const allowedNames = new Set(
+    (GRADE_1_TO_12_SUBJECT_NAMES || [])
+      .map((subject) => normalizeSubjectName(subject) || normalizeExtractedText(subject))
+      .filter(Boolean),
+  );
+
+  const snapshot = await db.collection('system').doc('subjects').get().catch(() => null);
+  const subjectNames = snapshot?.exists
+    ? normalizeActiveSubjects(snapshot.data()?.subjectNames || [])
+    : [];
+
+  return subjectNames
+    .filter((subject) => allowedNames.has(subject))
     .map((subject) => ({ value: subject, label: subject }));
 }
 
@@ -3873,7 +4081,7 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
 
     const extractedText = String(extractionResult?.extractedText || '').trim();
     const textLength = Number(extractionResult?.textLength || extractedText.length || 0);
-    const visionPricing = buildCloudVisionPricing({
+    const visionPricing = await buildLiveCloudVisionPricing({
       pageCount: Number(extractionResult?.pageCount || (isPdfInput ? extractionResult?.selectedPages?.length : 1) || 1),
     });
     trace('ocr_route_completed', 'OCR route completed', {
@@ -3921,9 +4129,11 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       pricing: {
         cloudVision: visionPricing,
       },
-      cloudVisionPriceUsd: visionPricing.usdTotal,
       cloudVisionPriceZar: visionPricing.zarTotal,
-      fxRateZarPerUsd: ZAR_PER_USD,
+      bookingFeePriceZar: buildBookingFeePricing({
+        cloudVisionZar: visionPricing.zarTotal,
+        geminiZar: 0,
+      }).totalZar,
     });
   } catch (error) {
     const normalizedMessage = String(error?.message || 'unknown_error');
@@ -4010,7 +4220,12 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
       inputPayload,
     });
 
-    const localSubject = classifySubjectLocally({ text: inputText, supportedSubjects });
+    const allowedSubjects = (GRADE_1_TO_12_SUBJECT_NAMES || [])
+      .map((subject) => normalizeSubjectName(subject) || normalizeExtractedText(subject))
+      .filter(Boolean)
+      .map((subject) => ({ value: subject, label: subject }));
+    const localSubject = classifySubjectLocally({ text: inputText, supportedSubjects, enforceSupportedList: true });
+    const allowedSubjectMatch = classifySubjectLocally({ text: inputText, supportedSubjects: allowedSubjects, enforceSupportedList: true });
     const localTopic = detectTopicsLocally({ text: inputText, subject: localSubject.subject || '' });
     const localMinutes = estimateMinutesLocally({ text: inputText });
     const localMl = classifyWithLocalMl({ text: inputText, supportedSubjects });
@@ -4028,6 +4243,11 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
     const supportedSubject = normalizedSupported.has(modelSubject) ? modelSubject : '';
     const fallbackSubject = localSubject.subject || '';
     const subject = supportedSubject || fallbackSubject;
+    const unsupportedSubject = !subject && modelSubject && !normalizedSupported.has(modelSubject)
+      ? modelSubject
+      : (!subject && allowedSubjectMatch.subject && !normalizedSupported.has(allowedSubjectMatch.subject)
+        ? allowedSubjectMatch.subject
+        : '');
     const topics = (Array.isArray(academicBrain?.topics) && academicBrain.topics.length
       ? academicBrain.topics.map((entry) => entry.label)
       : (localTopic.topics || []))
@@ -4035,7 +4255,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
       .filter(Boolean);
     const classification = {
       subject,
-      unsupportedSubject: '',
+      unsupportedSubject,
       topic: topics[0] || capitalizeTopic(localTopic.topic || ''),
       topics,
       estimatedMinutes: clampMinutes(academicBrain?.estimatedMinutes || 10),
@@ -4043,7 +4263,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
         ? ((academicBrain?.subject?.confidence || 0) >= 0.7 ? 'high' : 'low')
         : 'unknown',
       needsManualSubjectSelection: !subject || Boolean(academicBrain?.needsReview),
-      unsupportedSubjectRequested: false,
+      unsupportedSubjectRequested: Boolean(unsupportedSubject),
       unsupportedSubjectRecorded: false,
       topicConfidence: topics.length ? 'high' : (localTopic.topicConfidence || 'unknown'),
       topicMethod: 'academic_brain_rules',
@@ -5310,26 +5530,52 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     ),
   });
   const isLegacySession = !pricingQuoteId && !session.pricingSnapshot && !requestData.pricingSnapshot;
+  const bookingFee = toRand(
+    session?.boardPreparationSource?.bookingFeePricing?.totalZar
+      || requestData?.boardPreparationSource?.bookingFeePricing?.totalZar
+      || session?.boardPreparationSource?.bookingFeePriceZar
+      || requestData?.boardPreparationSource?.bookingFeePriceZar
+      || session?.pricingSnapshot?.bookingFeeAmount
+      || requestData?.pricingSnapshot?.bookingFeeAmount
+      || 0,
+  );
 
   const settlement = computeFinalAmountFromSnapshot({
     snapshot,
     billedMinutes,
     closureType,
     selectedDurationMinutes,
+    bookingFee,
   });
   const originalPrice = Number(settlement.totalAmount || 0);
 
   const studentRef = db.collection('users').doc(session.studentId);
   const studentSnap = await studentRef.get();
   const studentData = studentSnap.data() || {};
-  const freeMinuteDiscount = applyFreeMinuteDiscount({
-    originalPrice,
-    durationMinutes: Math.max(0, billedMinutes),
-    freeMinutesRemaining: Number(studentData.freeMinutesRemaining || 0),
-  });
-  const totalAmount = freeMinuteDiscount.finalPrice;
-  const tutorAmount = Number((originalPrice * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
-  const platformAmount = Number((originalPrice * BILLING_RULES.PLATFORM_FEE_RATE).toFixed(2));
+  const bookingFeeCharged = toRand(
+    settlement.bookingFeeApplied
+      ? settlement.bookingFeeAmount
+      : (closureType === 'completed' ? bookingFee : 0),
+  );
+  const serviceAmountBeforeDiscount = toRand(Math.max(0, originalPrice - bookingFeeCharged));
+  const freeMinuteDiscount = closureType === 'completed'
+    ? applyFreeMinuteDiscount({
+      originalPrice: serviceAmountBeforeDiscount,
+      durationMinutes: Math.max(0, billedMinutes),
+      freeMinutesRemaining: Number(studentData.freeMinutesRemaining || 0),
+    })
+    : {
+      originalPrice: serviceAmountBeforeDiscount,
+      requestedDurationMinutes: Math.max(0, billedMinutes),
+      freeMinutesApplied: 0,
+      discountApplied: 0,
+      finalPrice: serviceAmountBeforeDiscount,
+      discountSource: null,
+    };
+  const totalAmount = toRand(freeMinuteDiscount.finalPrice + bookingFeeCharged);
+  const tutorPayoutBase = settlement.bookingFeeApplied ? 0 : serviceAmountBeforeDiscount;
+  const tutorAmount = Number((tutorPayoutBase * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
+  const platformAmount = Number((bookingFeeCharged + (tutorPayoutBase * BILLING_RULES.PLATFORM_FEE_RATE)).toFixed(2));
   const paymentMethods = studentData.paymentMethods || [];
   const selectedCardId = session.selectedCardId || requestData.selectedCardId || null;
   const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
@@ -5374,9 +5620,11 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     totalAmount,
     originalPrice,
     discountApplied: freeMinuteDiscount.discountApplied,
-    finalPrice: freeMinuteDiscount.finalPrice,
+    finalPrice: totalAmount,
     discountSource: freeMinuteDiscount.discountSource,
     freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
+    bookingFeeAmount: bookingFeeCharged,
+    bookingFeeCharged,
     requestedDurationMinutes: Number(selectedDurationMinutes || snapshot.durationMinutes || 0),
     selectedCardId,
     canceledBy: closureType === 'canceled_during' ? canceledBy : null,
@@ -5385,9 +5633,15 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       ...snapshot,
       billedMinutes,
       originalPrice,
+      serviceAmountBeforeDiscount,
+      bookingFeeAmount: bookingFeeCharged,
+      bookingFeeApplied: settlement.bookingFeeApplied || closureType === 'completed',
+      bookingFeeOnly: settlement.billingRule === 'booking_fee_only',
+      billingRule: settlement.billingRule,
+      baseOnlyThresholdMinutes: settlement.baseOnlyThresholdMinutes,
       discountApplied: freeMinuteDiscount.discountApplied,
-      finalAmount: freeMinuteDiscount.finalPrice,
-      finalPayablePrice: freeMinuteDiscount.finalPrice,
+      finalAmount: totalAmount,
+      finalPayablePrice: totalAmount,
       discountSource: freeMinuteDiscount.discountSource,
       freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
       finalizedAt: new Date(endedAt).toISOString(),

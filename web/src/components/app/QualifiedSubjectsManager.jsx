@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { SUPPORTED_TUTOR_SUBJECTS } from '../../constants/subjects';
 import { updateTutorQualifiedSubjectsAndActiveSubjects } from '../../services/tutorDocumentService';
 
 function buildRows(qualifiedSubjects = [], activeSubjects = []) {
@@ -30,22 +29,6 @@ export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...updates } : row)));
   };
 
-  const removeRow = (id) => {
-    setRows((current) => current.filter((row) => row.id !== id));
-  };
-
-  const addRow = () => {
-    setRows((current) => [
-      ...current,
-      {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        subject: '',
-        mark: 60,
-        active: false,
-      },
-    ]);
-  };
-
   const saveQualifiedSubjects = async () => {
     setIsSaving(true);
     try {
@@ -71,30 +54,15 @@ export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
 
   return (
     <div className="space-y-3">
-      <datalist id="supported-tutor-subjects">
-        {SUPPORTED_TUTOR_SUBJECTS.map((subject) => (
-          <option key={subject} value={subject} />
-        ))}
-      </datalist>
       <div className="space-y-2">
         {rows.length ? rows.map((row) => (
           <div key={row.id} className="grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 md:grid-cols-[1fr_120px_120px_auto] md:items-center">
-            <input
-              type="text"
-              value={row.subject}
-              list="supported-tutor-subjects"
-              onChange={(event) => updateRow(row.id, { subject: event.target.value })}
-              placeholder="Subject name"
-              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900"
-            />
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={row.mark}
-              onChange={(event) => updateRow(row.id, { mark: Number(event.target.value || 0) })}
-              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900"
-            />
+            <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
+              {row.subject}
+            </div>
+            <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
+              {row.mark}%
+            </div>
             <label className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-700">
               <input
                 type="checkbox"
@@ -104,30 +72,17 @@ export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
               />
               Active
             </label>
-            <button
-              type="button"
-              onClick={() => removeRow(row.id)}
-              className="rounded-xl border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-            >
-              Remove
-            </button>
+            <p className="text-xs text-zinc-500">Verified from uploaded results</p>
           </div>
         )) : (
           <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
-            No qualified subjects yet. You can still add subjects manually and save.
+            No qualified subjects yet. Upload results to unlock tutor subjects with marks of 60% or higher.
           </p>
         )}
       </div>
-      <button
-        type="button"
-        onClick={addRow}
-        className="rounded-2xl border border-zinc-300 px-4 py-2 text-sm font-bold text-zinc-700"
-      >
-        Add subject row
-      </button>
       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-        <p className="font-semibold text-zinc-700">Supported subjects:</p>
-        <p className="mt-1">{SUPPORTED_TUTOR_SUBJECTS.join(', ')}</p>
+        <p className="font-semibold text-zinc-700">Tutor subject rule:</p>
+        <p className="mt-1">Only verified subjects from uploaded results with marks of 60% or higher can be activated for tutor matching.</p>
       </div>
       <button
         type="button"

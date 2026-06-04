@@ -3,14 +3,14 @@ function normalizeText(value = '') {
 }
 
 const TOPIC_RULES = {
-  Maths: {
+  Mathematics: {
     Algebra: ['algebra', 'equation', 'factorise', 'quadratic', 'simultaneous'],
     Trigonometry: ['trig', 'sine', 'cosine', 'tangent'],
     Geometry: ['angle', 'triangle', 'circle', 'theorem'],
     Calculus: ['differentiate', 'integrate', 'derivative', 'limit'],
     Probability: ['probability', 'random', 'outcome', 'tree diagram'],
   },
-  'Maths Lit': {
+  'Maths Literacy': {
     Finance: ['interest', 'budget', 'loan', 'repayment', 'profit', 'loss'],
     Measurement: ['area', 'volume', 'perimeter', 'scale drawing', 'distance'],
     DataHandling: ['table', 'graph', 'mean', 'median', 'mode', 'percentage'],

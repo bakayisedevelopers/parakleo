@@ -1,6 +1,6 @@
 export const SOUTH_AFRICAN_SUBJECTS = [
-  'Maths',
-  'Maths Lit',
+  'Mathematics',
+  'Maths Literacy',
   'Physical Sciences',
   'Business Studies',
   'Economics',

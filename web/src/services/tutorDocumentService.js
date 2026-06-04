@@ -4,6 +4,37 @@ import { normalizeSubjectList, SUPPORTED_TUTOR_SUBJECTS } from '../constants/sub
 
 const DOCUMENT_STATUSES = new Set(['UPLOADED', 'PROCESSING', 'VERIFIED', 'FAILED']);
 const ALLOWED_TUTOR_SUBJECTS = new Set(SUPPORTED_TUTOR_SUBJECTS.map((subject) => String(subject).trim().toLowerCase()));
+const TUTOR_SUBJECT_ALIASES = new Map([
+  ['mathematics', 'Mathematics'],
+  ['maths', 'Mathematics'],
+  ['math', 'Mathematics'],
+  ['maths literacy', 'Maths Literacy'],
+  ['maths lit', 'Maths Literacy'],
+  ['math literacy', 'Maths Literacy'],
+  ['math lit', 'Maths Literacy'],
+  ['mathematical literacy', 'Maths Literacy'],
+  ['physical sciences', 'Physical Sciences'],
+  ['physical science', 'Physical Sciences'],
+  ['physics', 'Physical Sciences'],
+  ['chemistry', 'Physical Sciences'],
+  ['business studies', 'Business Studies'],
+  ['economics', 'Economics'],
+  ['accounting', 'Accounting'],
+  ['life sciences', 'Life Sciences'],
+  ['life science', 'Life Sciences'],
+  ['biology', 'Life Sciences'],
+  ['agriculture', 'Agriculture'],
+  ['agricultural sciences', 'Agriculture'],
+  ['agricultural science', 'Agriculture'],
+  ['english', 'English'],
+  ['english home language', 'English'],
+  ['english first additional language', 'English'],
+]);
+
+function normalizeTutorSubject(value = '') {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return TUTOR_SUBJECT_ALIASES.get(normalized) || String(value || '').trim();
+}
 
 function sanitizeFileName(fileName = 'document') {
   return String(fileName || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -137,13 +168,14 @@ export async function updateTutorActiveSubjects(uid, activeSubjects, qualifiedSu
 function sanitizeQualifiedSubjects(values = []) {
   const bySubject = new Map();
   (values || []).forEach((item) => {
-    const subject = String(item?.subject || item || '').trim();
+    const subject = normalizeTutorSubject(String(item?.subject || item || '').trim());
     const subjectKey = subject.toLowerCase();
     const numericMark = Number(item?.mark);
     if (!subject) return;
     if (!ALLOWED_TUTOR_SUBJECTS.has(subjectKey)) return;
     if (!Number.isFinite(numericMark)) return;
     const mark = Math.max(0, Math.min(100, Math.round(numericMark)));
+    if (mark < 60) return;
     const existing = bySubject.get(subject);
     if (!existing || mark > Number(existing.mark || 0)) {
       bySubject.set(subject, { subject, mark });

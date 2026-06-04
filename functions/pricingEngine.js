@@ -456,6 +456,7 @@ function computeFinalAmountFromSnapshot({
   billedMinutes = 0,
   closureType = 'completed',
   selectedDurationMinutes = null,
+  bookingFee = 0,
 }) {
   const safeSnapshot = sanitizePricingSnapshot(snapshot);
   const safeBilledMinutes = Math.max(0, Number(billedMinutes || 0));
@@ -463,11 +464,17 @@ function computeFinalAmountFromSnapshot({
     1,
     Number(selectedDurationMinutes || safeSnapshot?.durationMinutes || 1),
   );
-  const earlyCancelThresholdMinutes = Number((selectedDuration * 0.1).toFixed(2));
+  const bookingFeeWindowMinutes = 1;
+  const earlyCancelThresholdMinutes = bookingFeeWindowMinutes;
+  const baseOnlyThresholdMinutes = Number((selectedDuration * 0.2).toFixed(2));
   const isCancel = closureType === 'canceled' || closureType === 'canceled_during';
   const isEarlyCancellation = isCancel && safeBilledMinutes <= earlyCancelThresholdMinutes;
+  const isBaseOnlyCancellation = isCancel
+    && safeBilledMinutes > bookingFeeWindowMinutes
+    && safeBilledMinutes < baseOnlyThresholdMinutes;
   const baseAmount = roundCurrency(safeSnapshot?.adjustedBaseAmount || safeSnapshot?.baseAmount || 0);
   const perMinuteRate = roundCurrency(safeSnapshot?.adjustedRatePerMinute || safeSnapshot?.ratePerMinute || 0);
+  const bookingFeeAmount = roundCurrency(bookingFee || 0);
   const discountPolicy = safeSnapshot.durationRateDiscounts;
   const hasLockedDurationDiscountPolicy = Boolean(
     discountPolicy
@@ -478,11 +485,39 @@ function computeFinalAmountFromSnapshot({
 
   if (isEarlyCancellation) {
     return {
+      totalAmount: bookingFeeAmount,
+      perMinuteRate,
+      baseAmount,
+      bookingFeeAmount,
+      bookingFeeApplied: true,
+      billingRule: 'booking_fee_only',
+      earlyCancelThresholdMinutes,
+      baseOnlyThresholdMinutes,
+      isEarlyCancellation,
+      isBaseOnlyCancellation: false,
+      selectedDurationMinutes: selectedDuration,
+      durationDiscountApplied: false,
+      durationDiscountPercent: 0,
+      durationDiscountAmount: 0,
+      durationDiscountedMinuteAmount: 0,
+      undiscountedMinuteAmount: 0,
+      effectiveRatePerMinute: 0,
+      durationDiscountBreakdown: null,
+    };
+  }
+
+  if (isBaseOnlyCancellation) {
+    return {
       totalAmount: baseAmount,
       perMinuteRate,
       baseAmount,
+      bookingFeeAmount,
+      bookingFeeApplied: false,
+      billingRule: 'base_only_cancellation',
       earlyCancelThresholdMinutes,
-      isEarlyCancellation,
+      baseOnlyThresholdMinutes,
+      isEarlyCancellation: false,
+      isBaseOnlyCancellation: true,
       selectedDurationMinutes: selectedDuration,
       durationDiscountApplied: false,
       durationDiscountPercent: 0,
@@ -495,13 +530,19 @@ function computeFinalAmountFromSnapshot({
   }
 
   if (!hasLockedDurationDiscountPolicy) {
-    const totalAmount = roundCurrency(baseAmount + (safeBilledMinutes * perMinuteRate));
+    const serviceAmount = roundCurrency(baseAmount + (safeBilledMinutes * perMinuteRate));
+    const totalAmount = roundCurrency(serviceAmount + (isCancel ? 0 : bookingFeeAmount));
     return {
       totalAmount,
       perMinuteRate,
       baseAmount,
+      bookingFeeAmount,
+      bookingFeeApplied: !isCancel && bookingFeeAmount > 0,
+      billingRule: isCancel ? 'base_plus_elapsed_cancellation' : 'base_plus_elapsed_completed',
       earlyCancelThresholdMinutes,
+      baseOnlyThresholdMinutes,
       isEarlyCancellation,
+      isBaseOnlyCancellation: false,
       selectedDurationMinutes: selectedDuration,
       durationDiscountApplied: false,
       durationDiscountPercent: 0,
@@ -518,14 +559,20 @@ function computeFinalAmountFromSnapshot({
     perMinuteRate,
     discountPolicy,
   );
-  const totalAmount = roundCurrency(baseAmount + billingDurationRateDiscount.durationDiscountedMinuteAmount);
+  const serviceAmount = roundCurrency(baseAmount + billingDurationRateDiscount.durationDiscountedMinuteAmount);
+  const totalAmount = roundCurrency(serviceAmount + (isCancel ? 0 : bookingFeeAmount));
 
   return {
     totalAmount,
     perMinuteRate,
     baseAmount,
+    bookingFeeAmount,
+    bookingFeeApplied: !isCancel && bookingFeeAmount > 0,
+    billingRule: isCancel ? 'base_plus_elapsed_cancellation' : 'base_plus_elapsed_completed',
     earlyCancelThresholdMinutes,
+    baseOnlyThresholdMinutes,
     isEarlyCancellation,
+    isBaseOnlyCancellation: false,
     selectedDurationMinutes: selectedDuration,
     durationDiscountApplied: billingDurationRateDiscount.durationDiscountApplied,
     durationDiscountPercent: billingDurationRateDiscount.durationDiscountPercent,

@@ -251,7 +251,7 @@ Rules:
 - Ignore invalid, duplicated, or unclear entries.
 - Normalize obvious subject aliases when safe:
   - Maths -> Mathematics
-  - Math Lit -> Mathematical Literacy
+  - Math Lit -> Maths Literacy
   - Physics/Chemistry -> Physical Sciences
   - Zulu -> IsiZulu
 - Preserve subject names as written when there is no safe normalization.
@@ -1032,11 +1032,14 @@ async function streamBoardExtractionWithAI({
       await emitParsedLine(pending);
     }
 
+    const finalResponse = await streamResult?.response?.catch?.(() => null);
+
     return {
       prompt,
       model: config.model,
       provider: 'firebase-ai-logic',
       backend: config.backend,
+      usageMetadata: finalResponse?.usageMetadata || null,
       streamStats,
       sawClassification,
       sawComplete,
@@ -1068,6 +1071,7 @@ async function streamBoardExtractionWithAI({
     model: config.model,
     provider: 'firebase-ai-logic',
     backend: config.backend,
+    usageMetadata: fallbackResult?.response?.usageMetadata || null,
     streamStats,
     sawClassification,
     sawComplete,

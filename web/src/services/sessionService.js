@@ -244,16 +244,37 @@ export async function finalizeSessionClosure(session, options = {}) {
     const billedMinutes = Number((billedSeconds / 60).toFixed(2));
     const pricingSnapshot = normalizePricingSnapshot(session.pricingSnapshot);
     const selectedDurationMinutes = Number(session.durationMinutes || pricingSnapshot.durationMinutes || 0);
-    const earlyThreshold = Number((selectedDurationMinutes * 0.1).toFixed(2));
+    const rawBookingFee = Number(
+      session?.boardPreparationSource?.bookingFeePricing?.totalZar
+      || session?.boardPreparationSource?.bookingFeePriceZar
+      || pricingSnapshot.bookingFeeAmount
+      || 0,
+    );
+    const bookingFee = Number((Number.isFinite(rawBookingFee) ? rawBookingFee : 0).toFixed(2));
+    const earlyThreshold = 1;
+    const baseOnlyThresholdMinutes = Number((selectedDurationMinutes * 0.2).toFixed(2));
+    const baseAmount = Number(pricingSnapshot.adjustedBaseAmount || pricingSnapshot.baseAmount || 0);
+    const ratePerMinute = Number(pricingSnapshot.adjustedRatePerMinute || pricingSnapshot.ratePerMinute || 0);
     const isEarlyCancellation = isCancellation && billedMinutes <= earlyThreshold;
-    const totalAmount = Number((
+    const isBaseOnlyCancellation = isCancellation && billedMinutes > earlyThreshold && billedMinutes < baseOnlyThresholdMinutes;
+    const serviceAmount = Number((
       isEarlyCancellation
-        ? Number(pricingSnapshot.adjustedBaseAmount || pricingSnapshot.baseAmount || 0)
-        : Number(pricingSnapshot.adjustedBaseAmount || pricingSnapshot.baseAmount || 0)
-          + (billedMinutes * Number(pricingSnapshot.adjustedRatePerMinute || pricingSnapshot.ratePerMinute || 0))
+        ? 0
+        : isBaseOnlyCancellation
+          ? baseAmount
+          : baseAmount + (billedMinutes * ratePerMinute)
     ).toFixed(2));
-    const tutorAmount = Number((totalAmount * TUTOR_PAYOUT_RATE).toFixed(2));
-    const platformAmount = Number((totalAmount * PLATFORM_FEE_RATE).toFixed(2));
+    const bookingFeeCharged = Number((
+      isEarlyCancellation
+        ? bookingFee
+        : closureType === SESSION_STATUS.COMPLETED
+          ? bookingFee
+          : 0
+    ).toFixed(2));
+    const totalAmount = Number((serviceAmount + bookingFeeCharged).toFixed(2));
+    const tutorPayoutBase = isEarlyCancellation ? 0 : serviceAmount;
+    const tutorAmount = Number((tutorPayoutBase * TUTOR_PAYOUT_RATE).toFixed(2));
+    const platformAmount = Number((bookingFeeCharged + (tutorPayoutBase * PLATFORM_FEE_RATE)).toFixed(2));
 
     updated = await updateSession(session.id, {
       ...session,
@@ -271,9 +292,21 @@ export async function finalizeSessionClosure(session, options = {}) {
         ...pricingSnapshot,
         billedMinutes,
         finalAmount: totalAmount,
+        finalPayablePrice: totalAmount,
         closureType,
         earlyCancellation: isEarlyCancellation,
         earlyCancelThresholdMinutes: earlyThreshold,
+        baseOnlyThresholdMinutes,
+        bookingFeeAmount: bookingFeeCharged,
+        bookingFeeApplied: isEarlyCancellation || closureType === SESSION_STATUS.COMPLETED,
+        bookingFeeOnly: isEarlyCancellation,
+        billingRule: isEarlyCancellation
+          ? 'booking_fee_only'
+          : isBaseOnlyCancellation
+            ? 'base_only_cancellation'
+            : isCancellation
+              ? 'base_plus_elapsed_cancellation'
+              : 'base_plus_elapsed_completed',
       },
       payoutBreakdown: {
         platformFeeRate: PLATFORM_FEE_RATE,

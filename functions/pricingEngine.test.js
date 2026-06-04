@@ -259,7 +259,7 @@ test('falls back to safe legacy pricing snapshot when pricing data is missing', 
   assert.equal(sanitized.totalAmount, LEGACY_SAFE_PRICING_SNAPSHOT.totalAmount);
 });
 
-test('early cancellation bills base only', () => {
+test('early cancellation bills booking fee only', () => {
   const result = computeFinalAmountFromSnapshot({
     snapshot: {
       baseAmount: 12,
@@ -270,12 +270,38 @@ test('early cancellation bills base only', () => {
       totalAmount: 66,
       durationRateDiscounts: DEFAULT_PRICING_CONFIG.durationRateDiscounts,
     },
-    billedMinutes: 3,
+    billedMinutes: 0.75,
     selectedDurationMinutes: 30,
     closureType: 'canceled_during',
+    bookingFee: 9.9,
   });
 
   assert.equal(result.isEarlyCancellation, true);
+  assert.equal(result.bookingFeeApplied, true);
+  assert.equal(result.billingRule, 'booking_fee_only');
+  assert.equal(result.totalAmount, 9.9);
+});
+
+test('cancellation after 1 minute and before 20 percent bills base only', () => {
+  const result = computeFinalAmountFromSnapshot({
+    snapshot: {
+      baseAmount: 12,
+      adjustedBaseAmount: 12,
+      ratePerMinute: 1.8,
+      adjustedRatePerMinute: 1.8,
+      durationMinutes: 30,
+      totalAmount: 66,
+      durationRateDiscounts: DEFAULT_PRICING_CONFIG.durationRateDiscounts,
+    },
+    billedMinutes: 4,
+    selectedDurationMinutes: 30,
+    closureType: 'canceled_during',
+    bookingFee: 9.9,
+  });
+
+  assert.equal(result.isEarlyCancellation, false);
+  assert.equal(result.isBaseOnlyCancellation, true);
+  assert.equal(result.billingRule, 'base_only_cancellation');
   assert.equal(result.totalAmount, 12);
 });
 
@@ -297,9 +323,10 @@ test('late cancellation with legacy snapshots bills base plus minute usage', () 
   assert.equal(result.isEarlyCancellation, false);
   assert.equal(result.totalAmount, 26.4);
   assert.equal(result.durationDiscountApplied, false);
+  assert.equal(result.bookingFeeApplied, false);
 });
 
-test('final billing uses actual billed minutes with the locked discount policy', () => {
+test('final billing uses actual billed minutes with the locked discount policy and adds booking fee', () => {
   const quote = computePricingQuote({
     minutes: 60,
     subject: 'english',
@@ -312,6 +339,7 @@ test('final billing uses actual billed minutes with the locked discount policy',
     billedMinutes: 75,
     selectedDurationMinutes: 60,
     closureType: 'completed',
+    bookingFee: 11.5,
   });
 
   assert.equal(result.isEarlyCancellation, false);
@@ -319,10 +347,11 @@ test('final billing uses actual billed minutes with the locked discount policy',
   assert.equal(result.perMinuteRate, 3.6);
   assert.equal(result.durationDiscountPercent, 30);
   assert.equal(result.effectiveRatePerMinute, 3.02);
-  assert.equal(result.totalAmount, 233.8);
+  assert.equal(result.bookingFeeApplied, true);
+  assert.equal(result.totalAmount, 245.3);
 });
 
-test('old snapshots without discount fields still bill using legacy behavior', () => {
+test('old snapshots without discount fields still bill using legacy behavior plus booking fee on completion', () => {
   const result = computeFinalAmountFromSnapshot({
     snapshot: {
       baseAmount: 7,
@@ -335,11 +364,12 @@ test('old snapshots without discount fields still bill using legacy behavior', (
     billedMinutes: 75,
     selectedDurationMinutes: 60,
     closureType: 'completed',
+    bookingFee: 8.25,
   });
 
   assert.equal(result.isEarlyCancellation, false);
   assert.equal(result.durationDiscountApplied, false);
-  assert.equal(result.totalAmount, 277);
+  assert.equal(result.totalAmount, 285.25);
 });
 
 test('minimum discounted rate is respected', () => {

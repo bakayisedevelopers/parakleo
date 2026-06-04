@@ -1149,12 +1149,19 @@ export async function settleSessionBilling(session) {
   const billedSeconds = Math.max(0, Math.floor((Date.now() - (session.billingStartedAt || Date.now())) / 1000));
   const billedMinutes = Number((billedSeconds / 60).toFixed(2));
   const pricingSnapshot = normalizePricingSnapshot(session.pricingSnapshot);
-  const totalAmount = Number((
+  const bookingFee = Number((
+    session?.boardPreparationSource?.bookingFeePricing?.totalZar
+    || session?.boardPreparationSource?.bookingFeePriceZar
+    || pricingSnapshot.bookingFeeAmount
+    || 0
+  ).toFixed(2));
+  const serviceAmount = Number((
     Number(pricingSnapshot.adjustedBaseAmount || pricingSnapshot.baseAmount || 0)
     + (billedMinutes * Number(pricingSnapshot.adjustedRatePerMinute || pricingSnapshot.ratePerMinute || 0))
   ).toFixed(2));
-  const tutorAmount = Number((totalAmount * TUTOR_PAYOUT_RATE).toFixed(2));
-  const platformAmount = Number((totalAmount * PLATFORM_FEE_RATE).toFixed(2));
+  const totalAmount = Number((serviceAmount + bookingFee).toFixed(2));
+  const tutorAmount = Number((serviceAmount * TUTOR_PAYOUT_RATE).toFixed(2));
+  const platformAmount = Number((bookingFee + (serviceAmount * PLATFORM_FEE_RATE)).toFixed(2));
 
   return {
     completedAt: Date.now(),
@@ -1166,6 +1173,11 @@ export async function settleSessionBilling(session) {
       ...pricingSnapshot,
       billedMinutes,
       finalAmount: totalAmount,
+      finalPayablePrice: totalAmount,
+      bookingFeeAmount: bookingFee,
+      bookingFeeApplied: bookingFee > 0,
+      bookingFeeOnly: false,
+      billingRule: 'base_plus_elapsed_completed',
     },
     payoutBreakdown: {
       platformFeeRate: PLATFORM_FEE_RATE,

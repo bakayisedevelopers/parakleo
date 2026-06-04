@@ -17,7 +17,6 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useLiveUserProfile } from '../../../hooks/useLiveUserProfile';
 import { useStudentRequests } from '../../../hooks/useClassRequests';
 import { useStudentSessions } from '../../../hooks/useSessions';
-import { SUBJECT_OPTIONS } from '../../../constants/subjects';
 import { useSubjectCatalog } from '../../../hooks/useSubjectCatalog';
 import { subscribeToUserAiLogs } from '../../../services/aiLogService';
 import { detectAttachmentType, extractAttachments } from '../../../services/attachmentExtractionService';
@@ -48,7 +47,7 @@ const SUBJECT_ALIASES = {
   Mathematics: ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'trigonometry', 'statistics', 'stats'],
 };
 
-function resolveSubjectFromText(text, supportedSubjects = SUBJECT_OPTIONS) {
+function resolveSubjectFromText(text, supportedSubjects = []) {
   const normalizedText = String(text || '').toLowerCase();
   if (!normalizedText.trim()) return '';
 
@@ -422,6 +421,17 @@ export default function StudentDashboardPage() {
     if (typeof window === 'undefined') return '';
     return window.sessionStorage.getItem(PENDING_STATUS_REDIRECT_KEY) || '';
   });
+
+  const openRequestStatus = (requestId, nextTopic = '') => {
+    if (!requestId) return;
+    navigate(`/app/student/request/${requestId}`, {
+      replace: true,
+      state: {
+        requestId,
+        topic: nextTopic,
+      },
+    });
+  };
   const { requests } = useStudentRequests(user?.uid);
   const { sessions } = useStudentSessions(user?.uid);
   const { subjectOptions } = useSubjectCatalog();
@@ -495,9 +505,14 @@ export default function StudentDashboardPage() {
   };
 
   const refreshQuote = async (minutes, subject = selectedSubject) => {
+    const nextSubject = String(subject || selectedSubject || '').trim();
+    if (!nextSubject) {
+      setQuote(null);
+      return null;
+    }
     const nextQuote = await fetchPricingQuote({
       durationMinutes: minutes,
-      subject: subject || 'Mathematics',
+      subject: nextSubject,
     });
     setQuote(nextQuote);
     return nextQuote;
@@ -752,7 +767,7 @@ export default function StudentDashboardPage() {
         })),
       });
 
-      const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
+      const supportedCatalog = subjectOptions;
       const classificationInput = buildSubjectClassificationInput({
         typedText: topic,
         attachmentExtractions,
@@ -855,7 +870,7 @@ export default function StudentDashboardPage() {
     setQuote(null);
     setError('');
     if (!isManualSubjectRef.current) {
-      setSelectedSubject(topic.trim() ? resolveSubjectFromText(topic, subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS) : '');
+      setSelectedSubject(topic.trim() ? resolveSubjectFromText(topic, subjectOptions) : '');
     }
     if (!nextAttachments.length && !hasManualDurationOverride) {
       setDurationMinutes(DEFAULT_LESSON_DURATION);
@@ -958,6 +973,7 @@ export default function StudentDashboardPage() {
         window.sessionStorage.setItem(PENDING_STATUS_REDIRECT_KEY, requestId);
       }
       setPendingStatusRequestId(requestId);
+      openRequestStatus(requestId, reviewTopic);
 
       const predicted = latestClassification?.academicBrainOutput || null;
       if (predicted) {
@@ -992,13 +1008,6 @@ export default function StudentDashboardPage() {
         }).catch(() => null);
       }
 
-      navigate(`/app/student/request/${requestId}`, {
-        replace: true,
-        state: {
-          requestId,
-          topic: reviewTopic,
-        },
-      });
     } catch (requestError) {
       setError(requestError.message || 'Unable to submit request right now.');
       console.debug('[studentRequestAI] submit request failed', {
@@ -1017,13 +1026,7 @@ export default function StudentDashboardPage() {
       window.sessionStorage.removeItem(PENDING_STATUS_REDIRECT_KEY);
     }
     setPendingStatusRequestId('');
-    navigate(`/app/student/request/${pendingStatusRequestId}`, {
-      replace: true,
-      state: {
-        requestId: pendingStatusRequestId,
-        topic: targetRequest.topic || topic,
-      },
-    });
+    openRequestStatus(pendingStatusRequestId, targetRequest.topic || topic);
   }, [navigate, pendingStatusRequestId, requests, topic]);
 
   useEffect(() => {
@@ -1067,7 +1070,7 @@ export default function StudentDashboardPage() {
     const hasAttachments = attachmentsRef.current.length > 0;
     if (hasAttachments) return;
 
-    const supportedCatalog = subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS;
+    const supportedCatalog = subjectOptions;
     const classificationInput = buildSubjectClassificationInput({
       typedText: topic,
       attachmentExtractions: [],
@@ -1531,7 +1534,7 @@ export default function StudentDashboardPage() {
                         className="max-w-[190px] bg-transparent text-right text-sm font-semibold text-zinc-900 outline-none"
                       >
                         <option value="">Select subject</option>
-                        {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
+                        {subjectOptions.map((subject) => (
                           <option key={subject.value} value={subject.value}>
                             {subject.label}
                           </option>
@@ -1642,7 +1645,7 @@ export default function StudentDashboardPage() {
                   className="mt-4 w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-900 outline-none"
                 >
                   <option value="">Select subject</option>
-                  {(subjectOptions.length ? subjectOptions : SUBJECT_OPTIONS).map((subject) => (
+                  {subjectOptions.map((subject) => (
                     <option key={subject.value} value={subject.value}>
                       {subject.label}
                     </option>
