@@ -4081,14 +4081,38 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
 
     const extractedText = String(extractionResult?.extractedText || '').trim();
     const textLength = Number(extractionResult?.textLength || extractedText.length || 0);
-    const visionPricing = await buildLiveCloudVisionPricing({
-      pageCount: Number(extractionResult?.pageCount || (isPdfInput ? extractionResult?.selectedPages?.length : 1) || 1),
-    });
+    let visionPricing = null;
+    let pricingStatus = 'skipped';
+    let pricingError = '';
+    try {
+      visionPricing = await buildLiveCloudVisionPricing({
+        pageCount: Number(extractionResult?.pageCount || (isPdfInput ? extractionResult?.selectedPages?.length : 1) || 1),
+      });
+      pricingStatus = 'complete';
+      logger.info('image_ocr_pricing_completed', {
+        uid: decoded.uid,
+        source: sourceLabel,
+        provider: extractionResult?.provider || 'google-vision',
+        fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
+        cloudVisionPriceZar: Number(visionPricing?.zarTotal || 0),
+      });
+    } catch (pricingFailure) {
+      pricingStatus = 'failed';
+      pricingError = String(pricingFailure?.message || 'pricing_failed');
+      logger.error('image_ocr_pricing_failed', {
+        uid: decoded.uid,
+        source: sourceLabel,
+        provider: extractionResult?.provider || 'google-vision',
+        fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
+        error: pricingError,
+      });
+    }
     trace('ocr_route_completed', 'OCR route completed', {
       providerRoute,
       providerReason,
       provider: extractionResult?.provider || '',
       textLength,
+      pricingStatus,
     });
     trace('simple_ocr_done', 'Simple OCR done', { providerReason });
 
@@ -4101,6 +4125,7 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       providerRoute,
       providerReason,
       fileType: extractionResult?.fileType || (isPdfInput ? 'pdf' : 'image'),
+      pricingStatus,
     });
 
     res.status(200).json({
@@ -4126,12 +4151,14 @@ exports.extractImageOcr = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS], m
       providerReason: providerReason || '',
       ppStructureVersion: extractionResult?.structuredData?.ppStructureVersion || extractionResult?.structuredData?.paddleOcrVlPipelineVersion || '',
       processingTrace,
-      pricing: {
+      pricingStatus,
+      pricingError,
+      pricing: visionPricing ? {
         cloudVision: visionPricing,
-      },
-      cloudVisionPriceZar: visionPricing.zarTotal,
+      } : null,
+      cloudVisionPriceZar: Number(visionPricing?.zarTotal || 0),
       bookingFeePriceZar: buildBookingFeePricing({
-        cloudVisionZar: visionPricing.zarTotal,
+        cloudVisionZar: Number(visionPricing?.zarTotal || 0),
         geminiZar: 0,
       }).totalZar,
     });
