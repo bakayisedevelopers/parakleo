@@ -22,6 +22,7 @@ import { subscribeToUserAiLogs } from '../../../services/aiLogService';
 import { detectAttachmentType, extractAttachments } from '../../../services/attachmentExtractionService';
 import { createClassRequest } from '../../../services/classRequestService';
 import { fetchPricingQuote } from '../../../services/pricingService';
+import { finalizeSessionClosure } from '../../../services/sessionService';
 import { uploadUserFile } from '../../../services/storageService';
 import { estimateFreeMinutePricing } from '../../../services/studentGrowthService';
 import { recordUnsupportedSubjectRequest } from '../../../services/unsupportedSubjectService';
@@ -411,6 +412,7 @@ export default function StudentDashboardPage() {
   const [isTextEntryOpen, setIsTextEntryOpen] = useState(false);
   const [quote, setQuote] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCancelingSession, setIsCancelingSession] = useState(false);
   const [error, setError] = useState('');
   const [showExtractionOverlay, setShowExtractionOverlay] = useState(false);
   const [showSlowExtractionMessage, setShowSlowExtractionMessage] = useState(false);
@@ -491,10 +493,14 @@ export default function StudentDashboardPage() {
   const readyForReview = hasRequestContent
     && !hasRunningExtraction
     && classificationState === 'done'
-    && Boolean(estimatedMinutes)
-    && Boolean(quote);
-  const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && !isSubmitting;
+    && Boolean(estimatedMinutes);
+  const canConfirm = readyForReview && Boolean(selectedSubject) && Boolean(cardId) && Boolean(quote) && !isSubmitting;
   const isPricingQuoteError = /pricing quote/i.test(error);
+  const pricingStatusLabel = !selectedSubject
+    ? 'Select a subject to calculate price.'
+    : !quote
+      ? 'Preparing price...'
+      : '';
   const shouldShowExtractionOverlay = showExtractionOverlay && stage !== 'review';
   const isWaitingForClassification = shouldShowExtractionOverlay && !hasRunningExtraction && classificationState === 'running';
 
@@ -502,6 +508,33 @@ export default function StudentDashboardPage() {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = 'auto';
     textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+  };
+
+  const cancelActiveSession = async () => {
+    if (!latestOpenSession?.id || isCancelingSession) return;
+
+    const reason = window.prompt('Please tell us why you want to cancel this class.');
+    if (reason === null) return;
+
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) {
+      setError('Please enter a cancellation reason before canceling the class.');
+      return;
+    }
+
+    setError('');
+    setIsCancelingSession(true);
+    try {
+      await finalizeSessionClosure(latestOpenSession, {
+        closureType: 'canceled_during',
+        canceledBy: 'student',
+        canceledReason: trimmedReason,
+      });
+    } catch (nextError) {
+      setError(nextError.message || 'Unable to cancel this class right now.');
+    } finally {
+      setIsCancelingSession(false);
+    }
   };
 
   const refreshQuote = async (minutes, subject = selectedSubject) => {
@@ -543,15 +576,12 @@ export default function StudentDashboardPage() {
   const maybeAdvanceToReview = (intent = '') => {
     if (flowState !== 'request_flow') return;
     if (unsupportedSubjectRequest?.subject) {
-      console.debug('[studentRequestAI] unsupported subject popup requested', {
+      console.debug('[studentRequestAI] unsupported subject detected; continuing to review for manual correction', {
         subject: unsupportedSubjectRequest.subject,
         intent,
         topic,
       });
-      setAdvanceIntent(intent || 'text');
-      setShowSubjectFallback(true);
       recordUnsupportedSubjectOnce();
-      return;
     }
     if (!readyForReview) {
       setAdvanceIntent(intent || 'text');
@@ -894,12 +924,16 @@ export default function StudentDashboardPage() {
         console.debug('[studentRequestAI] confirm blocked by unsupported subject', {
           subject: unsupportedSubjectRequest.subject,
         });
-        setShowSubjectFallback(true);
         recordUnsupportedSubjectOnce();
+        setError('Please select a supported subject before confirming.');
         return;
       }
       if (!selectedSubject) {
-        setShowSubjectFallback(true);
+        setError('Please select a subject before confirming.');
+        return;
+      }
+      if (!quote) {
+        setError('Please wait for the price to finish loading before confirming.');
       }
       return;
     }
@@ -1372,7 +1406,20 @@ export default function StudentDashboardPage() {
             >
               Open my classes
             </Link>
+            {showSession ? (
+              <button
+                type="button"
+                disabled={isCancelingSession}
+                onClick={cancelActiveSession}
+                className="inline-flex items-center justify-center rounded-2xl border border-rose-300 bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isCancelingSession ? 'Canceling...' : 'Cancel'}
+              </button>
+            ) : null}
           </div>
+          {showSession && error ? (
+            <p className="mt-3 text-sm text-rose-500">{error}</p>
+          ) : null}
         </div>
       </div>
     );
@@ -1550,17 +1597,26 @@ export default function StudentDashboardPage() {
                     <div className="space-y-3 rounded-2xl border border-brand/20 bg-brand/5 p-4">
                       <div className="flex w-full items-center justify-between gap-3">
                         <span className="font-semibold text-brand">Base price</span>
-                        <span className="text-right font-semibold text-zinc-900">{formatRand(quote?.adjustedBaseAmount ?? quote?.baseAmount ?? 0)}</span>
+                        <span className="text-right font-semibold text-zinc-900">
+                          {quote ? formatRand(quote.adjustedBaseAmount ?? quote.baseAmount ?? 0) : '-'}
+                        </span>
                       </div>
                       <div className="flex w-full items-center justify-between gap-3">
                         <span className="font-semibold text-brand">Per minute</span>
-                        <span className="text-right font-semibold text-zinc-900">{formatRand(quote?.adjustedRatePerMinute ?? quote?.ratePerMinute ?? 0)}</span>
+                        <span className="text-right font-semibold text-zinc-900">
+                          {quote ? formatRand(quote.adjustedRatePerMinute ?? quote.ratePerMinute ?? 0) : '-'}
+                        </span>
                       </div>
                       {pricingPreview ? (
                         <div className="flex w-full items-center justify-between gap-3">
                           <span className="font-semibold text-brand">Due after {durationMinutes} min</span>
                           <span className="text-right font-semibold text-zinc-900">{formatRand(pricingPreview.finalPrice)}</span>
                         </div>
+                      ) : null}
+                      {pricingStatusLabel ? (
+                        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                          {pricingStatusLabel}
+                        </p>
                       ) : null}
                       <label className="flex w-full items-center justify-between gap-3">
                         <span className="inline-flex items-center gap-2 font-semibold text-brand">

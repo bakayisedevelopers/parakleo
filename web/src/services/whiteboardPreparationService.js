@@ -55,9 +55,14 @@ function pushImageElement(elements, image, position) {
   elements.push({
     type: 'image',
     src: image.src,
+    dataURL: image.dataURL || '',
     mimeType: image.mimeType || 'image/png',
     fileName: image.fileName || '',
     imageId: image.id || '',
+    fileId: image.fileId || image.id || '',
+    questionId: image.questionId || '',
+    storageUrl: image.storageUrl || image.src || '',
+    storagePath: image.storagePath || '',
     position,
     width,
     height,
@@ -81,6 +86,7 @@ export function prepareWhiteboardLayout(parsedQuestions = []) {
       elements.push({
         type: 'text',
         content,
+        questionId: String(question?.questionId || ''),
         position: { x: 0, y: currentY },
         width: DEFAULT_TEXT_WIDTH,
         height: textHeight,

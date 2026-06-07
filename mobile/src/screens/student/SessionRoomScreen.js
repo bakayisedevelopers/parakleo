@@ -13,6 +13,7 @@ import { StudentAiSessionView } from '../../components/student/StudentAiSessionV
 import { Card } from '../../components/ui/Card';
 import { ErrorState, LoadingState } from '../../components/ui/States';
 import { useAuth } from '../../context/AuthContext';
+import { FIREBASE_PUBLIC_CONFIG } from '../../constants/runtimeConfig';
 import { getFirebaseClients } from '../../firebase/config';
 import {
   endSession,
@@ -138,7 +139,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
       try {
         const clients = await getFirebaseClients();
         const firebaseUser = clients?.auth?.currentUser;
-        const apiKey = String(process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '').trim();
+        const apiKey = String(FIREBASE_PUBLIC_CONFIG.apiKey || '').trim();
         if (!firebaseUser || !apiKey) {
           if (active) setAuthHandoff(null);
           return;

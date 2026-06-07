@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/app/Sidebar';
 import Topbar from '../components/app/Topbar';
-import NotificationDrawer from '../components/app/NotificationDrawer';
 import TutorOfferOverlay from '../components/app/TutorOfferOverlay';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
 import useViewportMode from '../hooks/useViewportMode';
-import { updateUserProfile } from '../services/userService';
 import { getNotificationDestination, markNotificationRead } from '../services/notificationService';
+import { updateUserProfile } from '../services/userService';
 import { debugError } from '../utils/devLogger';
 
 export default function AppShell() {
@@ -17,7 +16,6 @@ export default function AppShell() {
   const location = useLocation();
   const activeRole = String(user?.activeRole || user?.role || 'student').toLowerCase();
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const isTutor = activeRole === 'tutor';
   const { useBottomNav } = useViewportMode();
   const isTutorRestrictedMobile = isTutor && useBottomNav;
@@ -27,28 +25,17 @@ export default function AppShell() {
     if (notification?.id) {
       await markNotificationRead(notification.id).catch(() => null);
     }
-    setIsNotificationsOpen(false);
     if (destination) {
       navigate(destination);
     }
   };
 
   const {
-    notifications,
-    isLoading: notificationsLoading,
     unreadCount,
-    browserPermission,
-    requestBrowserPermission,
-    markRead,
-    markAllRead,
   } = useNotifications(user?.uid, {
     role: activeRole,
     onNotificationSelect: handleNotificationSelect,
   });
-
-  useEffect(() => {
-    setIsNotificationsOpen(false);
-  }, [location.pathname]);
 
   const isSessionRoute = useMemo(
     () => location.pathname.startsWith('/app/session/'),
@@ -96,12 +83,11 @@ export default function AppShell() {
               role={activeRole}
               referralSlug={user?.referralSlug || user?.referralCode}
               onOpenNav={() => {
-                setIsNotificationsOpen(false);
                 setIsNavOpen(true);
               }}
               onOpenNotifications={() => {
                 setIsNavOpen(false);
-                setIsNotificationsOpen((prev) => !prev);
+                navigate('/app/notifications');
               }}
               unreadCount={unreadCount}
               showMenuButton={useBottomNav}
@@ -124,27 +110,6 @@ export default function AppShell() {
           </div>
         </div>
       ) : null}
-
-      <NotificationDrawer
-        isOpen={isNotificationsOpen}
-        notifications={notifications}
-        unreadCount={unreadCount}
-        browserPermission={browserPermission}
-        isLoading={notificationsLoading}
-        onClose={() => setIsNotificationsOpen(false)}
-        onRequestBrowserPermission={requestBrowserPermission}
-        onMarkAllRead={markAllRead}
-        onSelectNotification={async (notification) => {
-          const destination = getNotificationDestination(notification, activeRole);
-          if (notification?.id) {
-            await markRead(notification.id).catch(() => null);
-          }
-          setIsNotificationsOpen(false);
-          if (destination) {
-            navigate(destination);
-          }
-        }}
-      />
     </div>
   );
 }

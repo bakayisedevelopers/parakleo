@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FormField } from '../../components/ui/FormField';
 import { ErrorState } from '../../components/ui/States';
+import { LEGAL_URLS } from '../../constants/legal';
 import { useAuth } from '../../context/AuthContext';
 import { TUTOR_LOGIN_BLOCKED_CODE } from '../../services/authService';
 import { colors } from '../../theme/colors';
@@ -15,6 +16,7 @@ export function LoginScreen({ navigate }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [tutorBlocked, setTutorBlocked] = useState(false);
+  const openLegalUrl = (url) => Linking.openURL(url).catch(() => null);
 
   async function submit() {
     setBusy(true);
@@ -63,7 +65,12 @@ export function LoginScreen({ navigate }) {
               <Text style={styles.link}>Forgot password?</Text>
             </View>
             <Text style={styles.policy}>
-              By signing in, you agree to Parakleo's Terms of Service, Privacy Policy, and Payment Policy.
+              By signing in, you agree to Parakleo's{' '}
+              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.terms)}>Terms of Service</Text>,{' '}
+              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.privacy)}>Privacy Policy</Text>,{' '}
+              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.payment)}>Payment Policy</Text>,{' '}
+              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.refund)}>Refund Policy</Text>, and{' '}
+              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.dataVoice)}>Data and Voice Policy</Text>.
             </Text>
             <Button disabled={busy || !email || !password} onPress={submit}>
               {busy ? 'Signing in...' : 'Sign in'}
@@ -152,5 +159,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     padding: 12,
+  },
+  policyLink: {
+    color: colors.brandDark,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
   },
 });

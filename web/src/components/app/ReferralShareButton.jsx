@@ -19,6 +19,7 @@ export default function ReferralShareButton({
   className = '',
   variant = 'card',
   showIntro = true,
+  freeMinutesRemaining = null,
 }) {
   const [feedback, setFeedback] = useState('');
   const feedbackTimerRef = useRef(null);
@@ -97,6 +98,7 @@ export default function ReferralShareButton({
       <div className={`${showIntro ? 'mt-3' : ''} rounded-2xl border border-emerald-200/70 bg-white/80 p-3`}>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Referral link</p>
         <p className="mt-2 break-all text-sm font-medium text-zinc-700">{referralPreview}</p>
+        <p className="mt-1 break-all text-xs text-zinc-500">{referralLink}</p>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
@@ -118,6 +120,11 @@ export default function ReferralShareButton({
       </div>
       {feedback ? (
         <p className="mt-2 text-xs font-semibold text-emerald-700">{feedback}</p>
+      ) : null}
+      {typeof freeMinutesRemaining === 'number' ? (
+        <p className="mt-2 text-sm text-zinc-900">
+          <span className="font-semibold">Free minutes remaining:</span> {freeMinutesRemaining.toFixed(2)} min
+        </p>
       ) : null}
     </div>
   );

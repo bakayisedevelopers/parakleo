@@ -18,6 +18,7 @@ import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import { createClassRequest } from '../../services/classRequestService';
 import { extractAttachments } from '../../services/attachmentExtractionService';
 import { fetchPricingQuote } from '../../services/pricingService';
+import { finalizeSessionClosure } from '../../services/sessionService';
 import {
   buildSubjectClassificationInput,
   classifySubjectFromText,
@@ -281,6 +282,10 @@ export function StudentRequestComposer({
   const [typedSubjectStatus, setTypedSubjectStatus] = useState('');
   const [typedTopicStatus, setTypedTopicStatus] = useState('');
   const [pendingStatusRequestId, setPendingStatusRequestId] = useState('');
+  const [showSessionCancelModal, setShowSessionCancelModal] = useState(false);
+  const [sessionCancelReason, setSessionCancelReason] = useState('');
+  const [sessionCancelError, setSessionCancelError] = useState('');
+  const [isCancelingSession, setIsCancelingSession] = useState(false);
   const lastAutoReviewSignatureRef = useRef('');
   const typingClassificationRunRef = useRef(0);
   const processingRedirectTimeoutRef = useRef(null);
@@ -303,6 +308,46 @@ export function StudentRequestComposer({
   function openRequestStatus(requestId) {
     if (!requestId) return;
     navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
+  }
+
+  function openSessionCancellation() {
+    setSessionCancelReason('');
+    setSessionCancelError('');
+    setShowSessionCancelModal(true);
+  }
+
+  function closeSessionCancellation(force = false) {
+    if (isCancelingSession && !force) return;
+    setShowSessionCancelModal(false);
+    setSessionCancelReason('');
+    setSessionCancelError('');
+  }
+
+  async function handleCancelActiveSession() {
+    const trimmedReason = sessionCancelReason.trim();
+    if (!latestOpenSession?.id) {
+      setSessionCancelError('Session not found.');
+      return;
+    }
+    if (!trimmedReason) {
+      setSessionCancelError('Please enter a cancellation reason.');
+      return;
+    }
+
+    setSessionCancelError('');
+    setIsCancelingSession(true);
+    try {
+      await finalizeSessionClosure(latestOpenSession, {
+        closureType: 'canceled_during',
+        canceledBy: 'student',
+        canceledReason: trimmedReason,
+      });
+      closeSessionCancellation(true);
+    } catch (nextError) {
+      setSessionCancelError(nextError.message || 'Unable to cancel this class right now.');
+    } finally {
+      setIsCancelingSession(false);
+    }
   }
 
   function buildReviewSignature() {
@@ -711,7 +756,13 @@ export function StudentRequestComposer({
           <StatusBadge label="Complete profile" tone="warning" />
           <Text style={styles.heroTitle}>Finish your student profile before requesting a class.</Text>
           <Text style={styles.heroCopy}>{onboardingStatus.message}</Text>
-          <Button onPress={() => navigate('Onboarding')}>Complete profile</Button>
+          <Button
+            onPress={() => navigate('Onboarding')}
+            icon={<Ionicons name="arrow-forward" size={18} color="#ffffff" />}
+            iconPosition="right"
+          >
+            Complete profile
+          </Button>
         </Card>
       ) : null}
 
@@ -724,7 +775,13 @@ export function StudentRequestComposer({
           </Text>
           <Text style={styles.currentTitle}>{activeOrOngoingRequest?.subject || 'Current request'}</Text>
           <Text style={styles.currentCopy}>{activeOrOngoingRequest?.topic || 'Live request'}</Text>
-          <Button onPress={() => navigate({ key: 'RequestStatus', params: { requestId: activeOrOngoingRequest?.id, parentTab: 'Requests' } })}>View current request</Button>
+          <Button
+            onPress={() => navigate({ key: 'RequestStatus', params: { requestId: activeOrOngoingRequest?.id, parentTab: 'Requests' } })}
+            icon={<Ionicons name="chevron-forward" size={18} color="#ffffff" />}
+            iconPosition="right"
+          >
+            View current request
+          </Button>
         </Card>
       ) : null}
 
@@ -737,7 +794,30 @@ export function StudentRequestComposer({
           </Text>
           <Text style={styles.currentTitle}>{latestOpenSession?.subject || 'Current class'}</Text>
           <Text style={styles.currentCopy}>{latestOpenSession?.topic || latestOpenSession?.requestTopic || 'Live class session'}</Text>
-          <Button onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: latestOpenSession?.id, parentTab: 'Sessions' } })}>Continue current class</Button>
+          <Button
+            onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: latestOpenSession?.id, parentTab: 'Sessions' } })}
+            icon={<Ionicons name="chevron-forward" size={18} color="#ffffff" />}
+            iconPosition="right"
+          >
+            Continue current class
+          </Button>
+          <View style={styles.activeSessionActions}>
+            <Button
+              style={styles.actionButton}
+              variant="secondary"
+              onPress={() => navigate({ key: 'Requests', params: {} })}
+            >
+              Open my classes
+            </Button>
+            <Button
+              style={[styles.actionButton, styles.cancelSessionButton]}
+              textStyle={styles.cancelSessionButtonText}
+              disabled={isCancelingSession}
+              onPress={openSessionCancellation}
+            >
+              {isCancelingSession ? 'Canceling...' : 'Cancel'}
+            </Button>
+          </View>
         </Card>
       ) : null}
 
@@ -745,17 +825,34 @@ export function StudentRequestComposer({
         <>
           {stage !== 'review' ? (
             <Card style={styles.heroCard}>
+              <View style={styles.heroBackdrop}>
+                <View style={styles.heroGlowPrimary} />
+                <View style={styles.heroGlowSecondary} />
+              </View>
+              <View style={styles.heroContent}>
               <StatusBadge label="Student request" tone="success" />
-              <Text style={styles.heroTitle}>Snap homework, upload a worksheet, or describe what you need help with.</Text>
+              <Text style={styles.requestLeadCopy}>
+                <Text style={styles.requestLeadPrimary}>Snap homework, upload a worksheet, </Text>
+                <Text style={styles.requestLeadAccent}>or describe what you need help with.</Text>
+              </Text>
               <Text style={styles.heroCopy}>
                 We'll estimate the session length, detect the subject, and let you review before confirming.
               </Text>
 
               <View style={styles.actionRow}>
-                <Button style={styles.actionButton} onPress={() => setPickerMode('camera')}>
+                <Button
+                  style={styles.actionButton}
+                  onPress={() => setPickerMode('camera')}
+                  icon={<Ionicons name="camera-outline" size={18} color="#ffffff" />}
+                >
                   Take Picture
                 </Button>
-                <Button style={styles.actionButton} onPress={() => setPickerMode('upload')} variant="secondary">
+                <Button
+                  style={styles.actionButton}
+                  onPress={() => setPickerMode('upload')}
+                  variant="secondary"
+                  icon={<Ionicons name="cloud-upload-outline" size={18} color={colors.brand} />}
+                >
                   Upload
                 </Button>
               </View>
@@ -841,6 +938,7 @@ export function StudentRequestComposer({
               <Text style={styles.autoAdvanceText}>
                 {isPreparingReview ? 'Preparing review...' : 'Review will open automatically once your request is ready.'}
               </Text>
+              </View>
             </Card>
           ) : null}
 
@@ -921,7 +1019,12 @@ export function StudentRequestComposer({
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
               <View style={styles.actionRow}>
-                <Button style={styles.actionButton} disabled={isSubmitting} onPress={confirmRequest}>
+                <Button
+                  style={styles.actionButton}
+                  disabled={isSubmitting}
+                  onPress={confirmRequest}
+                  icon={<Ionicons name="paper-plane-outline" size={18} color="#ffffff" />}
+                >
                   {isSubmitting ? 'Confirming...' : 'Confirm request'}
                 </Button>
                 <Button
@@ -931,6 +1034,7 @@ export function StudentRequestComposer({
                     setStage('input');
                   }}
                   variant="secondary"
+                  icon={<Ionicons name="arrow-back" size={18} color={colors.brand} />}
                 >
                   Back
                 </Button>
@@ -950,6 +1054,46 @@ export function StudentRequestComposer({
         }}
         onFilesSelected={handlePickedFiles}
       />
+
+      <Modal animationType="fade" transparent visible={showSessionCancelModal} onRequestClose={closeSessionCancellation}>
+        <View style={styles.modalOverlay}>
+          <Card style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Cancel current class</Text>
+            <Text style={styles.modalCopy}>
+              Tell us why you want to cancel this class. This will mark it as canceled during class.
+            </Text>
+            <TextInput
+              editable={!isCancelingSession}
+              multiline
+              onChangeText={setSessionCancelReason}
+              placeholder="Type your cancellation reason"
+              placeholderTextColor={colors.muted}
+              style={styles.modalInput}
+              textAlignVertical="top"
+              value={sessionCancelReason}
+            />
+            {sessionCancelError ? <Text style={styles.modalError}>{sessionCancelError}</Text> : null}
+            <View style={styles.modalActions}>
+              <Button
+                disabled={isCancelingSession}
+                onPress={closeSessionCancellation}
+                style={styles.modalButton}
+                variant="secondary"
+              >
+                Keep class
+              </Button>
+              <Button
+                disabled={isCancelingSession}
+                onPress={handleCancelActiveSession}
+                style={[styles.modalButton, styles.cancelSessionButton]}
+                textStyle={styles.cancelSessionButtonText}
+              >
+                {isCancelingSession ? 'Canceling...' : 'Confirm cancel'}
+              </Button>
+            </View>
+          </Card>
+        </View>
+      </Modal>
 
       <Modal
         animationType="fade"
@@ -1001,6 +1145,36 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     gap: 14,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  heroBackdrop: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  heroGlowPrimary: {
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 220,
+    height: 220,
+    left: -72,
+    position: 'absolute',
+    top: -44,
+    width: 220,
+  },
+  heroGlowSecondary: {
+    backgroundColor: 'rgba(59,130,246,0.14)',
+    borderRadius: 220,
+    bottom: -84,
+    height: 220,
+    position: 'absolute',
+    right: -88,
+    width: 220,
+  },
+  heroContent: {
+    gap: 14,
   },
   feedbackCard: {
     backgroundColor: '#ecfdf5',
@@ -1021,6 +1195,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  requestLeadCopy: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 28,
+  },
+  requestLeadPrimary: {
+    color: colors.brandDark,
+  },
+  requestLeadAccent: {
+    color: colors.cyan,
+  },
   currentTitle: {
     color: colors.text,
     fontSize: 18,
@@ -1034,8 +1220,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  activeSessionActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   actionButton: {
     flex: 1,
+  },
+  cancelSessionButton: {
+    backgroundColor: colors.danger,
+    borderColor: colors.danger,
+    borderWidth: 1,
+  },
+  cancelSessionButtonText: {
+    color: '#ffffff',
   },
   attachmentList: {
     gap: 10,

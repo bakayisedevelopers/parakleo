@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Clipboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { Card } from '../../components/ui/Card';
 import { LoadingState } from '../../components/ui/States';
 import { StudentRequestComposer } from '../../components/student/StudentRequestComposer';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToStudentRequests } from '../../services/classRequestService';
 import { subscribeToStudentSessions } from '../../services/sessionService';
+import { shadows } from '../../theme/shadows';
 import { getStudentOnboardingStatus } from '../../utils/onboarding';
 import { colors } from '../../theme/colors';
 
@@ -44,6 +45,8 @@ export function DashboardScreen({ navigate }) {
     return <LoadingState label="Loading dashboard" />;
   }
 
+  const firstName = String(user?.displayName || 'there').trim().split(' ')[0] || 'there';
+
   const handleShareReferral = async () => {
     if (!referralLink) return;
     try {
@@ -58,64 +61,152 @@ export function DashboardScreen({ navigate }) {
     }
   };
 
+  const handleCopyReferral = () => {
+    if (!referralLink) return;
+    try {
+      Clipboard.setString(referralLink);
+      setShareFeedback('Link copied.');
+    } catch (_error) {
+      setShareFeedback('Unable to copy link.');
+    }
+  };
+
   return (
-    <View style={styles.wrap}>
-      <View>
-        <Text style={styles.kicker}>Student dashboard</Text>
-        <Text style={styles.title}>Hi {user?.displayName || 'there'}</Text>
+    <View style={styles.page}>
+      <View style={styles.pageGlowTop} />
+      <View style={styles.pageGlowBottom} />
+      <View style={styles.wrap}>
+        <View style={styles.heroSection}>
+          <View style={styles.heroGlowTopLeft} />
+          <View style={styles.heroGlowBottomRight} />
+          <View style={styles.heroContent}>
+            <View>
+              <Text style={styles.kicker}>Student request</Text>
+              <Text style={styles.title}>Hi {firstName}</Text>
+            </View>
+            <StudentRequestComposer navigate={navigate} requests={requests} sessions={sessions} user={user} onStageChange={setComposerStage} />
+          </View>
+        </View>
+        {referralLink && composerStage !== 'review' ? (
+          <Card style={styles.referralCard}>
+            <Text style={styles.referralIntro}>
+              Get free 30 minutes when a student joins and completes their profile using your link.
+            </Text>
+            <View style={styles.referralLinkCard}>
+              <Text style={styles.referralLabel}>Referral link</Text>
+              <Text style={styles.referralPreview} numberOfLines={2}>{referralPreview}</Text>
+              <Text selectable style={styles.referralLink}>{referralLink}</Text>
+            </View>
+            <View style={styles.referralActions}>
+              <Pressable accessibilityRole="button" onPress={handleCopyReferral} style={styles.referralGhostButton}>
+                <Text style={styles.referralGhostButtonText}>Copy</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.referralShareButton}>
+                <Text style={styles.referralShareButtonText}>Share</Text>
+              </Pressable>
+            </View>
+            {shareFeedback ? <Text style={styles.referralFeedback}>{shareFeedback}</Text> : null}
+            <Text style={styles.meta}><Text style={styles.metaStrong}>Free minutes remaining:</Text> {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</Text>
+          </Card>
+        ) : null}
+        {!onboardingStatus.complete ? (
+          <Card>
+            <Text style={styles.copy}>{onboardingStatus.message}</Text>
+          </Card>
+        ) : null}
       </View>
-      <StudentRequestComposer navigate={navigate} requests={requests} sessions={sessions} user={user} onStageChange={setComposerStage} />
-      {referralLink && composerStage !== 'review' ? (
-        <Card style={styles.referralCard}>
-          <Text style={styles.referralIntro}>
-            Get free 30 minutes when a student joins and completes their profile using your link.
-          </Text>
-          <View style={styles.referralLinkCard}>
-            <Text style={styles.referralLabel}>Referral link</Text>
-            <Text style={styles.referralPreview} numberOfLines={2}>{referralPreview}</Text>
-            <Text selectable style={styles.referralLink}>{referralLink}</Text>
-          </View>
-          <View style={styles.referralActions}>
-            <Pressable accessibilityRole="button" onPress={() => Linking.openURL(referralLink)} style={styles.referralGhostButton}>
-              <Text style={styles.referralGhostButtonText}>Open</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.referralShareButton}>
-              <Text style={styles.referralShareButtonText}>Share</Text>
-            </Pressable>
-          </View>
-          {shareFeedback ? <Text style={styles.referralFeedback}>{shareFeedback}</Text> : null}
-        </Card>
-      ) : null}
-      {!onboardingStatus.complete ? (
-        <Card>
-          <Text style={styles.copy}>{onboardingStatus.message}</Text>
-        </Card>
-      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  page: {
+    backgroundColor: '#f8fafc',
+    flex: 1,
+  },
+  pageGlowTop: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderRadius: 180,
+    height: 260,
+    position: 'absolute',
+    right: -110,
+    top: 24,
+    width: 260,
+  },
+  pageGlowBottom: {
+    backgroundColor: 'rgba(59,130,246,0.10)',
+    borderRadius: 220,
+    bottom: 80,
+    height: 300,
+    left: -140,
+    position: 'absolute',
+    width: 300,
+  },
   wrap: {
     gap: 16,
+    paddingBottom: 12,
+  },
+  heroSection: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderColor: colors.border,
+    borderRadius: 32,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...shadows.panel,
+  },
+  heroGlowTopLeft: {
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 220,
+    height: 220,
+    left: -70,
+    position: 'absolute',
+    top: -40,
+    width: 220,
+  },
+  heroGlowBottomRight: {
+    backgroundColor: 'rgba(59,130,246,0.14)',
+    borderRadius: 200,
+    bottom: -70,
+    height: 220,
+    position: 'absolute',
+    right: -80,
+    width: 220,
+  },
+  heroContent: {
+    gap: 16,
+    padding: 16,
   },
   kicker: {
-    color: colors.brandDark,
-    fontSize: 13,
-    fontWeight: '900',
+    color: 'rgba(16,185,129,0.8)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 2.5,
     textTransform: 'uppercase',
   },
   title: {
-    color: colors.text,
-    fontSize: 30,
+    color: '#0f172a',
+    fontSize: 31,
     fontWeight: '900',
+    letterSpacing: -0.8,
+    lineHeight: 36,
+    marginTop: 8,
   },
   copy: {
     color: colors.muted,
     fontSize: 15,
     lineHeight: 22,
   },
+  meta: {
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  metaStrong: {
+    color: colors.text,
+    fontWeight: '800',
+  },
   referralCard: {
+    fontSize: 30,
     backgroundColor: '#ecfdf5',
     borderColor: '#bbf7d0',
     gap: 10,

@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@types/react": "~19.1.10",
-    "expo": "~54.0.34",
+    "expo": "~54.0.35",
     "expo-status-bar": "~3.0.9",
     "firebase": "^11.10.0",
     "react": "19.1.0",

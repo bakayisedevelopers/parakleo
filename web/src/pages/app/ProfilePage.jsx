@@ -7,7 +7,9 @@ import TutorMetricTile from '../../components/app/TutorMetricTile';
 import FormField from '../../components/ui/FormField';
 import LiveSelfieCapture from '../../components/app/LiveSelfieCapture';
 import QualifiedSubjectsManager from '../../components/app/QualifiedSubjectsManager';
+import ReferralShareButton from '../../components/app/ReferralShareButton';
 import TutorDocumentsManager from '../../components/app/TutorDocumentsManager';
+import { LegalLinksList } from '../../components/legal/LegalLinks';
 import { useAuth } from '../../hooks/useAuth';
 import { useLiveUserProfile } from '../../hooks/useLiveUserProfile';
 import { getStudentOnboardingStatus, getTutorOnboardingStatus, hasCurrentTutorAgreement } from '../../utils/onboarding';
@@ -245,14 +247,16 @@ export default function ProfilePage() {
 
       {(currentUser?.activeRole || currentUser?.role) === 'student' ? (
         <SectionCard title="Free minutes & referrals" subtitle="Share your referral link to earn +30 free minutes when a referred student completes their student profile.">
-          <div className="space-y-2 text-sm text-zinc-700">
-            <p><span className="font-semibold">Free minutes remaining:</span> {Number(currentUser?.freeMinutesRemaining || 0).toFixed(2)} min</p>
-            <p className="text-xs text-zinc-500">
-              Share link: {`${window.location.origin}/signup?ref=${encodeURIComponent(currentUser?.referralSlug || currentUser?.referralCode || '')}`}
-            </p>
-          </div>
+          <ReferralShareButton
+            referralSlug={currentUser?.referralSlug || currentUser?.referralCode}
+            freeMinutesRemaining={Number(currentUser?.freeMinutesRemaining || 0)}
+          />
         </SectionCard>
       ) : null}
+
+      <SectionCard title="Legal policies" subtitle="Open the latest terms and policy documents in the app.">
+        <LegalLinksList className="rounded-2xl border border-brand/15 bg-brand/5 px-4 py-3 text-sm font-semibold text-brand-dark transition-colors hover:bg-brand/10 hover:text-brand" />
+      </SectionCard>
 
       <SectionCard title="Delete account" subtitle="This permanently removes your profile and access.">
         <div className="space-y-3">

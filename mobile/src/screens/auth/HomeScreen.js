@@ -1,11 +1,14 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { LEGAL_URLS } from '../../constants/legal';
 import { colors } from '../../theme/colors';
 
 const trustItems = ['Verified tutors only', 'Secure card authorization', 'Flexible live sessions'];
 
 export function HomeScreen({ navigate }) {
+  const openLegalUrl = (url) => Linking.openURL(url).catch(() => null);
+
   return (
     <View style={styles.page}>
       <View style={styles.brandGlowTop} />
@@ -29,7 +32,10 @@ export function HomeScreen({ navigate }) {
           ))}
         </View>
         <Text style={styles.terms}>
-          By continuing, you agree to our Terms of Service, Privacy Policy, and Payment Policy.
+          By continuing, you agree to our{' '}
+          <Text style={styles.termsLink} onPress={() => openLegalUrl(LEGAL_URLS.terms)}>Terms of Service</Text>,{' '}
+          <Text style={styles.termsLink} onPress={() => openLegalUrl(LEGAL_URLS.privacy)}>Privacy Policy</Text>, and{' '}
+          <Text style={styles.termsLink} onPress={() => openLegalUrl(LEGAL_URLS.payment)}>Payment Policy</Text>.
         </Text>
       </Card>
     </View>
@@ -117,5 +123,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     lineHeight: 18,
+  },
+  termsLink: {
+    color: colors.brandDark,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
   },
 });

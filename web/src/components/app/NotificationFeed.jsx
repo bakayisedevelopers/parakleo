@@ -20,8 +20,18 @@ function getNotificationTime(value) {
   }).format(date);
 }
 
-export default function NotificationFeed({ notifications, onSelectNotification, onMarkRead, maxItems = Infinity }) {
+export default function NotificationFeed({
+  notifications,
+  onSelectNotification,
+  onMarkRead,
+  maxItems = Infinity,
+  isLoading = false,
+}) {
   const visibleNotifications = Number.isFinite(maxItems) ? notifications.slice(0, maxItems) : notifications;
+
+  if (isLoading) {
+    return <EmptyState title="Loading notifications" description="Listening for request, session, and tutor updates." compact />;
+  }
 
   if (!visibleNotifications.length) {
     return <EmptyState title="No notifications yet" description="Real-time updates appear here." compact />;

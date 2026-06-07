@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom';
 import Button from './Button';
+import { useAuth } from '../hooks/useAuth';
 
 export default function Navbar() {
+  const { isAuthenticated, isInitializing } = useAuth();
+
   return (
     <nav className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200 dark:border-zinc-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -31,16 +34,28 @@ export default function Navbar() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-3">
-            <Link to="/login">
-              <Button variant="secondary" size="sm">
-                Login
-              </Button>
-            </Link>
-            <Link to="/signup">
-              <Button size="sm">
-                Sign Up
-              </Button>
-            </Link>
+            {isInitializing ? (
+              <div className="h-9 w-28 rounded-2xl bg-zinc-200/80" />
+            ) : isAuthenticated ? (
+              <Link to="/app">
+                <Button variant="secondary" size="sm">
+                  Open App
+                </Button>
+              </Link>
+            ) : (
+              <>
+                <Link to="/login">
+                  <Button variant="secondary" size="sm">
+                    Login
+                  </Button>
+                </Link>
+                <Link to="/signup">
+                  <Button size="sm">
+                    Sign Up
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>

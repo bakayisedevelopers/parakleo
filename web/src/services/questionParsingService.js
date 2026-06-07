@@ -100,6 +100,9 @@ function normalizeImageAttachment(item) {
     fileName: item?.fileName || '',
     mimeType,
     id: item?.id || '',
+    fileId: item?.fileId || item?.id || '',
+    dataURL: item?.dataURL || item?.dataUrl || '',
+    storageUrl: item?.storageUrl || item?.downloadUrl || src,
     width: Number(item?.width || 0) || undefined,
     height: Number(item?.height || 0) || undefined,
   };

@@ -1,26 +1,25 @@
 import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { FIREBASE_PUBLIC_CONFIG, USE_FIREBASE_EMULATORS, WEB_APP_BASE_URL } from '../../constants/runtimeConfig';
 import { getFunctionEndpoint } from '../../firebase/config';
 
 export function StudentAiSessionView({ authHandoff, onBridgeMessage, sessionId }) {
   const sessionUrl = useMemo(() => {
-    const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
-    const webBaseUrl = String(process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://parakleo.bakayise.com').trim().replace(/\/+$/, '');
     const sessionPath = `/app/session/${encodeURIComponent(String(sessionId || ''))}`;
     const params = new URLSearchParams({
       sessionId: String(sessionId || ''),
-      target: `${webBaseUrl}${sessionPath}`,
+      target: `${WEB_APP_BASE_URL}${sessionPath}`,
       source: 'mobile',
-      apiKey: String(process.env.EXPO_PUBLIC_FIREBASE_API_KEY || ''),
-      authDomain: String(process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || ''),
-      projectId: String(process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || ''),
-      appId: String(process.env.EXPO_PUBLIC_FIREBASE_APP_ID || ''),
+      apiKey: FIREBASE_PUBLIC_CONFIG.apiKey,
+      authDomain: FIREBASE_PUBLIC_CONFIG.authDomain,
+      projectId: FIREBASE_PUBLIC_CONFIG.projectId,
+      appId: FIREBASE_PUBLIC_CONFIG.appId,
     });
-    if (useFirebaseEmulators) {
+    if (USE_FIREBASE_EMULATORS) {
       return `${getFunctionEndpoint('mobileWebviewAuth')}?${params.toString()}`;
     }
-    return `${webBaseUrl}/mobile-webview-auth?${params.toString()}`;
+    return `${WEB_APP_BASE_URL}/mobile-webview-auth?${params.toString()}`;
   }, [sessionId]);
 
   const injectedAuthBootstrap = useMemo(() => {

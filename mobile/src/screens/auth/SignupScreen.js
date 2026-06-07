@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FormField } from '../../components/ui/FormField';
 import { ErrorState } from '../../components/ui/States';
+import { LEGAL_URLS } from '../../constants/legal';
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 
@@ -14,6 +15,7 @@ export function SignupScreen({ navigate }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const openLegalUrl = (url) => Linking.openURL(url).catch(() => null);
 
   async function submit() {
     setBusy(true);
@@ -46,7 +48,12 @@ export function SignupScreen({ navigate }) {
         <FormField label="Email address" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} placeholder="name@company.com" />
         <FormField label="Password" secureTextEntry value={password} onChangeText={setPassword} placeholder="••••••••" />
         <Text style={styles.policy}>
-          By signing up, you agree to our Terms of Service, Privacy Policy, Payment Policy, and Data and Voice Policy.
+          By signing up, you agree to our{' '}
+          <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.terms)}>Terms of Service</Text>,{' '}
+          <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.privacy)}>Privacy Policy</Text>,{' '}
+          <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.payment)}>Payment Policy</Text>,{' '}
+          <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.refund)}>Refund Policy</Text>, and{' '}
+          <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.dataVoice)}>Data and Voice Policy</Text>.
         </Text>
         <Button disabled={busy || !name || !email || password.length < 6} onPress={submit}>
           {busy ? 'Creating account...' : 'Create Account'}
@@ -124,5 +131,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     padding: 12,
+  },
+  policyLink: {
+    color: colors.brandDark,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
   },
 });

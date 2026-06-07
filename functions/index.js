@@ -385,17 +385,6 @@ const ACTIVE_REQUEST_STATUSES = new Set([
   REQUEST_STATUS.OFFERED,
   REQUEST_STATUS.NO_TUTOR_AVAILABLE,
 ]);
-const AI_FALLBACK_SUBJECT_ALLOWLIST = new Set([
-  'maths',
-  'mathematics',
-  'mathematical literacy',
-  'physics',
-  'physical sciences',
-  'chemistry',
-  'english',
-  'business studies',
-  'economics',
-]);
 let visionClient = null;
 const GEMINI_FLASH_EXTRACTION_SOURCE = 'gemini_2_5_flash_after_tutor_accept';
 const BOOKING_FEE_BUFFER_RATE = 0.10;
@@ -704,15 +693,31 @@ async function recordTutorSessionLifecycleEvent({
 }
 
 function hasCompletedStudentProfile(user = {}) {
+  const requirements = getStudentCompletionRequirements(user);
+  return requirements.complete;
+}
+
+function getStudentCompletionRequirements(user = {}) {
   const studentProfile = user?.studentProfile || {};
   const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
+  const hasGrade = Boolean(studentProfile.grade);
+  const hasCurriculum = Boolean(String(studentProfile.curriculum || '').trim());
+  const hasDiscoverySource = Boolean(String(studentProfile.discoverySource || '').trim());
+  const hasPaymentMethod = paymentMethods.length > 0;
 
-  return Boolean(
-    studentProfile.grade
-      && String(studentProfile.curriculum || '').trim()
-      && String(studentProfile.discoverySource || '').trim()
-      && paymentMethods.length > 0,
-  );
+  return {
+    hasGrade,
+    hasCurriculum,
+    hasDiscoverySource,
+    hasPaymentMethod,
+    paymentMethodsCount: paymentMethods.length,
+    complete: Boolean(
+      hasGrade
+        && hasCurriculum
+        && hasDiscoverySource
+        && hasPaymentMethod,
+    ),
+  };
 }
 
 function hasCompletedTutorProfile(user = {}) {
@@ -772,8 +777,22 @@ async function applyStudentReferralReward(transaction, {
   if (!isStudent) return { rewarded: false, reason: 'not_student' };
 
   const alreadyProcessed = Boolean((userData.growth || {}).accountCompletionRewardProcessed);
-  const studentProfileComplete = hasCompletedStudentProfile(userData);
+  const completionRequirements = getStudentCompletionRequirements(userData);
+  const studentProfileComplete = completionRequirements.complete;
   const referralSlug = String(pendingReferralSlug || userData.pendingReferralSlug || userData.pendingReferralCode || '').trim();
+
+  logger.info('student_referral_reward_evaluated', {
+    uid,
+    source,
+    isStudent,
+    alreadyProcessed,
+    studentProfileComplete,
+    pendingReferralSlugPresent: Boolean(referralSlug),
+    completionRequirements,
+    referredBy: userData.referredBy || null,
+    referralRewardCount: Number(userData.referralRewardCount || 0),
+    growthRewardProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+  });
 
   const nextBaseUpdates = baseUpdates || {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -782,6 +801,7 @@ async function applyStudentReferralReward(transaction, {
       ...(userData.growth || {}),
       completionRequirements: {
         ...((userData.growth || {}).completionRequirements || {}),
+        ...completionRequirements,
         studentProfileComplete,
       },
       lastGrowthSyncedAt: new Date().toISOString(),
@@ -790,15 +810,25 @@ async function applyStudentReferralReward(transaction, {
 
   const existingFreeMinutes = Number(userData.freeMinutesRemaining ?? DEFAULT_STUDENT_FREE_MINUTES);
   const existingEarned = Number(userData.totalFreeMinutesEarned ?? DEFAULT_STUDENT_FREE_MINUTES);
-  transaction.set(userRef, {
+  const userRewardBaseline = {
     ...nextBaseUpdates,
     freeMinutesRemaining: Number.isFinite(existingFreeMinutes) ? existingFreeMinutes : DEFAULT_STUDENT_FREE_MINUTES,
     totalFreeMinutesEarned: Number.isFinite(existingEarned) ? existingEarned : DEFAULT_STUDENT_FREE_MINUTES,
     totalFreeMinutesUsed: Number(userData.totalFreeMinutesUsed || 0),
     referralRewardCount: Number(userData.referralRewardCount || 0),
-  }, { merge: true });
+  };
 
   if (!studentProfileComplete || alreadyProcessed) {
+    transaction.set(userRef, userRewardBaseline, { merge: true });
+    logger.warn('student_referral_reward_skipped', {
+      uid,
+      source,
+      reason: !studentProfileComplete ? 'incomplete_profile' : 'already_processed',
+      alreadyProcessed,
+      completionRequirements,
+      pendingReferralSlugPresent: Boolean(referralSlug),
+      growthRewardProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+    });
     return {
       rewarded: false,
       reason: !studentProfileComplete ? 'incomplete_profile' : 'already_processed',
@@ -807,6 +837,7 @@ async function applyStudentReferralReward(transaction, {
 
   if (!referralSlug) {
     transaction.set(userRef, {
+      ...userRewardBaseline,
       pendingReferralSlug: null,
       pendingReferralCode: null,
       growth: {
@@ -815,6 +846,12 @@ async function applyStudentReferralReward(transaction, {
         accountCompletionQualifiedAt: new Date().toISOString(),
       },
     }, { merge: true });
+    logger.info('student_referral_reward_completed_without_slug', {
+      uid,
+      source,
+      completionRequirements,
+      reason: 'no_referral_slug',
+    });
     return { rewarded: false, reason: 'no_referral_slug', source };
   }
 
@@ -835,6 +872,7 @@ async function applyStudentReferralReward(transaction, {
 
   if (!referrerId || referrerId === uid || !referrerIsStudent) {
     transaction.set(userRef, {
+      ...userRewardBaseline,
       pendingReferralSlug: null,
       pendingReferralCode: null,
       growth: {
@@ -843,6 +881,15 @@ async function applyStudentReferralReward(transaction, {
         accountCompletionQualifiedAt: new Date().toISOString(),
       },
     }, { merge: true });
+    logger.warn('student_referral_reward_invalid_referrer', {
+      uid,
+      source,
+      referralSlug,
+      referrerId,
+      referrerIsStudent,
+      completionRequirements,
+      reason: !referrerId ? 'referrer_not_found' : (referrerId === uid ? 'self_referral' : 'referrer_not_student'),
+    });
     return {
       rewarded: false,
       reason: !referrerId ? 'referrer_not_found' : (referrerId === uid ? 'self_referral' : 'referrer_not_student'),
@@ -877,6 +924,7 @@ async function applyStudentReferralReward(transaction, {
   }
 
   transaction.set(userRef, {
+    ...userRewardBaseline,
     referredBy: referrerId,
     pendingReferralSlug: null,
     pendingReferralCode: null,
@@ -886,6 +934,16 @@ async function applyStudentReferralReward(transaction, {
       accountCompletionQualifiedAt: new Date().toISOString(),
     },
   }, { merge: true });
+
+  logger.info('student_referral_reward_result', {
+    uid,
+    source,
+    referralSlug,
+    referrerId,
+    rewardAlreadyGranted,
+    rewarded: !rewardAlreadyGranted,
+    completionRequirements,
+  });
 
   return {
     rewarded: !rewardAlreadyGranted,
@@ -1128,88 +1186,6 @@ async function getTutorQueueForSubject(subject) {
   return rankTutorsWithFairness(eligibleTutors);
 }
 
-function normalizeSubjectForAiFallback(subject) {
-  return String(subject || '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function isAiFallbackSubjectEligible(subject) {
-  return AI_FALLBACK_SUBJECT_ALLOWLIST.has(normalizeSubjectForAiFallback(subject));
-}
-
-async function createAiFallbackSessionInTransaction(transaction, requestRef, requestId, request = {}) {
-  const fallbackSessionId = String(request.sessionId || `ai_${requestId}`).trim();
-  const sessionRef = db.collection('sessions').doc(fallbackSessionId);
-  const sessionSnap = await transaction.get(sessionRef);
-  const existingSession = sessionSnap.exists ? (sessionSnap.data() || {}) : null;
-
-  if (existingSession && existingSession.sessionType && existingSession.sessionType !== 'ai') {
-    return false;
-  }
-
-  const nowMs = Date.now();
-  transaction.set(sessionRef, {
-    requestId,
-    studentId: request.studentId || null,
-    studentName: request.studentName || '',
-    studentEmail: request.studentEmail || '',
-    tutorId: null,
-    tutorName: 'Parakleo AI Tutor',
-    tutorEmail: '',
-    subject: request.subject || 'Mathematics',
-    topic: request.topic || '',
-    duration: request.duration || '',
-    durationMinutes: Number(request.durationMinutes || 10),
-    pricingSnapshot: request.pricingSnapshot || null,
-    pricingQuoteId: request.pricingQuoteId || request?.pricingSnapshot?.quoteId || null,
-    meetingProvider: 'gemini_live',
-    meetingLink: '',
-    meetingId: '',
-    meetingPassword: '',
-    sessionType: 'ai',
-    sessionProvider: 'gemini_live',
-    whiteboardRoomId: request.whiteboardRoomId || requestId,
-    notes: '',
-    requestAttachment: request.attachment || null,
-    attachments: Array.isArray(request.attachments) ? request.attachments : (request.attachment ? [request.attachment] : []),
-    requestDescription: request.description || '',
-    boardPreparationSource: request.boardPreparationSource || null,
-    status: SESSION_STATUS.WAITING_STUDENT,
-    joinGraceEndsAt: nowMs + (2 * 60 * 1000),
-    callStartedAt: null,
-    studentJoinedAt: null,
-    billingStartedAt: null,
-    billedSeconds: 0,
-    totalAmount: 0,
-    aiLive: {
-      status: 'idle',
-      wsConnected: false,
-      audioInActive: false,
-      audioOutActive: false,
-      transcriptStatus: 'idle',
-      startedAt: null,
-      endedAt: null,
-      lastError: '',
-    },
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    createdAt: existingSession?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-
-  transaction.update(requestRef, {
-    sessionId: fallbackSessionId,
-    status: REQUEST_STATUS.ACCEPTED,
-    statusDetail: 'No tutor available. AI live tutor is ready.',
-    tutorId: null,
-    tutorName: 'Parakleo AI Tutor',
-    tutorEmail: '',
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
-    offerToken: null,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return true;
-}
-
 exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}', async (event) => {
   const afterData = event.data.after.exists ? event.data.after.data() : null;
   if (!afterData) return;
@@ -1259,11 +1235,6 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
     }
 
     if (!queue.length) {
-      if (isAiFallbackSubjectEligible(request.subject)) {
-        const createdAiFallback = await createAiFallbackSessionInTransaction(transaction, requestRef, requestId, request);
-        if (createdAiFallback) return;
-      }
-
       transaction.update(requestRef, {
         status: REQUEST_STATUS.NO_TUTOR_AVAILABLE,
         statusDetail: 'No tutor accepted. Looking for another tutor.',
@@ -2054,8 +2025,16 @@ exports.syncStudentReferralRewardsOnUserWrite = onDocumentWritten('users/{uid}',
   const isStudent = (after.activeRole || after.role || '').toLowerCase() === 'student';
   if (!isStudent) return;
 
-  const studentProfileComplete = hasCompletedStudentProfile(after);
+  const completionRequirements = getStudentCompletionRequirements(after);
+  const studentProfileComplete = completionRequirements.complete;
   const alreadyProcessed = Boolean((after.growth || {}).accountCompletionRewardProcessed);
+  logger.info('student_referral_user_write_seen', {
+    uid: event.params.uid,
+    studentProfileComplete,
+    alreadyProcessed,
+    completionRequirements,
+    pendingReferralSlugPresent: Boolean(String(after.pendingReferralSlug || after.pendingReferralCode || '').trim()),
+  });
   if (!studentProfileComplete || alreadyProcessed) return;
 
   const userRef = db.collection('users').doc(event.params.uid);
@@ -2080,6 +2059,7 @@ exports.syncStudentReferralRewardsOnUserWrite = onDocumentWritten('users/{uid}',
           ...(userData.growth || {}),
           completionRequirements: {
             ...((userData.growth || {}).completionRequirements || {}),
+            ...completionRequirements,
             studentProfileComplete: true,
           },
           lastGrowthSyncedAt: new Date().toISOString(),
@@ -4521,6 +4501,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
     if (!userSnap.exists) return;
     const userData = userSnap.data() || {};
     const isStudent = (userData.activeRole || userData.role || '').toLowerCase() === 'student';
+    const completionRequirements = isStudent ? getStudentCompletionRequirements(userData) : null;
 
     const baseUpdates = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -4530,7 +4511,8 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
         completionRequirements: {
           ...((userData.growth || {}).completionRequirements || {}),
           emailVerified,
-          studentProfileComplete: isStudent ? hasCompletedStudentProfile(userData) : false,
+          ...(completionRequirements || {}),
+          studentProfileComplete: isStudent ? completionRequirements.complete : false,
           phoneVerified: Boolean(((userData.growth || {}).completionRequirements || {}).phoneVerified || false),
         },
         lastGrowthSyncedAt: new Date().toISOString(),
@@ -4546,6 +4528,14 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
       return;
     }
 
+    logger.info('student_growth_sync_evaluated', {
+      uid: decoded.uid,
+      emailVerified,
+      completionRequirements,
+      pendingReferralSlugPresent: Boolean(String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim()),
+      alreadyProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+    });
+
     await applyStudentReferralReward(transaction, {
       userRef,
       userData,
@@ -4557,7 +4547,18 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
   });
 
   const profileSnap = await userRef.get();
-  res.status(200).json({ success: true, profile: { uid: decoded.uid, ...(profileSnap.data() || {}) } });
+  const profile = { uid: decoded.uid, ...(profileSnap.data() || {}) };
+  res.status(200).json({
+    success: true,
+    profile,
+    diagnostics: {
+      completionRequirements: getStudentCompletionRequirements(profile),
+      pendingReferralSlugPresent: Boolean(String(profile.pendingReferralSlug || profile.pendingReferralCode || '').trim()),
+      alreadyProcessed: Boolean((profile.growth || {}).accountCompletionRewardProcessed),
+      referredBy: profile.referredBy || null,
+      referralRewardCount: Number(profile.referralRewardCount || 0),
+    },
+  });
 });
 
 exports.mobileWebviewAuth = onRequest({ cors: true }, async (req, res) => {

@@ -1,7 +1,16 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../theme/colors';
 
-export function Button({ children, onPress, disabled = false, variant = 'primary', style }) {
+export function Button({
+  children,
+  onPress,
+  disabled = false,
+  variant = 'primary',
+  style,
+  icon = null,
+  iconPosition = 'left',
+  textStyle,
+}) {
   return (
     <Pressable
       accessibilityRole="button"
@@ -15,9 +24,12 @@ export function Button({ children, onPress, disabled = false, variant = 'primary
         style,
       ]}
     >
-      <Text style={[styles.text, variant === 'secondary' && styles.secondaryText]}>
-        {children}
-      </Text>
+      <View style={[styles.content, iconPosition === 'right' && styles.contentReverse]}>
+        {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
+        <Text style={[styles.text, variant === 'secondary' && styles.secondaryText, textStyle]}>
+          {children}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -43,6 +55,19 @@ const styles = StyleSheet.create({
   },
   pressed: {
     transform: [{ scale: 0.99 }],
+  },
+  content: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  contentReverse: {
+    flexDirection: 'row-reverse',
+  },
+  iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   text: {
     color: '#ffffff',

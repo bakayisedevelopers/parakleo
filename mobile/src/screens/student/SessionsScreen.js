@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/States';
@@ -7,8 +8,28 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToStudentSessions } from '../../services/sessionService';
 import { colors } from '../../theme/colors';
-import { formatRand } from '../../utils/pricing';
 import { getSessionStatusMeta } from '../../utils/sessionStatus';
+
+function getMeetingProviderLabel(session) {
+  const meetingProvider = String(
+    session?.meetingProvider
+    || session?.sessionProvider
+    || '',
+  ).toLowerCase();
+
+  if (meetingProvider === 'gemini_live') return 'Gemini Live';
+  if (meetingProvider === 'webrtc_human') return 'Parakleo WebRTC';
+  if (meetingProvider === 'webrtc') return 'In-app call';
+  if (meetingProvider) return meetingProvider.replace(/_/g, ' ');
+  return 'Not set';
+}
+
+function getSessionScheduleLine(session) {
+  const date = session?.scheduledDate || 'Live';
+  const time = session?.scheduledTime || 'Now';
+  const duration = session?.duration || `${session?.durationMinutes || 60} mins`;
+  return `${date} - ${time} - ${duration}`;
+}
 
 export function SessionsScreen({ navigate }) {
   const { user } = useAuth();
@@ -30,36 +51,80 @@ export function SessionsScreen({ navigate }) {
     );
   }, [user?.uid]);
 
+  const openSession = (sessionId) => {
+    navigate({ key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } });
+  };
+
   if (loading) return <LoadingState label="Loading classes" />;
   if (error) return <ErrorState message={error} />;
-  if (!sessions.length) return <EmptyState title="No classes yet" message="Accepted requests will appear here." />;
+  if (!sessions.length) {
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.headerCard}>
+          <Text style={styles.title}>My Sessions</Text>
+          <Text style={styles.subtitle}>Track scheduled, in-progress, and completed classes in real time.</Text>
+        </View>
+        <Card style={styles.sectionCard}>
+          <EmptyState title="No sessions yet" message="Accepted requests automatically become sessions." />
+        </Card>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Sessions</Text>
-      {sessions.map((session) => (
-        <Card key={session.id} style={styles.card}>
+      <View style={styles.headerCard}>
+        <Text style={styles.title}>My Sessions</Text>
+        <Text style={styles.subtitle}>Track scheduled, in-progress, and completed classes in real time.</Text>
+      </View>
+
+      <Card style={styles.sectionCard}>
+        {sessions.map((session) => (
           <Pressable
+            key={session.id}
             accessibilityRole="button"
-            onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: session.id, parentTab: 'Sessions' } })}
-            style={styles.cardPressable}
+            onPress={() => openSession(session.id)}
+            style={({ pressed }) => [
+              styles.sessionCard,
+              pressed && styles.sessionCardPressed,
+            ]}
           >
-            <StatusBadge {...getSessionStatusMeta(session.status)} />
-            <Text style={styles.cardTitle}>{session.topic || session.subject || 'Class session'}</Text>
-            <Text style={styles.copy}>Tutor: {session.tutorName || session.tutorId || 'Pending'}</Text>
-            <Text style={styles.meta}>Duration: {session.duration || `${session.durationMinutes || 10} minutes`}</Text>
-            <Text style={styles.meta}>Meeting provider: {session.meetingProvider || 'Parakleo WebRTC'}</Text>
-            {session.pricingSnapshot ? (
-              <Text style={styles.meta}>
-                Billing snapshot: Base {formatRand(session.pricingSnapshot.adjustedBaseAmount ?? session.pricingSnapshot.baseAmount ?? 0)} | Rate {formatRand(session.pricingSnapshot.adjustedRatePerMinute ?? session.pricingSnapshot.ratePerMinute ?? 0)}
-              </Text>
-            ) : null}
+            <View style={styles.sessionHeader}>
+              <View style={styles.sessionTitleWrap}>
+                <Text style={styles.subjectLabel}>{session.subject || 'Session'}</Text>
+                <Text style={styles.cardTitle}>{session.topic || 'Class session'}</Text>
+              </View>
+              <StatusBadge {...getSessionStatusMeta(session.status)} />
+            </View>
+
+            <View style={styles.metaGrid}>
+              <View style={styles.metaItem}>
+                <Ionicons name="calendar-outline" size={16} color="#a1a1aa" />
+                <Text style={styles.metaText}>{getSessionScheduleLine(session)}</Text>
+              </View>
+              <View style={styles.metaItem}>
+                <Ionicons name="person-outline" size={16} color="#a1a1aa" />
+                <Text style={styles.metaText}>{session.tutorName || session.tutorId || 'Tutor pending'}</Text>
+              </View>
+            </View>
+
+            <Text style={styles.providerText}>Provider: {getMeetingProviderLabel(session)}</Text>
+            {session.meetingLink ? (
+              <Pressable accessibilityRole="button" onPress={() => openSession(session.id)}>
+                <Text style={styles.linkText}>Open meeting link</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.providerText}>Meeting link not added yet.</Text>
+            )}
+
+            <View style={styles.actionsRow}>
+              <Button onPress={() => openSession(session.id)} style={styles.actionButton}>
+                {session.status === 'in_progress' ? 'Rejoin Call' : 'Open Session Room'}
+              </Button>
+            </View>
           </Pressable>
-          <Button onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: session.id, parentTab: 'Sessions' } })}>
-            {session.status === 'in_progress' ? 'Rejoin Call' : 'Open Session Room'}
-          </Button>
-        </Card>
-      ))}
+        ))}
+      </Card>
     </View>
   );
 }
@@ -68,29 +133,100 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 12,
   },
+  headerCard: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.06,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 2,
+  },
   title: {
     color: colors.text,
     fontSize: 28,
     fontWeight: '900',
   },
-  card: {
-    gap: 10,
+  subtitle: {
+    color: '#52525b',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
   },
-  cardPressable: {
-    gap: 10,
+  sectionCard: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 24,
+    gap: 16,
+    padding: 16,
+  },
+  sessionCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 26,
+    borderWidth: 1,
+    gap: 12,
+    padding: 20,
+  },
+  sessionCardPressed: {
+    backgroundColor: '#fffbff',
+    borderColor: '#6ee7b7',
+  },
+  sessionHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  sessionTitleWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  subjectLabel: {
+    color: '#71717a',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   cardTitle: {
     color: colors.text,
-    fontSize: 18,
+    fontSize: 30,
     fontWeight: '900',
+    lineHeight: 34,
   },
-  copy: {
-    color: colors.muted,
+  metaGrid: {
+    gap: 8,
+  },
+  metaItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  metaText: {
+    color: '#3f3f46',
     fontSize: 14,
   },
-  meta: {
-    color: colors.muted,
-    fontSize: 12,
+  providerText: {
+    color: '#71717a',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  linkText: {
+    color: '#047857',
+    fontSize: 14,
     fontWeight: '700',
+  },
+  actionsRow: {
+    marginTop: 4,
+  },
+  actionButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 16,
+    minHeight: 42,
+    paddingHorizontal: 16,
   },
 });

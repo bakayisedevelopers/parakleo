@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Clipboard,
   Linking,
   Pressable,
   ScrollView,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { LEGAL_LINKS } from '../../constants/legal';
 import { useAuth } from '../../context/AuthContext';
 import { FormField } from '../../components/ui/FormField';
 import { getUserProfile, updateUserProfile } from '../../services/userService';
@@ -21,6 +23,7 @@ export function ProfileScreen({ navigate }) {
   const { deleteAccount, logout, setUser, user } = useAuth();
   const currentUser = user;
   const studentStatus = getStudentOnboardingStatus(currentUser);
+  const hydratedUserIdRef = useRef(null);
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState('');
@@ -36,27 +39,40 @@ export function ProfileScreen({ navigate }) {
   useEffect(() => {
     if (!user?.uid) return;
 
+    let cancelled = false;
+
     getUserProfile(user.uid).then((profile) => {
+      if (cancelled) return;
+
       const profileData = profile || user;
       if (profile) {
         setUser((prev) => ({ ...prev, ...profile }));
       }
-      setForm({
-        fullName: profileData.fullName || profileData.displayName || '',
-        phoneNumber: profileData.phoneNumber || '',
-        bio: profileData.bio || '',
-        availability: profileData.availability || '',
-      });
+
+      if (hydratedUserIdRef.current !== user.uid) {
+        hydratedUserIdRef.current = user.uid;
+        setForm({
+          fullName: profileData.fullName || profileData.displayName || '',
+          phoneNumber: profileData.phoneNumber || '',
+          bio: profileData.bio || '',
+          availability: profileData.availability || '',
+        });
+      }
     });
-  }, [setUser, user]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setUser, user?.uid]);
 
   const isTutorRole = (currentUser?.activeRole || currentUser?.role) === 'tutor';
+  const hasTutorRole = isTutorRole || (currentUser?.roles || []).includes('tutor');
   const referralSlug = String(currentUser?.referralSlug || currentUser?.referralCode || '').trim();
-  const referralLink = useMemo(
-    () => (referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : ''),
-    [referralSlug],
-  );
+  const referralLink = useMemo(() => {
+    return referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : '';
+  }, [referralSlug]);
   const referralPreview = referralLink.length > 42 ? `${referralLink.slice(0, 42)}...` : referralLink;
+  const openLegalUrl = (url) => Linking.openURL(url).catch(() => null);
 
   const handleLogout = async () => {
     await logout();
@@ -115,6 +131,16 @@ export function ProfileScreen({ navigate }) {
     }
   };
 
+  const handleCopyReferral = () => {
+    if (!referralLink) return;
+    try {
+      Clipboard.setString(referralLink);
+      setShareFeedback('Link copied.');
+    } catch (_error) {
+      setShareFeedback('Unable to copy link.');
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
       <View style={styles.header}>
@@ -131,18 +157,24 @@ export function ProfileScreen({ navigate }) {
       ) : null}
 
       <Card style={styles.card}>
-        <FormField
-          label="Full name"
-          value={form.fullName}
-          onChangeText={(value) => setForm((prev) => ({ ...prev, fullName: value }))}
-          placeholder="Full name"
-        />
-        <FormField
-          label="Phone number"
-          value={form.phoneNumber}
-          onChangeText={(value) => setForm((prev) => ({ ...prev, phoneNumber: value }))}
-          placeholder="Phone number"
-        />
+        <View style={styles.fieldRow}>
+          <View style={styles.fieldColumn}>
+            <FormField
+              label="Full name"
+              value={form.fullName}
+              onChangeText={(value) => setForm((prev) => ({ ...prev, fullName: value }))}
+              placeholder="Full name"
+            />
+          </View>
+          <View style={styles.fieldColumn}>
+            <FormField
+              label="Phone number"
+              value={form.phoneNumber}
+              onChangeText={(value) => setForm((prev) => ({ ...prev, phoneNumber: value }))}
+              placeholder="Phone number"
+            />
+          </View>
+        </View>
         <FormField
           label="Bio"
           multiline
@@ -150,6 +182,7 @@ export function ProfileScreen({ navigate }) {
           value={form.bio}
           onChangeText={(value) => setForm((prev) => ({ ...prev, bio: value }))}
           placeholder="Bio"
+          inputStyle={styles.bioInput}
         />
         {isTutorRole ? (
           <FormField
@@ -170,36 +203,65 @@ export function ProfileScreen({ navigate }) {
           <Button variant="secondary" onPress={handleLogout}>Log out</Button>
         </View>
         <View style={styles.detailGrid}>
-          <Text style={styles.meta}><Text style={styles.metaLabel}>Email:</Text> {currentUser?.email || 'Not set'}</Text>
-          <Text style={styles.meta}><Text style={styles.metaLabel}>Role:</Text> {currentUser?.activeRole || currentUser?.role || 'student'}</Text>
-          <Text style={styles.meta}><Text style={styles.metaLabel}>Student onboarding:</Text> {studentStatus.complete ? 'Complete' : studentStatus.message}</Text>
+          <View style={styles.detailItem}>
+            <Text style={styles.metaLabel}>Email</Text>
+            <Text style={styles.metaValue}>{currentUser?.email || 'Not set'}</Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.metaLabel}>Role</Text>
+            <Text style={[styles.metaValue, styles.capitalize]}>{currentUser?.activeRole || currentUser?.role || 'student'}</Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.metaLabel}>Student onboarding</Text>
+            <Text style={styles.meta}>{studentStatus.complete ? 'Complete' : studentStatus.message}</Text>
+          </View>
+          {hasTutorRole ? (
+            <View style={styles.detailItem}>
+              <Text style={styles.metaLabel}>Tutor onboarding</Text>
+              <Text style={styles.meta}>Open the web app to complete tutor-specific setup.</Text>
+            </View>
+          ) : null}
         </View>
       </Card>
 
-      {(currentUser?.activeRole || currentUser?.role) === 'student' && referralLink ? (
+      {(currentUser?.activeRole || currentUser?.role) === 'student' ? (
         <Card style={styles.referralCard}>
           <Text style={styles.referralIntro}>
             Get free 30 minutes when a student joins and completes their profile using your link.
           </Text>
           <View style={styles.referralLinkCard}>
             <Text style={styles.referralLabel}>Referral link</Text>
-            <Text style={styles.referralPreview} numberOfLines={2}>{referralPreview}</Text>
-            <Text selectable style={styles.referralLink}>{referralLink}</Text>
+            <Text style={styles.referralPreview} numberOfLines={2}>{referralPreview || 'Not available yet'}</Text>
+            <Text selectable style={styles.referralLink}>{referralLink || 'Not available yet'}</Text>
           </View>
           <View style={styles.referralActions}>
-            <Pressable accessibilityRole="button" onPress={() => Linking.openURL(referralLink)} style={styles.referralGhostButton}>
-              <Text style={styles.referralGhostButtonText}>Open</Text>
+            <Pressable accessibilityRole="button" onPress={handleCopyReferral} style={styles.referralGhostButton}>
+              <Text style={styles.referralGhostButtonText}>Copy</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.referralShareButton}>
               <Text style={styles.referralShareButtonText}>Share</Text>
             </Pressable>
           </View>
           {shareFeedback ? <Text style={styles.referralFeedback}>{shareFeedback}</Text> : null}
+          <Text style={styles.meta}><Text style={styles.metaStrong}>Free minutes remaining:</Text> {Number(currentUser?.freeMinutesRemaining || 0).toFixed(2)} min</Text>
         </Card>
       ) : null}
 
       <Card style={styles.card}>
+        <Text style={styles.sectionTitle}>Legal policies</Text>
+        <Text style={styles.copy}>Open the latest terms and policy documents hosted on the web app.</Text>
+        <View style={styles.legalList}>
+          {LEGAL_LINKS.map((link) => (
+            <Pressable key={link.href} onPress={() => openLegalUrl(link.href)} style={styles.legalLink}>
+              <Text style={styles.legalLinkText}>{link.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Card>
+
+      <Card style={styles.card}>
         <Text style={styles.sectionTitle}>Delete account</Text>
+        <Text style={styles.copy}>This permanently removes your profile and access.</Text>
         <Text style={styles.danger}>Type DELETE below to confirm permanent account deletion.</Text>
         <TextInput
           placeholder="Type DELETE"
@@ -219,11 +281,11 @@ export function ProfileScreen({ navigate }) {
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: 12,
-    paddingBottom: 24,
+    gap: 16,
+    paddingBottom: 28,
   },
   header: {
-    gap: 6,
+    gap: 8,
   },
   title: {
     color: colors.text,
@@ -231,7 +293,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   card: {
-    gap: 10,
+    gap: 14,
   },
   copy: {
     color: colors.muted,
@@ -243,21 +305,63 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
   },
+  fieldRow: {
+    gap: 12,
+  },
+  fieldColumn: {
+    flex: 1,
+  },
+  bioInput: {
+    minHeight: 96,
+    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
   accountHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   detailGrid: {
-    gap: 8,
+    gap: 12,
+  },
+  legalList: {
+    gap: 10,
+  },
+  legalLink: {
+    backgroundColor: 'rgba(16,185,129,0.06)',
+    borderColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  legalLinkText: {
+    color: colors.brandDark,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  detailItem: {
+    gap: 4,
   },
   meta: {
     color: colors.text,
     fontSize: 14,
+    lineHeight: 20,
   },
   metaLabel: {
     color: colors.muted,
+    fontSize: 12,
     fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  metaValue: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  capitalize: {
+    textTransform: 'capitalize',
   },
   referralCard: {
     backgroundColor: '#ecfdf5',
@@ -327,6 +431,10 @@ const styles = StyleSheet.create({
     color: '#047857',
     fontSize: 12,
     fontWeight: '700',
+  },
+  metaStrong: {
+    color: colors.text,
+    fontWeight: '800',
   },
   danger: {
     color: colors.danger,

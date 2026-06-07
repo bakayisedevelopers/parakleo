@@ -19,7 +19,9 @@ export class ErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <View style={styles.safe}>
-          <ErrorState message="Restart the app and try again." />
+          <ErrorState
+            message={this.state.error?.message || 'Restart the app and try again.'}
+          />
         </View>
       );
     }

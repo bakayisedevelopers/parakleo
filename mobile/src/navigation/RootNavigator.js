@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { LoadingState } from '../components/ui/States';
-import { NotificationCenterModal } from '../components/student/NotificationCenterModal';
 import { SessionRatingPrompt } from '../components/student/SessionRatingPrompt';
 import { useAuth } from '../context/AuthContext';
 import { HomeScreen } from '../screens/auth/HomeScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignupScreen } from '../screens/auth/SignupScreen';
 import { DashboardScreen } from '../screens/student/DashboardScreen';
+import { NotificationsScreen } from '../screens/student/NotificationsScreen';
 import { OnboardingScreen } from '../screens/student/OnboardingScreen';
 import { ProfileScreen } from '../screens/student/ProfileScreen';
 import { RequestDetailsScreen } from '../screens/student/RequestDetailsScreen';
@@ -17,7 +17,11 @@ import { RequestsScreen } from '../screens/student/RequestsScreen';
 import { SessionRoomScreen } from '../screens/student/SessionRoomScreen';
 import { SessionsScreen } from '../screens/student/SessionsScreen';
 import { WalletScreen } from '../screens/student/WalletScreen';
-import { markNotificationsRead, subscribeToNotifications } from '../services/notificationService';
+import {
+  markAllNotificationsRead,
+  markNotificationRead,
+  subscribeToNotifications,
+} from '../services/notificationService';
 import { subscribeToStudentSessions } from '../services/sessionService';
 import { colors } from '../theme/colors';
 import { RATABLE_SESSION_STATUSES } from '../utils/sessionStatus';
@@ -38,6 +42,7 @@ const studentTabs = [
 ];
 
 const detailScreens = {
+  Notifications: NotificationsScreen,
   RequestStatus: RequestStatusScreen,
   RequestDetails: RequestDetailsScreen,
   SessionRoom: SessionRoomScreen,
@@ -90,6 +95,13 @@ function resolveNotificationRoute(notification = {}) {
   const requestId = notification?.requestId || '';
   const sessionId = notification?.sessionId || '';
 
+  if (targetPath.startsWith('/app/session/')) {
+    const targetSessionId = targetPath.split('/app/session/')[1] || sessionId;
+    return targetSessionId
+      ? { key: 'SessionRoom', params: { sessionId: targetSessionId, parentTab: 'Sessions' } }
+      : { key: 'Sessions', params: {} };
+  }
+
   if (targetPath.includes('/student/payment') || type.includes('payment')) {
     return { key: 'Wallet', params: {} };
   }
@@ -116,7 +128,6 @@ export function RootNavigator() {
   const [authRoute, setAuthRoute] = useState('Home');
   const [activeRoute, setActiveRoute] = useState({ key: 'Dashboard', params: {} });
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
@@ -158,6 +169,9 @@ export function RootNavigator() {
 
   useEffect(() => {
     if (!user?.uid) {
+      setAuthRoute('Home');
+      setActiveRoute({ key: 'Dashboard', params: {} });
+      setIsNavOpen(false);
       setNotifications([]);
       setSessions([]);
       setRatingQueue([]);
@@ -242,15 +256,6 @@ export function RootNavigator() {
     setRatingQueue((prev) => prev.filter((sessionId) => activeSessionIds.has(sessionId)));
   }, [ratingQueue.length, sessions]);
 
-  useEffect(() => {
-    if (!isNotificationsOpen) {
-      return;
-    }
-
-    const unreadIds = notifications.filter((item) => !item?.read).map((item) => item.id);
-    markNotificationsRead(unreadIds).catch(() => null);
-  }, [isNotificationsOpen, notifications]);
-
   if (initializing) {
     return (
       <View style={styles.safe}>
@@ -287,8 +292,6 @@ export function RootNavigator() {
   const ActiveScreen = detailScreens[activeRoute.key] || active.component;
   const isFullscreenRoute = activeRoute.key === 'SessionRoom';
   const unreadCount = notifications.filter((item) => !item?.read).length;
-  const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : '';
 
   const handleLogout = async () => {
     setAuthRoute('Home');
@@ -301,19 +304,6 @@ export function RootNavigator() {
     await logout();
   };
 
-  const handleShareReferral = async () => {
-    if (!referralLink) return;
-    try {
-      await Share.share({
-        title: 'Join Parakleo',
-        message: `Use my Parakleo referral link to sign up and start learning.\n${referralLink}`,
-        url: referralLink,
-      });
-    } catch (_error) {
-      // noop
-    }
-  };
-
   return (
     <View style={[styles.safe, isFullscreenRoute ? styles.safeFullscreen : null]}>
       <View style={styles.shell}>
@@ -322,7 +312,19 @@ export function RootNavigator() {
         ) : (
           <SafeAreaView style={styles.contentSafe}>
             <ScrollView contentContainerStyle={styles.content}>
-              <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} />
+              <ActiveScreen
+                navigate={openRoute}
+                goBack={goBack}
+                route={activeRoute}
+                notifications={notifications}
+                isLoading={notificationsLoading}
+                unreadCount={unreadCount}
+                onMarkAllRead={() => markAllNotificationsRead(user?.uid).catch(() => null)}
+                onOpenNotification={async (notification) => {
+                  await markNotificationRead(notification?.id).catch(() => null);
+                  openRoute(resolveNotificationRoute(notification));
+                }}
+              />
             </ScrollView>
           </SafeAreaView>
         )}
@@ -337,8 +339,13 @@ export function RootNavigator() {
             <Pressable accessibilityRole="button" onPress={() => openRoute('Dashboard')} style={[styles.bottomNavItem, activeTabKey === 'Dashboard' && styles.bottomNavItemActive]}>
               <Ionicons name={activeTabKey === 'Dashboard' ? 'home' : 'home-outline'} size={22} color={activeTabKey === 'Dashboard' ? colors.brand : '#3f3f46'} />
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.bottomNavItem}>
-              <Ionicons name="share-social-outline" size={22} color="#047857" />
+            <Pressable accessibilityRole="button" onPress={() => openRoute('Notifications')} style={[styles.bottomNavItem, activeRoute.key === 'Notifications' && styles.bottomNavItemActive]}>
+              <View style={styles.notificationIconWrap}>
+                <Ionicons name={activeRoute.key === 'Notifications' ? 'notifications' : 'notifications-outline'} size={22} color={activeRoute.key === 'Notifications' ? colors.brand : '#3f3f46'} />
+                {unreadCount > 0 ? (
+                  <Text style={styles.notificationCount}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                ) : null}
+              </View>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => openRoute('Profile')} style={[styles.bottomNavItem, activeTabKey === 'Profile' && styles.bottomNavItemActive]}>
               <Ionicons name={activeTabKey === 'Profile' ? 'person' : 'person-outline'} size={22} color={activeTabKey === 'Profile' ? colors.brand : '#3f3f46'} />
@@ -380,24 +387,6 @@ export function RootNavigator() {
             </View>
           </View>
         </Modal>
-        <NotificationCenterModal
-          visible={isNotificationsOpen}
-          notifications={notifications}
-          isLoading={notificationsLoading}
-          onClose={() => setIsNotificationsOpen(false)}
-          onOpenNotification={(notification) => {
-            setIsNotificationsOpen(false);
-            openRoute(resolveNotificationRoute(notification));
-          }}
-          onOpenRequest={(requestId) => {
-            setIsNotificationsOpen(false);
-            openRoute({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
-          }}
-          onOpenSession={(sessionId) => {
-            setIsNotificationsOpen(false);
-            openRoute({ key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } });
-          }}
-        />
         <SessionRatingPrompt
           session={ratingTarget}
           role="student"
@@ -565,6 +554,11 @@ const styles = StyleSheet.create({
   },
   bottomNavItemActive: {
     backgroundColor: '#ecfdf5',
+  },
+  notificationIconWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   overlay: {
     flex: 1,

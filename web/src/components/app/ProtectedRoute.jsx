@@ -28,9 +28,13 @@ export default function ProtectedRoute({ children, allowedRoles, requireAdmin = 
   const { user, isAuthenticated, isInitializing } = useAuth();
   const { isAdmin, isLoadingAdmin } = useAdmin();
   const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const isMobileSessionRoom = searchParams.get('source') === 'mobile'
+    && location.pathname.startsWith('/app/session/');
+  const loadingMessage = isMobileSessionRoom ? 'Loading Session...' : 'Loading...';
 
   if (isInitializing || (requireAdmin && isLoadingAdmin)) {
-    return <LoadingState message="Loading Parakleo..." fullPage />;
+    return <LoadingState message={loadingMessage} fullPage />;
   }
 
   if (!isAuthenticated) {

@@ -105,6 +105,44 @@ export default function TldrawSdkEmbed({ roomId, onMount }) {
                 // no-op
               }
             },
+            setSceneContent: ({ elements = [], files = [] } = {}) => {
+              try {
+                const nextElements = Array.isArray(elements) ? elements : [];
+                const nextFiles = Array.isArray(files) ? files : [];
+                const currentElements = typeof api.getSceneElementsIncludingDeleted === 'function'
+                  ? api.getSceneElementsIncludingDeleted()
+                  : [];
+                const preservedElements = Array.isArray(currentElements)
+                  ? currentElements.filter((element) => {
+                    const elementId = String(element?.id || '');
+                    return !elementId.startsWith('parsed-question-') && !elementId.startsWith('parsed-image-');
+                  })
+                  : [];
+                if (nextFiles.length) {
+                  api.addFiles(nextFiles);
+                }
+                api.updateScene({ elements: [...preservedElements, ...nextElements] });
+              } catch {
+                // no-op
+              }
+            },
+            resetScene: () => {
+              try {
+                api.resetScene?.();
+              } catch {
+                // no-op
+              }
+            },
+            addFiles: (files = []) => {
+              try {
+                const nextFiles = Array.isArray(files) ? files : [];
+                if (nextFiles.length) {
+                  api.addFiles(nextFiles);
+                }
+              } catch {
+                // no-op
+              }
+            },
           });
         }}
         onChange={(elements, appState) => {

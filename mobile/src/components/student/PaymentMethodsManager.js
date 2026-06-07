@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
 import { EmptyState } from '../ui/States';
 import { StatusBadge } from '../ui/StatusBadge';
 import { PaystackAuthorizationModal } from './PaystackAuthorizationModal';
@@ -74,12 +74,16 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
 
   return (
     <View style={styles.wrap}>
-      <Card style={styles.form}>
-        <Button disabled={isAuthorizingCard} onPress={() => setIsAuthorizingCard(true)}>
+      <View style={styles.form}>
+        <Button
+          disabled={isAuthorizingCard}
+          onPress={() => setIsAuthorizingCard(true)}
+          icon={<Ionicons name="add-circle-outline" size={18} color="#ffffff" />}
+        >
           {isAuthorizingCard ? 'Authorizing card...' : 'Add a Card'}
         </Button>
         <Text style={styles.copy}>We charge R1 to securely authorize your card, then immediately refund it after verification.</Text>
-      </Card>
+      </View>
 
       <PaystackAuthorizationModal
         email={user?.email}
@@ -92,7 +96,7 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
       {!methods.length ? <EmptyState title="No cards added yet" message="Add a verified card before requesting a class." /> : null}
 
       {methods.map((card) => (
-        <Card key={card.id} style={styles.card}>
+        <View key={card.id} style={styles.card}>
           <View style={styles.cardHeader}>
             <View>
               <Text style={styles.cardTitle}>{card.nickname || 'Card'}</Text>
@@ -101,14 +105,23 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
             {card.isDefault ? <StatusBadge label="Primary" tone="success" /> : null}
           </View>
           <View style={styles.actions}>
-            <Button variant="secondary" disabled={card.isDefault} onPress={() => makeDefault(card.id)}>
+            <Button
+              variant="secondary"
+              disabled={card.isDefault}
+              onPress={() => makeDefault(card.id)}
+              icon={<Ionicons name="checkmark-circle-outline" size={16} color={colors.brand} />}
+            >
               Set primary
             </Button>
-            <Button variant="secondary" onPress={() => removeCard(card.id)}>
+            <Button
+              variant="secondary"
+              onPress={() => removeCard(card.id)}
+              icon={<Ionicons name="trash-outline" size={16} color={colors.brand} />}
+            >
               Remove
             </Button>
           </View>
-        </Card>
+        </View>
       ))}
     </View>
   );
@@ -121,18 +134,18 @@ const styles = StyleSheet.create({
   form: {
     gap: 12,
   },
-  title: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-  },
   copy: {
     color: colors.muted,
     fontSize: 14,
     lineHeight: 20,
   },
   card: {
+    backgroundColor: '#fafafa',
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 1,
     gap: 12,
+    padding: 12,
   },
   cardHeader: {
     alignItems: 'flex-start',

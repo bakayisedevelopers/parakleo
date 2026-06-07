@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { EmptyState } from '../ui/States';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Card } from '../../components/ui/Card';
+import { EmptyState } from '../../components/ui/States';
 import { colors } from '../../theme/colors';
 
 function getNotificationTime(value) {
@@ -22,79 +23,61 @@ function getNotificationTime(value) {
   }).format(date);
 }
 
-export function NotificationCenterModal({
-  visible,
-  notifications,
-  isLoading,
+export function NotificationsScreen({
+  notifications = [],
+  isLoading = false,
   unreadCount = 0,
-  onClose,
   onMarkAllRead,
   onOpenNotification,
-  onOpenRequest,
-  onOpenSession,
 }) {
-  const handleOpen = (notification) => {
-    if (onOpenNotification) {
-      onOpenNotification(notification);
-      return;
-    }
-
-    if (notification?.sessionId) {
-      onOpenSession?.(notification.sessionId);
-      return;
-    }
-
-    if (notification?.requestId) {
-      onOpenRequest?.(notification.requestId);
-    }
-  };
-
   return (
-    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Pressable accessibilityRole="button" onPress={onClose} style={styles.scrim} />
-        <View style={styles.sheet}>
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.kicker}>In-app notifications</Text>
-              <Text style={styles.title}>Notifications</Text>
-              <Text style={styles.subtitle}>
-                {unreadCount ? `${unreadCount} unread update${unreadCount === 1 ? '' : 's'}.` : 'Everything is up to date.'}
-              </Text>
-            </View>
-            <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeButton}>
-              <Ionicons name="close" size={20} color={colors.text} />
-            </Pressable>
+    <View style={styles.page}>
+      <View style={styles.pageGlowTop} />
+      <View style={styles.pageGlowBottom} />
+      <View style={styles.wrap}>
+        <Card style={styles.heroCard}>
+          <View style={styles.heroGlowTopLeft} />
+          <View style={styles.heroGlowBottomRight} />
+          <View style={styles.heroContent}>
+            <Text style={styles.kicker}>In-app notifications</Text>
+            <Text style={styles.title}>Notifications</Text>
+            <Text style={styles.subtitle}>
+              {unreadCount ? `${unreadCount} unread update${unreadCount === 1 ? '' : 's'}.` : 'Everything is up to date.'}
+            </Text>
           </View>
+        </Card>
 
-          <View style={styles.actionsPanel}>
-            <Pressable accessibilityRole="button" onPress={onMarkAllRead} style={styles.primaryAction}>
-              <Ionicons name="checkmark-done" size={16} color="#ffffff" />
-              <Text style={styles.primaryActionText}>Mark all read</Text>
-            </Pressable>
-            <Text style={styles.helperCopy}>Real-time request, session, and payment updates appear here.</Text>
-          </View>
+        <Card style={styles.actionsCard}>
+          <Pressable accessibilityRole="button" onPress={onMarkAllRead} style={styles.primaryAction}>
+            <Ionicons name="checkmark-done" size={16} color="#ffffff" />
+            <Text style={styles.primaryActionText}>Mark all read</Text>
+          </Pressable>
+          <Text style={styles.helperCopy}>Real-time request, session, and payment updates appear here.</Text>
+        </Card>
 
+        <Card style={styles.listCard}>
           {isLoading ? (
             <EmptyState title="Loading notifications" message="Listening for request, session, and tutor updates." />
           ) : notifications.length ? (
-            <ScrollView contentContainerStyle={styles.list}>
+            <ScrollView contentContainerStyle={styles.list} nestedScrollEnabled>
               {notifications.map((notification) => (
                 <Pressable
                   accessibilityRole="button"
                   key={notification.id}
                   disabled={!notification?.requestId && !notification?.sessionId && !notification?.targetPath}
-                  onPress={() => handleOpen(notification)}
+                  onPress={() => onOpenNotification?.(notification)}
                   style={[
                     styles.card,
                     notification?.read ? styles.cardRead : styles.cardUnread,
                   ]}
                 >
                   <View style={styles.cardRow}>
-                    <View style={[
-                      styles.cardIconWrap,
-                      notification?.read ? styles.cardIconWrapRead : styles.cardIconWrapUnread,
-                    ]}>
+                    <View
+                      style={[
+                        styles.cardIconWrap,
+                        notification?.read ? styles.cardIconWrapRead : styles.cardIconWrapUnread,
+                      ]}
+                    >
                       <Ionicons
                         name={notification?.read ? 'checkmark-done' : 'notifications'}
                         size={16}
@@ -131,84 +114,94 @@ export function NotificationCenterModal({
           ) : (
             <EmptyState title="No notifications yet" message="Realtime updates appear here." />
           )}
-        </View>
+        </Card>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  page: {
+    backgroundColor: '#f8fafc',
     flex: 1,
   },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(24,24,27,0.30)',
-  },
-  sheet: {
+  pageGlowTop: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderRadius: 180,
+    height: 260,
     position: 'absolute',
-    top: 12,
-    right: 12,
-    bottom: 12,
-    width: '92%',
-    maxWidth: 420,
-    backgroundColor: colors.surface,
-    borderRadius: 32,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
+    right: -110,
+    top: 24,
+    width: 260,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+  pageGlowBottom: {
+    backgroundColor: 'rgba(59,130,246,0.10)',
+    borderRadius: 220,
+    bottom: 80,
+    height: 300,
+    left: -140,
+    position: 'absolute',
+    width: 300,
+  },
+  wrap: {
     gap: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingBottom: 12,
+  },
+  heroCard: {
+    overflow: 'hidden',
+    padding: 0,
+  },
+  heroGlowTopLeft: {
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    borderRadius: 220,
+    height: 220,
+    left: -70,
+    position: 'absolute',
+    top: -40,
+    width: 220,
+  },
+  heroGlowBottomRight: {
+    backgroundColor: 'rgba(59,130,246,0.14)',
+    borderRadius: 200,
+    bottom: -70,
+    height: 220,
+    position: 'absolute',
+    right: -80,
+    width: 220,
+  },
+  heroContent: {
+    gap: 8,
+    padding: 18,
   },
   kicker: {
-    color: colors.brand,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 2.6,
+    color: 'rgba(16,185,129,0.8)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 2.5,
     textTransform: 'uppercase',
   },
   title: {
-    color: colors.text,
-    fontSize: 24,
+    color: '#0f172a',
+    fontSize: 30,
     fontWeight: '900',
+    letterSpacing: -0.8,
+    lineHeight: 34,
   },
   subtitle: {
     color: colors.muted,
     fontSize: 14,
-    marginTop: 4,
+    lineHeight: 20,
   },
-  closeButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  actionsPanel: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+  actionsCard: {
     gap: 10,
   },
   primaryAction: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    alignSelf: 'flex-start',
     backgroundColor: colors.brand,
     borderRadius: 16,
+    flexDirection: 'row',
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -222,40 +215,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  listCard: {
+    gap: 12,
+  },
   list: {
     gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
   },
   card: {
     borderRadius: 16,
     padding: 12,
   },
   cardRead: {
-    borderWidth: 1,
-    borderColor: colors.border,
     backgroundColor: colors.surface,
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
+    borderColor: colors.border,
+    borderWidth: 1,
     elevation: 1,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
   },
   cardUnread: {
     backgroundColor: 'rgba(16,185,129,0.05)',
   },
   cardRow: {
-    flexDirection: 'row',
     alignItems: 'flex-start',
+    flexDirection: 'row',
     gap: 12,
   },
   cardIconWrap: {
-    marginTop: 2,
-    height: 40,
-    width: 40,
-    borderRadius: 16,
     alignItems: 'center',
+    borderRadius: 16,
+    height: 40,
     justifyContent: 'center',
+    marginTop: 2,
+    width: 40,
   },
   cardIconWrapRead: {
     backgroundColor: '#f4f4f5',
@@ -268,10 +262,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   cardTopRow: {
-    flexDirection: 'row',
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
     gap: 8,
+    justifyContent: 'space-between',
   },
   cardTextWrap: {
     flex: 1,
@@ -284,12 +278,12 @@ const styles = StyleSheet.create({
   cardMessage: {
     color: colors.muted,
     fontSize: 14,
-    marginTop: 4,
     lineHeight: 20,
+    marginTop: 4,
   },
   metaRow: {
-    flexDirection: 'row',
     alignItems: 'center',
+    flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 10,
@@ -297,8 +291,8 @@ const styles = StyleSheet.create({
   typePill: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderWidth: 1,
     borderRadius: 999,
+    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },

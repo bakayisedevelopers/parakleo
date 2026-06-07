@@ -2,18 +2,13 @@ import { getApp, getApps, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, inMemoryPersistence, initializeAuth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { connectStorageEmulator, getStorage } from 'firebase/storage';
+import {
+  FIREBASE_EMULATOR_HOST,
+  FIREBASE_PUBLIC_CONFIG,
+  USE_FIREBASE_EMULATORS,
+} from '../constants/runtimeConfig';
 
-const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-};
-
-const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
-const emulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '10.0.2.2';
+const firebaseConfig = FIREBASE_PUBLIC_CONFIG;
 const projectId = firebaseConfig.projectId || 'parakleo';
 let emulatorsConnected = false;
 let authInstance = null;
@@ -40,10 +35,10 @@ export function getFirebaseClients() {
   const db = getFirestore(app);
   const storage = getStorage(app);
 
-  if (useFirebaseEmulators && !emulatorsConnected) {
-    connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
-    connectFirestoreEmulator(db, emulatorHost, 8080);
-    connectStorageEmulator(storage, emulatorHost, 9199);
+  if (USE_FIREBASE_EMULATORS && !emulatorsConnected) {
+    connectAuthEmulator(auth, `http://${FIREBASE_EMULATOR_HOST}:9099`, { disableWarnings: true });
+    connectFirestoreEmulator(db, FIREBASE_EMULATOR_HOST, 8080);
+    connectStorageEmulator(storage, FIREBASE_EMULATOR_HOST, 9199);
     emulatorsConnected = true;
   }
 
@@ -51,8 +46,8 @@ export function getFirebaseClients() {
 }
 
 export function getFunctionEndpoint(functionName) {
-  if (useFirebaseEmulators) {
-    return `http://${emulatorHost}:5001/${projectId}/us-central1/${functionName}`;
+  if (USE_FIREBASE_EMULATORS) {
+    return `http://${FIREBASE_EMULATOR_HOST}:5001/${projectId}/us-central1/${functionName}`;
   }
 
   return `https://us-central1-${projectId}.cloudfunctions.net/${functionName}`;

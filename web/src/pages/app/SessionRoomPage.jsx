@@ -31,6 +31,7 @@ import { createAiLiveSessionController } from '../../services/aiLiveSessionServi
 import { fetchIceServers } from '../../services/iceServerService';
 import { debugLog } from '../../utils/devLogger';
 import { parseQuestionsFromExtraction, parseQuestionsFromGptExtraction } from '../../services/questionParsingService';
+import { uploadUserFile } from '../../services/storageService';
 import { prepareWhiteboardLayout } from '../../services/whiteboardPreparationService';
 
 const RATABLE_STATUSES = new Set([
@@ -137,7 +138,16 @@ function HiddenMediaMounts({ localVideoRef, remoteVideoRef, remoteScreenVideoRef
   );
 }
 
-function createExcalidrawTextElement(layoutItem, index) {
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to convert cropped image to a data URL.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function createExcalidrawTextElement(layoutItem, index, sceneKey = '') {
   const x = Number(layoutItem?.position?.x || 0);
   const y = Number(layoutItem?.position?.y || 0);
   const width = Math.max(220, Number(layoutItem?.width || 600));
@@ -147,6 +157,8 @@ function createExcalidrawTextElement(layoutItem, index) {
   const lineCount = Math.max(1, text.split('\n').length);
   const fontSize = 24;
   const lineHeight = 1.25;
+  const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
+  const safeIdSuffix = String(layoutItem?.questionId || index + 1).replace(/[^a-zA-Z0-9_-]+/g, '_');
   const estimatedHeight = Math.max(
     Number(layoutItem?.height || 0),
     Math.ceil(lineCount * fontSize * lineHeight),
@@ -156,7 +168,7 @@ function createExcalidrawTextElement(layoutItem, index) {
   const now = Date.now();
 
   return {
-    id: `parsed-question-${index + 1}`,
+    id: `parsed-question-${safeSceneKey ? `${safeSceneKey}-` : ''}${safeIdSuffix}`,
     type: 'text',
     x,
     y,
@@ -192,11 +204,109 @@ function createExcalidrawTextElement(layoutItem, index) {
   };
 }
 
-function mapLayoutToExcalidrawElements(layout = []) {
-  return (Array.isArray(layout) ? layout : [])
-    .filter((item) => item?.type === 'text')
-    .map((item, index) => createExcalidrawTextElement(item, index))
-    .filter(Boolean);
+function createExcalidrawImageElement(layoutItem, index, fileId, sceneKey = '') {
+  const x = Number(layoutItem?.position?.x || 0);
+  const y = Number(layoutItem?.position?.y || 0);
+  const width = Math.max(120, Number(layoutItem?.width || 320));
+  const height = Math.max(120, Number(layoutItem?.height || 220));
+  const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
+  const safeIdSuffix = String(layoutItem?.questionId || layoutItem?.imageId || index + 1).replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const seed = (Date.now() + (index * 104729)) % 2147483647;
+  const versionNonce = (Date.now() + (index * 9176)) % 2147483647;
+  const now = Date.now();
+
+  return {
+    id: `parsed-image-${safeSceneKey ? `${safeSceneKey}-` : ''}${safeIdSuffix}`,
+    type: 'image',
+    x,
+    y,
+    width,
+    height,
+    angle: 0,
+    strokeColor: '#1f2937',
+    backgroundColor: 'transparent',
+    fillStyle: 'hachure',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roughness: 0,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed,
+    version: 1,
+    versionNonce,
+    isDeleted: false,
+    boundElements: null,
+    updated: now,
+    link: null,
+    locked: false,
+    fileId,
+    status: 'saved',
+    scale: [1, 1],
+    crop: null,
+  };
+}
+
+async function resolveImageDataUrl(layoutItem = {}) {
+  const directDataUrl = String(layoutItem?.dataURL || layoutItem?.dataUrl || layoutItem?.src || layoutItem?.storageUrl || '').trim();
+  if (!directDataUrl) return '';
+  if (directDataUrl.startsWith('data:')) return directDataUrl;
+
+  const response = await fetch(directDataUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to load image asset (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  return blobToDataUrl(blob);
+}
+
+async function buildExcalidrawSceneFromLayout(layout = [], sceneKey = '') {
+  const elements = [];
+  const files = [];
+  const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
+
+  for (let index = 0; index < (Array.isArray(layout) ? layout.length : 0); index += 1) {
+    const item = layout[index];
+    if (item?.type === 'text') {
+      const textElement = createExcalidrawTextElement(item, index, safeSceneKey);
+      if (textElement) {
+        elements.push(textElement);
+      }
+      continue;
+    }
+
+    if (item?.type !== 'image') {
+      continue;
+    }
+
+    const fileIdBase = String(item?.questionId || item?.imageId || `image-${index + 1}`).replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const fileId = String(item?.fileId || `${safeSceneKey ? `${safeSceneKey}-` : ''}${fileIdBase}-file`);
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const dataURL = await resolveImageDataUrl(item);
+      if (!dataURL) {
+        continue;
+      }
+
+      files.push({
+        id: fileId,
+        dataURL,
+        mimeType: item?.mimeType || 'image/png',
+        created: Date.now(),
+        version: 1,
+      });
+      elements.push(createExcalidrawImageElement({ ...item, dataURL }, index, fileId, safeSceneKey));
+    } catch (error) {
+      debugLog('sessionRoom', '[whiteboardPreparation] image asset skipped.', {
+        imageId: item?.imageId || item?.questionId || index + 1,
+        message: error?.message,
+      });
+    }
+  }
+
+  return { elements, files };
 }
 
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
@@ -353,7 +463,35 @@ function loadImageObject(src) {
   });
 }
 
-async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs = []) {
+function buildBoardPreparationSignature(boardPreparationSource = {}) {
+  const attachmentExtractions = Array.isArray(boardPreparationSource?.attachmentExtractions)
+    ? boardPreparationSource.attachmentExtractions
+    : [];
+  const documentAiExtraction = boardPreparationSource?.documentAiExtraction || {};
+
+  return JSON.stringify({
+    extractedTextLength: String(boardPreparationSource?.extractedText || '').length,
+    attachmentSummary: attachmentExtractions.map((entry) => ({
+      fileName: String(entry?.fileName || ''),
+      extractedLength: String(entry?.extractedText || entry?.text || '').length,
+      pageCount: Array.isArray(entry?.pages) ? entry.pages.length : 0,
+      imageCount: Array.isArray(entry?.extractedImages) ? entry.extractedImages.length : 0,
+    })),
+    ocrImageCount: Array.isArray(boardPreparationSource?.ocrImageReferences)
+      ? boardPreparationSource.ocrImageReferences.length
+      : 0,
+    documentAi: {
+      processedAt: documentAiExtraction?.processedAt || null,
+      extractionStatus: String(documentAiExtraction?.extractionStatus || ''),
+      textLength: Number(documentAiExtraction?.textLength || 0) || 0,
+      pageCount: Number(documentAiExtraction?.pageCount || 0) || 0,
+      questionsCount: Number(documentAiExtraction?.summary?.questionsCount || 0) || 0,
+      visualRegionCount: Number(documentAiExtraction?.summary?.visualRegionCount || 0) || 0,
+    },
+  });
+}
+
+async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs = [], options = {}) {
   if (!Array.isArray(parsedQuestions) || !parsedQuestions.length || !Array.isArray(imageRefs) || !imageRefs.length) {
     return parsedQuestions;
   }
@@ -377,6 +515,8 @@ async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs =
 
   const nextQuestions = [];
   let cropCounter = 0;
+  const boardKey = String(options?.boardKey || options?.sessionId || options?.requestId || options?.userId || 'board').trim();
+  const userId = String(options?.userId || '').trim();
   for (const question of parsedQuestions) {
     const nextQuestion = { ...question, images: Array.isArray(question?.images) ? [...question.images] : [] };
     const regions = Array.isArray(question?.visualRegions) ? question.visualRegions : [];
@@ -422,15 +562,45 @@ async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs =
       // eslint-disable-next-line no-await-in-loop
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) continue;
-      const cropUrl = URL.createObjectURL(blob);
+      // eslint-disable-next-line no-await-in-loop
+      const dataURL = await blobToDataUrl(blob);
+      const cropFileName = `${String(question?.questionId || `q_${cropCounter + 1}`)}-crop-${regionIndex + 1}.png`;
+      let cropUrl = dataURL;
+      let storagePath = '';
+      let downloadUrl = '';
+      if (userId) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const uploadResult = await uploadUserFile({
+            userId,
+            file: new File([blob], cropFileName, { type: 'image/png' }),
+            pathPrefix: 'whiteboard-crops',
+            objectPath: `whiteboard-crops/${boardKey || userId}/${String(question?.questionId || `q_${cropCounter + 1}`)}/${regionIndex + 1}.png`,
+          });
+          downloadUrl = uploadResult.downloadUrl || '';
+          cropUrl = downloadUrl || cropUrl;
+          storagePath = uploadResult.objectPath || '';
+        } catch (uploadError) {
+          debugLog('sessionRoom', '[whiteboardPreparation] cropped image upload failed; using inline data URL.', {
+            questionId: question?.questionId || null,
+            message: uploadError?.message,
+          });
+        }
+      }
       cropCounter += 1;
       nextQuestion.images.push({
         id: `${question?.questionId || 'q'}-crop-${cropCounter}`,
         src: cropUrl,
+        dataURL,
+        storageUrl: downloadUrl,
+        storagePath,
+        fileId: `${question?.questionId || 'q'}-crop-${cropCounter}-file`,
         mimeType: 'image/png',
         fileName: `${sourceEntry.fileName} crop ${regionIndex + 1}`,
         width: rect.width,
         height: rect.height,
+        questionId: String(question?.questionId || ''),
+        cropIndex: cropCounter,
       });
     }
 
@@ -488,7 +658,7 @@ export default function SessionRoomPage() {
   const hadSessionRef = useRef(false);
   const studentControlsTimeoutRef = useRef(null);
   const autoEndingRef = useRef(false);
-  const boardContentLoadedRef = useRef(false);
+  const lastInjectedBoardSignatureRef = useRef('');
   const boardEditorRef = useRef(null);
   const previousStatusRef = useRef(null);
   const [aiLiveStatus, setAiLiveStatus] = useState('idle');
@@ -501,6 +671,12 @@ export default function SessionRoomPage() {
   const [aiAudioState, setAiAudioState] = useState({ audioInActive: false, audioOutActive: false });
   const [aiLastError, setAiLastError] = useState('');
   const isAiSession = String(session?.sessionType || '').toLowerCase() === 'ai';
+  const boardPreparationSource = session?.boardPreparationSource || request?.boardPreparationSource || null;
+  const boardPreparationSignature = useMemo(
+    () => buildBoardPreparationSignature(boardPreparationSource),
+    [boardPreparationSource],
+  );
+  const latestBoardPreparationSignatureRef = useRef(boardPreparationSignature);
 
   const callSeconds = useLiveSeconds(session?.callStartedAt);
   const hasLiveRemoteScreenTrack = Boolean(
@@ -556,6 +732,10 @@ export default function SessionRoomPage() {
   }, [session]);
 
   useEffect(() => {
+    latestBoardPreparationSignatureRef.current = boardPreparationSignature;
+  }, [boardPreparationSignature]);
+
+  useEffect(() => {
     autoJoinAttemptedRef.current = false;
     autoScreenShareAttemptedRef.current = false;
     connectionStartRecordedRef.current = false;
@@ -568,7 +748,6 @@ export default function SessionRoomPage() {
     setGraceEndsAtMs(null);
     extensionPromptShownRef.current = false;
     autoEndingRef.current = false;
-    boardContentLoadedRef.current = false;
     previousStatusRef.current = session?.status || null;
     setIsRatingPromptOpen(false);
     setAiTranscript('');
@@ -577,6 +756,7 @@ export default function SessionRoomPage() {
     setAiAnswersByQuestion({});
     setAiQuestionOrder([]);
     setAiActiveQuestionId(null);
+    lastInjectedBoardSignatureRef.current = '';
   }, [session?.id, role]);
 
   const getSessionBoardSeedContent = useCallback(() => {
@@ -666,7 +846,10 @@ export default function SessionRoomPage() {
   }, [aiActiveQuestionId, aiParsedQuestions, isAiSession]);
 
   const injectPreparedBoardContent = useCallback(async (editor) => {
-    if (!editor || boardContentLoadedRef.current || role !== 'tutor') return;
+    if (!editor || role !== 'tutor') return;
+    const injectionSignature = boardPreparationSignature;
+    if (!injectionSignature) return;
+    if (lastInjectedBoardSignatureRef.current === injectionSignature) return;
 
     const {
       extractedText,
@@ -723,24 +906,44 @@ export default function SessionRoomPage() {
       } else if (!parsedQuestions.length) {
         parsedQuestions = fallbackParsedQuestions();
       }
-      parsedQuestions = await attachVisualCropUrlsToQuestions(parsedQuestions, hydratedImageReferences);
+
+      parsedQuestions = await attachVisualCropUrlsToQuestions(parsedQuestions, hydratedImageReferences, {
+        userId: user?.uid || '',
+        sessionId: session?.id || '',
+        requestId: session?.requestId || request?.id || '',
+        boardKey: session?.id || request?.id || user?.uid || '',
+      });
       const layout = prepareWhiteboardLayout(parsedQuestions);
-      const textElements = mapLayoutToExcalidrawElements(layout);
+      const scene = await buildExcalidrawSceneFromLayout(layout, injectionSignature);
+      if (latestBoardPreparationSignatureRef.current !== injectionSignature) {
+        return;
+      }
 
       debugLog('sessionRoom', '[whiteboardPreparation] parsing finished.', {
         sessionId: session?.id || null,
         questionCount: parsedQuestions.length,
         layoutCount: layout.length,
+        elementCount: scene.elements.length,
+        fileCount: scene.files.length,
       });
 
-      // Hydrate parsed question text into Excalidraw scene.
-      if (textElements.length && typeof editor?.setSceneElements === 'function') {
-        editor.setSceneElements(textElements);
+      if (typeof editor?.setSceneContent === 'function') {
+        editor.setSceneContent(scene);
+      } else {
+        if (typeof editor?.resetScene === 'function') {
+          editor.resetScene();
+        }
+        if (scene.files.length && typeof editor?.addFiles === 'function') {
+          editor.addFiles(scene.files);
+        }
+        if (typeof editor?.setSceneElements === 'function') {
+          editor.setSceneElements(scene.elements);
+        }
       }
       if (typeof editor?.refresh === 'function') {
         editor.refresh();
       }
-      boardContentLoadedRef.current = true;
+      lastInjectedBoardSignatureRef.current = injectionSignature;
       debugLog('sessionRoom', '[whiteboardPreparation] board initialized for Excalidraw.', {
         sessionId: session?.id || null,
       });
@@ -750,7 +953,7 @@ export default function SessionRoomPage() {
         message: error?.message,
       });
     }
-  }, [getSessionBoardSeedContent, role, session?.id]);
+  }, [boardPreparationSignature, getSessionBoardSeedContent, request?.id, role, session?.id, session?.requestId, user?.uid]);
 
   const handleBoardMount = useCallback((editor) => {
     boardEditorRef.current = editor;

@@ -17,6 +17,7 @@ import TutorSessionsPage from './pages/app/tutor/TutorSessionsPage';
 import TutorPaymentsPage from './pages/app/tutor/TutorPaymentsPage';
 import TutorAgreementPage from './pages/app/tutor/TutorAgreementPage';
 import ProfilePage from './pages/app/ProfilePage';
+import NotificationsPage from './pages/app/NotificationsPage';
 import OnboardingPage from './pages/app/OnboardingPage';
 import SessionRoomPage from './pages/app/SessionRoomPage';
 import AdminDashboardPage from './pages/app/admin/AdminDashboardPage';
@@ -55,6 +56,7 @@ export default function App() {
         >
           <Route index element={<AppHomeRedirect />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route path="session/:id" element={<SessionRoomPage />} />
 
