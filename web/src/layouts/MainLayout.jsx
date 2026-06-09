@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 
 export default function MainLayout({ children }) {
+  const footerLinkClassName = 'transition-colors hover:text-brand';
+
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <Navbar />
@@ -14,34 +16,29 @@ export default function MainLayout({ children }) {
             <div>
               <h4 className="mb-4 font-bold text-zinc-900">Product</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
-                <li><a href="#features" className="transition-colors hover:text-zinc-900">Features</a></li>
-                <li><Link to="/payment-pricing-policy" className="transition-colors hover:text-zinc-900">Pricing</Link></li>
-                <li><a href="#" className="transition-colors hover:text-zinc-900">Security</a></li>
+                <li><a href="/#features" className={footerLinkClassName}>Features</a></li>
               </ul>
             </div>
             <div>
               <h4 className="mb-4 font-bold text-zinc-900">Company</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
-                <li><a href="#" className="transition-colors hover:text-zinc-900">About</a></li>
-                <li><a href="#" className="transition-colors hover:text-zinc-900">Blog</a></li>
-                <li><a href="#" className="transition-colors hover:text-zinc-900">Careers</a></li>
+                <li><Link to="/about" className={footerLinkClassName}>About</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="mb-4 font-bold text-zinc-900">Legal</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
-                <li><Link to="/privacy-policy" className="transition-colors hover:text-zinc-900">Privacy Policy</Link></li>
-                <li><Link to="/terms" className="transition-colors hover:text-zinc-900">Terms of Service</Link></li>
-                <li><Link to="/payment-pricing-policy" className="transition-colors hover:text-zinc-900">Payment and Pricing</Link></li>
-                <li><Link to="/refund-policy" className="transition-colors hover:text-zinc-900">Refund Policy</Link></li>
-                <li><Link to="/data-voice-policy" className="transition-colors hover:text-zinc-900">Data and Voice Handling</Link></li>
+                <li><Link to="/privacy-policy" className={footerLinkClassName}>Privacy Policy</Link></li>
+                <li><Link to="/terms" className={footerLinkClassName}>Terms of Service</Link></li>
+                <li><Link to="/refund-policy" className={footerLinkClassName}>Refund Policy</Link></li>
+                <li><Link to="/data-voice-policy" className={footerLinkClassName}>Data and Voice Handling</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="mb-4 font-bold text-zinc-900">Connect</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
-                <li><a href="#" className="transition-colors hover:text-zinc-900">Twitter</a></li>
-                <li><a href="#" className="transition-colors hover:text-zinc-900">LinkedIn</a></li>
+                <li><span className="transition-colors hover:text-brand">YouTube</span></li>
+                <li><span className="transition-colors hover:text-brand">WhatsApp</span></li>
               </ul>
             </div>
           </div>

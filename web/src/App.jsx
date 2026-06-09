@@ -30,6 +30,7 @@ import TermsPage from './pages/TermsPage';
 import RefundPolicyPage from './pages/RefundPolicyPage';
 import PaymentPricingPolicyPage from './pages/PaymentPricingPolicyPage';
 import DataVoicePolicyPage from './pages/DataVoicePolicyPage';
+import AboutPage from './pages/AboutPage';
 import StudentRequestsPage from './pages/app/student/StudentRequestsPage';
 import StudentRequestDetailsPage from './pages/app/student/StudentRequestDetailsPage';
 
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/refund-policy" element={<RefundPolicyPage />} />
         <Route path="/payment-pricing-policy" element={<PaymentPricingPolicyPage />} />
         <Route path="/data-voice-policy" element={<DataVoicePolicyPage />} />
+        <Route path="/about" element={<AboutPage />} />
 
         <Route
           path="/app"

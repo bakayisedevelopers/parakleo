@@ -92,7 +92,7 @@ export default function ReferralShareButton({
     <div className={`rounded-[1.5rem] border border-emerald-200 bg-emerald-50/80 p-4 ${className}`}>
       {showIntro ? (
         <p className="text-sm font-bold leading-6 text-zinc-900">
-          Get free 30 minutes when a student joins and completes their profile using your link.
+          Get free 15 minutes when a student joins and completes their profile using your link.
         </p>
       ) : null}
       <div className={`${showIntro ? 'mt-3' : ''} rounded-2xl border border-emerald-200/70 bg-white/80 p-3`}>

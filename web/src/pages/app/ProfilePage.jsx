@@ -246,7 +246,7 @@ export default function ProfilePage() {
       ) : null}
 
       {(currentUser?.activeRole || currentUser?.role) === 'student' ? (
-        <SectionCard title="Free minutes & referrals" subtitle="Share your referral link to earn +30 free minutes when a referred student completes their student profile.">
+        <SectionCard title="Free minutes & referrals" subtitle="Share your referral link to earn +15 free minutes when a referred student completes their student profile.">
           <ReferralShareButton
             referralSlug={currentUser?.referralSlug || currentUser?.referralCode}
             freeMinutesRemaining={Number(currentUser?.freeMinutesRemaining || 0)}

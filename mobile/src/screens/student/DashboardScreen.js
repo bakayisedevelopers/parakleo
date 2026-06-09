@@ -90,7 +90,7 @@ export function DashboardScreen({ navigate }) {
         {referralLink && composerStage !== 'review' ? (
           <Card style={styles.referralCard}>
             <Text style={styles.referralIntro}>
-              Get free 30 minutes when a student joins and completes their profile using your link.
+              Get free 15 minutes when a student joins and completes their profile using your link.
             </Text>
             <View style={styles.referralLinkCard}>
               <Text style={styles.referralLabel}>Referral link</Text>

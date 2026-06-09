@@ -68,7 +68,7 @@ export default function SignupPage() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mt-8 sm:mx-auto sm:w-full sm:max-w-xl"
+        className="mx-4 mt-8 sm:mx-6 sm:w-full sm:max-w-xl md:mx-auto"
       >
         <div className="rounded-[32px] border border-brand/20 bg-white py-10 px-6 shadow-xl sm:px-12">
           <form className="space-y-6" onSubmit={handleSubmit}>

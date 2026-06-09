@@ -1512,7 +1512,11 @@ export default function StudentDashboardPage() {
                               type="button"
                               onClick={() => maybeAdvanceToReview('text')}
                               disabled={!topic.trim()}
-                              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                              className={`inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition ${
+                                topic.trim()
+                                  ? 'bg-emerald-500 text-white hover:bg-emerald-400'
+                                  : 'bg-zinc-300 text-zinc-700 disabled:cursor-not-allowed'
+                              }`}
                             >
                               Continue
                               <ChevronRight className="h-4 w-4" />

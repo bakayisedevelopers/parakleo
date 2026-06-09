@@ -6,7 +6,7 @@ export default function Navbar() {
   const { isAuthenticated, isInitializing } = useAuth();
 
   return (
-    <nav className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200 dark:border-zinc-800">
+    <nav className="sticky top-0 z-50 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
@@ -14,9 +14,11 @@ export default function Navbar() {
             <img
               src="/logo.png"
               alt="Parakleo logo"
-              className="h-10 w-10 rounded-xl object-cover ring-1 ring-zinc-200 transition-shadow group-hover:shadow-lg"
+              className="h-10 w-10 rounded-xl object-cover transition-transform group-hover:scale-[1.02]"
             />
-            <span className="text-xl font-black text-zinc-900 dark:text-white">Parakleo</span>
+            <span className="bg-gradient-to-r from-brand via-emerald-500 to-brand-dark bg-clip-text text-xl font-black text-transparent">
+              Parakleo
+            </span>
           </Link>
 
           {/* Navigation Links */}

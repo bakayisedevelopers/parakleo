@@ -926,10 +926,20 @@ export function StudentRequestComposer({
                       accessibilityRole="button"
                       disabled={!topic.trim() || isPreparingReview}
                       onPress={prepareReview}
-                      style={[styles.textContinueButton, (!topic.trim() || isPreparingReview) && styles.textContinueButtonDisabled]}
+                      style={[
+                        styles.textContinueButton,
+                        topic.trim() && !isPreparingReview ? styles.textContinueButtonEnabled : styles.textContinueButtonDisabled,
+                      ]}
                     >
-                      <Ionicons name="arrow-forward" size={16} color="#0f172a" />
-                      <Text style={styles.textContinueLabel}>{isPreparingReview ? 'Preparing...' : 'Continue'}</Text>
+                      <Ionicons name="arrow-forward" size={16} color={topic.trim() && !isPreparingReview ? '#ffffff' : '#0f172a'} />
+                      <Text
+                        style={[
+                          styles.textContinueLabel,
+                          topic.trim() && !isPreparingReview ? styles.textContinueLabelEnabled : null,
+                        ]}
+                      >
+                        {isPreparingReview ? 'Preparing...' : 'Continue'}
+                      </Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1340,7 +1350,6 @@ const styles = StyleSheet.create({
   },
   textContinueButton: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderColor: colors.border,
     borderRadius: 14,
     borderWidth: 1,
@@ -1349,13 +1358,21 @@ const styles = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: 12,
   },
+  textContinueButtonEnabled: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
+  },
   textContinueButtonDisabled: {
+    backgroundColor: '#ffffff',
     opacity: 0.5,
   },
   textContinueLabel: {
     color: '#0f172a',
     fontSize: 13,
     fontWeight: '800',
+  },
+  textContinueLabelEnabled: {
+    color: '#ffffff',
   },
   reviewCard: {
     gap: 14,
