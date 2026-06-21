@@ -29,15 +29,14 @@ const {
   getGeminiFlashTextInputPrice,
   getGeminiFlashTextOutputPrice,
 } = require('./googleCloudPricing');
+const {
+  buildBookingFeePricing,
+  ensureMinimumCancellationCharge,
+} = require('./paymentPricing');
 const { classifySubjectLocally } = require('./extraction/localSubjectClassifier');
 const { detectTopicsLocally } = require('./extraction/localTopicClassifier');
 const { estimateMinutesLocally, clampMinutes } = require('./extraction/minutesEstimator');
 const { classifyWithLocalMl } = require('./extraction/localMlClassifier');
-const { extractDocumentText } = require('./academicBrain/extraction');
-const { runAcademicBrainMini } = require('./academicBrain/engine');
-const { saveAcademicBrainFeedback } = require('./academicBrain/feedback');
-const { AcademicBrain, SUBJECTS } = require('./ai/AcademicBrain');
-const { TrainingPipeline } = require('./ai/TrainingPipeline');
 const {
   LEGAL_ENTITY_NAME,
   TUTOR_AGREEMENT_DOCUMENT_ID,
@@ -57,6 +56,10 @@ let aiSubjectExtractionModule = null;
 let geminiExtractionModule = null;
 let ocrProviderRouterModule = null;
 let academicBrainPromise = null;
+let academicBrainExtractionModule = null;
+let academicBrainEngineModule = null;
+let academicBrainFeedbackModule = null;
+let academicBrainAiModule = null;
 const ENABLE_ACADEMIC_BRAIN = String(process.env.ENABLE_ACADEMICBRAIN_MINI || 'true').toLowerCase() !== 'false';
 
 function getAiSubjectExtractionModule() {
@@ -80,8 +83,37 @@ function getOcrProviderRouterModule() {
   return ocrProviderRouterModule;
 }
 
+function getAcademicBrainExtractionModule() {
+  if (!academicBrainExtractionModule) {
+    academicBrainExtractionModule = require('./academicBrain/extraction');
+  }
+  return academicBrainExtractionModule;
+}
+
+function getAcademicBrainEngineModule() {
+  if (!academicBrainEngineModule) {
+    academicBrainEngineModule = require('./academicBrain/engine');
+  }
+  return academicBrainEngineModule;
+}
+
+function getAcademicBrainFeedbackModule() {
+  if (!academicBrainFeedbackModule) {
+    academicBrainFeedbackModule = require('./academicBrain/feedback');
+  }
+  return academicBrainFeedbackModule;
+}
+
+function getAcademicBrainAiModule() {
+  if (!academicBrainAiModule) {
+    academicBrainAiModule = require('./ai/AcademicBrain');
+  }
+  return academicBrainAiModule;
+}
+
 async function getAcademicBrain() {
   if (!academicBrainPromise) {
+    const { AcademicBrain } = getAcademicBrainAiModule();
     const brain = new AcademicBrain();
     academicBrainPromise = brain.init().then(() => brain);
   }
@@ -387,7 +419,6 @@ const ACTIVE_REQUEST_STATUSES = new Set([
 ]);
 let visionClient = null;
 const GEMINI_FLASH_EXTRACTION_SOURCE = 'gemini_2_5_flash_after_tutor_accept';
-const BOOKING_FEE_BUFFER_RATE = 0.10;
 
 function getVisionClient() {
   if (!visionClient) {
@@ -2472,6 +2503,73 @@ function toRand(value) {
   return Number(toMoney(value).toFixed(2));
 }
 
+function getEstimatedBookingFeeFromBoardPreparationSource(source = {}) {
+  const explicitPricing = source?.bookingFeePricing;
+  if (explicitPricing && Number.isFinite(Number(explicitPricing.totalZar))) {
+    return {
+      ...explicitPricing,
+      totalZar: toRand(explicitPricing.totalZar),
+    };
+  }
+
+  if (Number.isFinite(Number(source?.bookingFeePriceZar))) {
+    const totalZar = toRand(source.bookingFeePriceZar);
+    return {
+      currency: 'ZAR',
+      bookingFeeLabel: 'booking_fee',
+      subtotalZar: totalZar,
+      bufferAmountZar: 0,
+      processingSubtotalZar: totalZar,
+      paystackFeeZar: 0,
+      totalZar,
+    };
+  }
+
+  const attachmentExtractions = Array.isArray(source?.attachmentExtractions)
+    ? source.attachmentExtractions
+    : [];
+  const cloudVisionZar = toRand(attachmentExtractions.reduce((sum, item = {}) => {
+    const direct = Number(item?.cloudVisionPriceZar || 0);
+    const fromPricing = Number(item?.pricing?.cloudVision?.zarTotal || 0);
+    const next = direct || fromPricing;
+    return sum + (Number.isFinite(next) ? next : 0);
+  }, 0));
+  const geminiZar = toRand(
+    source?.documentAiExtraction?.pricing?.zarTotal
+      || source?.extractionPricing?.geminiFlash?.zarTotal
+      || source?.documentAiPriceZar
+      || 0,
+  );
+
+  return buildBookingFeePricing({ cloudVisionZar, geminiZar });
+}
+
+function getPayableSessionEstimate(pricingSnapshot = {}, boardPreparationSource = {}) {
+  const serviceAmount = toRand(
+    pricingSnapshot?.finalPrice
+      || pricingSnapshot?.finalPayablePrice
+      || pricingSnapshot?.totalAmount
+      || 0,
+  );
+  const bookingFeePricing = getEstimatedBookingFeeFromBoardPreparationSource(boardPreparationSource);
+  const bookingFeeAmount = toRand(
+    bookingFeePricing?.totalZar
+      || pricingSnapshot?.bookingFeeAmount
+      || 0,
+  );
+
+  return {
+    serviceAmount,
+    bookingFeeAmount,
+    totalAmount: toRand(serviceAmount + bookingFeeAmount),
+    bookingFeePricing,
+  };
+}
+
+function buildPaystackReference(prefix) {
+  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+}
+
 function getUsageMonthKey(value = Date.now()) {
   const date = new Date(value);
   const year = date.getUTCFullYear();
@@ -2680,23 +2778,6 @@ async function buildLiveGeminiFlashPricing({
   };
 }
 
-function buildBookingFeePricing({ cloudVisionZar = 0, geminiZar = 0, bufferRate = BOOKING_FEE_BUFFER_RATE } = {}) {
-  const cloudVisionAmount = toRand(cloudVisionZar);
-  const geminiAmount = toRand(geminiZar);
-  const subtotalZar = toRand(cloudVisionAmount + geminiAmount);
-  const bufferAmountZar = toRand(subtotalZar * Number(bufferRate || 0));
-  return {
-    currency: 'ZAR',
-    bookingFeeLabel: 'booking_fee',
-    cloudVisionZar: cloudVisionAmount,
-    geminiZar: geminiAmount,
-    subtotalZar,
-    bufferRate: Number(bufferRate || 0),
-    bufferAmountZar,
-    totalZar: toRand(subtotalZar + bufferAmountZar),
-  };
-}
-
 function normalizeVertices(vertices = []) {
   const xs = [];
   const ys = [];
@@ -2867,7 +2948,7 @@ async function runVisionOcrOnBuffer(imageBuffer) {
 }
 
 async function runPdfVisionOcr(pdfBuffer) {
-  return extractDocumentText({
+  return getAcademicBrainExtractionModule().extractDocumentText({
     mimeType: 'application/pdf',
     imageBuffer: pdfBuffer,
     runVisionOcrOnBuffer,
@@ -4239,7 +4320,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
 
     const normalizedSupported = new Set((supportedSubjects || []).map((item) => String(item?.value || item || '').trim()).filter(Boolean));
     const academicBrain = ENABLE_ACADEMIC_BRAIN
-      ? runAcademicBrainMini({
+      ? getAcademicBrainEngineModule().runAcademicBrainMini({
         extractedText: inputText,
         ocrBlocks: Array.isArray(inputPayload?.ocrBlocks) ? inputPayload.ocrBlocks : [],
         country: String(inputPayload?.country || 'ZA'),
@@ -4356,7 +4437,7 @@ exports.classifySubject = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS] },
     });
 
     if (academicBrain) {
-      await saveAcademicBrainFeedback(db, {
+      await getAcademicBrainFeedbackModule().saveAcademicBrainFeedback(db, {
         userId: decoded.uid,
         role: 'student',
         country: String(inputPayload?.country || 'ZA'),
@@ -4461,7 +4542,7 @@ exports.saveAcademicBrainFeedback = onRequest({ cors: true }, async (req, res) =
 
   try {
     const feedback = req.body && typeof req.body === 'object' ? req.body : {};
-    const result = await saveAcademicBrainFeedback(db, {
+    const result = await getAcademicBrainFeedbackModule().saveAcademicBrainFeedback(db, {
       ...feedback,
       userId: decoded.uid,
     });
@@ -5329,6 +5410,201 @@ async function chargeAuthorizationWithPaystack({ paystackSecretKey, email, amoun
     ok: succeeded,
     reason: succeeded ? null : (chargePayload?.message || 'gateway_declined'),
     transactionId: chargeData?.id ? String(chargeData.id) : null,
+    amountCharged: succeeded ? toRand(amount) : 0,
+  };
+}
+
+async function reservePreauthorizationWithPaystack({
+  paystackSecretKey,
+  email,
+  amount,
+  authorizationCode,
+  reference,
+}) {
+  const payload = await callPaystackApi({
+    paystackSecretKey,
+    path: '/preauthorization/reserve_authorization',
+    method: 'POST',
+    body: {
+      email,
+      amount: Math.round(Number(amount || 0) * 100),
+      authorization_code: authorizationCode,
+      currency: 'ZAR',
+      ...(reference ? { reference } : {}),
+    },
+  });
+  const data = payload?.data || {};
+
+  return {
+    reference: String(data.reference || reference || ''),
+    amountAuthorized: toRand(Number(data.amount || 0) / 100),
+    expiresAt: data.expiry_date || null,
+    status: String(data.status || 'authorized').toLowerCase(),
+    transactionId: data.id ? String(data.id) : null,
+  };
+}
+
+async function capturePreauthorizationWithPaystack({
+  paystackSecretKey,
+  reference,
+  amount,
+}) {
+  const payload = await callPaystackApi({
+    paystackSecretKey,
+    path: '/preauthorization/capture',
+    method: 'POST',
+    body: {
+      reference,
+      currency: 'ZAR',
+      amount: Math.round(Number(amount || 0) * 100),
+    },
+  });
+  const data = payload?.data || {};
+
+  return {
+    reference: String(data.reference || reference || ''),
+    amountCaptured: toRand(Number(data.amount || 0) / 100),
+    status: String(data.status || '').toLowerCase(),
+    transactionId: data.id ? String(data.id) : null,
+  };
+}
+
+async function releasePreauthorizationWithPaystack({
+  paystackSecretKey,
+  reference,
+}) {
+  const payload = await callPaystackApi({
+    paystackSecretKey,
+    path: '/preauthorization/release',
+    method: 'POST',
+    body: { reference },
+  });
+  const data = payload?.data || {};
+
+  return {
+    reference: String(data.reference || reference || ''),
+    status: String(data.status || 'released').toLowerCase(),
+  };
+}
+
+async function settlePaystackAuthorization({
+  paystackSecretKey,
+  email,
+  totalAmount,
+  authorizationCode,
+  paymentHold,
+}) {
+  const targetAmount = toRand(totalAmount);
+  const holdReference = String(paymentHold?.reference || '');
+  const holdStatus = String(paymentHold?.status || '').toLowerCase();
+  const holdAmount = toRand(paymentHold?.amountAuthorized || paymentHold?.authorizedAmount || 0);
+
+  if (!targetAmount) {
+    if (holdReference && holdStatus === 'authorized') {
+      const release = await releasePreauthorizationWithPaystack({
+        paystackSecretKey,
+        reference: holdReference,
+      });
+      return {
+        ok: true,
+        reason: null,
+        transactionId: null,
+        paidAmount: 0,
+        unpaidAmount: 0,
+        paymentHold: {
+          ...(paymentHold || {}),
+          reference: holdReference,
+          status: release.status || 'released',
+          releasedAt: new Date().toISOString(),
+          releasedReason: 'no_amount_due',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      reason: null,
+      transactionId: null,
+      paidAmount: 0,
+      unpaidAmount: 0,
+      paymentHold: paymentHold || null,
+    };
+  }
+
+  if (holdReference && holdStatus === 'authorized' && holdAmount > 0) {
+    const captureAmount = toRand(Math.min(targetAmount, holdAmount));
+    let capturedAmount = 0;
+    let captureTransactionId = null;
+
+    if (captureAmount > 0) {
+      const capture = await capturePreauthorizationWithPaystack({
+        paystackSecretKey,
+        reference: holdReference,
+        amount: captureAmount,
+      });
+      capturedAmount = capture.amountCaptured;
+      captureTransactionId = capture.transactionId || null;
+    }
+
+    const remainingAmount = toRand(Math.max(0, targetAmount - capturedAmount));
+    if (remainingAmount > 0) {
+      const extraCharge = await chargeAuthorizationWithPaystack({
+        paystackSecretKey,
+        email,
+        amount: remainingAmount,
+        authorizationCode,
+      });
+      const paidAmount = toRand(capturedAmount + (extraCharge.ok ? remainingAmount : 0));
+      return {
+        ok: extraCharge.ok,
+        reason: extraCharge.ok ? null : extraCharge.reason,
+        transactionId: extraCharge.transactionId || captureTransactionId,
+        paidAmount,
+        unpaidAmount: toRand(Math.max(0, targetAmount - paidAmount)),
+        paymentHold: {
+          ...(paymentHold || {}),
+          reference: holdReference,
+          status: 'captured',
+          capturedAt: new Date().toISOString(),
+          capturedAmount: capturedAmount,
+          additionalChargeAmount: extraCharge.ok ? remainingAmount : 0,
+          additionalChargeTransactionId: extraCharge.transactionId || null,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      reason: null,
+      transactionId: captureTransactionId,
+      paidAmount: capturedAmount,
+      unpaidAmount: 0,
+      paymentHold: {
+        ...(paymentHold || {}),
+        reference: holdReference,
+        status: 'captured',
+        capturedAt: new Date().toISOString(),
+        capturedAmount,
+        additionalChargeAmount: 0,
+        additionalChargeTransactionId: null,
+      },
+    };
+  }
+
+  const charge = await chargeAuthorizationWithPaystack({
+    paystackSecretKey,
+    email,
+    amount: targetAmount,
+    authorizationCode,
+  });
+
+  return {
+    ok: charge.ok,
+    reason: charge.reason,
+    transactionId: charge.transactionId || null,
+    paidAmount: charge.ok ? targetAmount : 0,
+    unpaidAmount: charge.ok ? 0 : targetAmount,
+    paymentHold: paymentHold || null,
   };
 }
 
@@ -5469,6 +5745,266 @@ async function initiatePaystackTransfer({ paystackSecretKey, amount, recipientCo
   return payload?.data || {};
 }
 
+exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed.' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const body = req.body || {};
+  const studentId = String(body.studentId || '').trim();
+  if (!studentId || studentId !== decoded.uid) {
+    res.status(400).json({ success: false, message: 'Invalid student ID supplied.' });
+    return;
+  }
+
+  const selectedCardId = String(body.selectedCardId || '').trim();
+  const subject = String(body.subject || 'Mathematics').trim() || 'Mathematics';
+  const topic = String(body.topic || subject).trim() || subject;
+  const pricingSnapshot = body.pricingSnapshot || null;
+  const boardPreparationSource = body.boardPreparationSource || null;
+  const durationMinutes = Math.max(1, Math.floor(Number(body.durationMinutes || 10)));
+  const meetingProviderPreference = String(body.meetingProviderPreference || 'any').trim() || 'any';
+  const attachments = Array.isArray(body.attachments)
+    ? body.attachments
+    : (body.attachment ? [body.attachment] : []);
+
+  const requestBody = {
+    ...body,
+    subject,
+    topic,
+    durationMinutes,
+    pricingSnapshot,
+    pricingQuoteId: pricingSnapshot?.quoteId || null,
+    boardPreparationSource,
+    selectedCardId,
+    mode: 'online',
+    meetingProviderPreference,
+    status: 'pending',
+    tutorId: null,
+    tutorName: null,
+    tutorEmail: null,
+    tutorQueue: [],
+    currentOfferTutorId: null,
+    offerExpiresAt: null,
+    attachment: body.attachment || null,
+    attachments,
+    imageAttachment: body.imageAttachment || '',
+    statusDetail: 'Request submitted. Initializing tutor matching.',
+    ratings: {
+      student: null,
+      tutor: null,
+    },
+    ratingStatus: {
+      student: 'pending',
+      tutor: 'pending',
+    },
+  };
+
+  const studentRef = db.collection('users').doc(decoded.uid);
+  const studentSnap = await studentRef.get();
+  if (!studentSnap.exists) {
+    res.status(404).json({ success: false, message: 'Student profile not found.' });
+    return;
+  }
+
+  const studentData = studentSnap.data() || {};
+  const paymentMethods = Array.isArray(studentData.paymentMethods) ? studentData.paymentMethods : [];
+  const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
+    || paymentMethods.find((card) => card.isDefault)
+    || paymentMethods[0]
+    || null;
+
+  const payableEstimate = getPayableSessionEstimate(pricingSnapshot || {}, boardPreparationSource || {});
+  let paymentHold = null;
+
+  if (payableEstimate.totalAmount > 0) {
+    if (!selectedCard?.paystackAuthorizationCode) {
+      res.status(400).json({
+        success: false,
+        message: 'Select a saved card before confirming this request.',
+      });
+      return;
+    }
+
+    let paymentsSecrets;
+    try {
+      paymentsSecrets = getPaymentsSecrets();
+    } catch (error) {
+      logger.error('Payment configuration is unavailable during class request submission.', {
+        uid: decoded.uid,
+        error: error.message,
+      });
+      res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
+      return;
+    }
+
+    try {
+      const reference = buildPaystackReference('preauth');
+      const reserved = await reservePreauthorizationWithPaystack({
+        paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+        email: String(studentData.email || decoded.email || body.studentEmail || '').trim(),
+        amount: payableEstimate.totalAmount,
+        authorizationCode: selectedCard.paystackAuthorizationCode || '',
+        reference,
+      });
+      paymentHold = {
+        reference: reserved.reference,
+        status: reserved.status || 'authorized',
+        amountAuthorized: reserved.amountAuthorized,
+        estimatedServiceAmount: payableEstimate.serviceAmount,
+        estimatedBookingFeeAmount: payableEstimate.bookingFeeAmount,
+        estimatedTotalAmount: payableEstimate.totalAmount,
+        createdAt: new Date().toISOString(),
+        expiresAt: reserved.expiresAt || null,
+        transactionId: reserved.transactionId || null,
+        selectedCardId: selectedCard.id || selectedCardId,
+        selectedCardLast4: selectedCard.last4 || null,
+      };
+    } catch (error) {
+      logger.warn('Class request preauthorization failed.', {
+        uid: decoded.uid,
+        amount: payableEstimate.totalAmount,
+        cardId: selectedCard?.id || null,
+        error: error.message,
+        status: error.status || null,
+      });
+      res.status(402).json({
+        success: false,
+        message: error.message || 'Card hold failed. Please use another card or contact your bank.',
+      });
+      return;
+    }
+  }
+
+  let requestRef = null;
+  try {
+    const existingSnap = await db.collection('classRequests')
+      .where('studentId', '==', decoded.uid)
+      .where('status', 'in', ['pending', 'matching', 'offered', 'no_tutor_available'])
+      .get();
+
+    await Promise.all(existingSnap.docs.map((item) => item.ref.set({
+      status: 'expired',
+      statusDetail: 'Previous request auto-expired by new request.',
+      currentOfferTutorId: null,
+      offerExpiresAt: null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })));
+
+    requestRef = await db.collection('classRequests').add({
+      ...requestBody,
+      paymentHold,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await createUserNotification({
+      userId: decoded.uid,
+      title: 'Class request submitted',
+      message: `Your ${topic || subject} request is now matching tutors.`,
+      type: 'class_request',
+      requestId: requestRef.id,
+      targetPath: `/app/student/requests/${requestRef.id}`,
+      metadata: {
+        paymentHoldReference: paymentHold?.reference || null,
+        paymentHoldAmount: paymentHold?.amountAuthorized || 0,
+      },
+    });
+  } catch (error) {
+    if (paymentHold?.reference) {
+      try {
+        const paymentsSecrets = getPaymentsSecrets();
+        await releasePreauthorizationWithPaystack({
+          paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+          reference: paymentHold.reference,
+        });
+      } catch (releaseError) {
+        logger.error('Failed to release request preauthorization after submission error.', {
+          uid: decoded.uid,
+          reference: paymentHold.reference,
+          error: releaseError.message,
+        });
+      }
+    }
+
+    logger.error('Class request submission failed.', {
+      uid: decoded.uid,
+      error: error.message,
+    });
+    res.status(500).json({ success: false, message: 'Unable to submit request right now.' });
+    return;
+  }
+
+  res.status(200).json({
+    success: true,
+    requestId: requestRef.id,
+    paymentHold,
+  });
+});
+
+exports.releaseRequestPreauthorization = onDocumentWritten('classRequests/{requestId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  if (!after) return;
+
+  const nextStatus = String(after.status || '').toLowerCase();
+  if (!['canceled', 'expired'].includes(nextStatus)) return;
+
+  const paymentHold = after.paymentHold || null;
+  if (!paymentHold?.reference || String(paymentHold.status || '').toLowerCase() !== 'authorized') return;
+
+  const priorHoldStatus = String(before?.paymentHold?.status || '').toLowerCase();
+  if (priorHoldStatus === 'released') return;
+
+  let paymentsSecrets;
+  try {
+    paymentsSecrets = getPaymentsSecrets();
+  } catch (error) {
+    logger.error('Payment configuration is unavailable while releasing request preauthorization.', {
+      requestId: event.params.requestId,
+      error: error.message,
+    });
+    return;
+  }
+
+  try {
+    const release = await releasePreauthorizationWithPaystack({
+      paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+      reference: paymentHold.reference,
+    });
+
+    await event.data.after.ref.set({
+      paymentHold: {
+        ...paymentHold,
+        status: release.status || 'released',
+        releasedAt: new Date().toISOString(),
+        releasedReason: nextStatus,
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    logger.error('Request preauthorization release failed.', {
+      requestId: event.params.requestId,
+      reference: paymentHold.reference,
+      error: error.message,
+      status: error.status || null,
+    });
+  }
+});
+
 exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
@@ -5600,7 +6136,10 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       finalPrice: serviceAmountBeforeDiscount,
       discountSource: null,
     };
-  const totalAmount = toRand(freeMinuteDiscount.finalPrice + bookingFeeCharged);
+  const calculatedTotalAmount = toRand(freeMinuteDiscount.finalPrice + bookingFeeCharged);
+  const totalAmount = settlement.billingRule === 'booking_fee_only'
+    ? ensureMinimumCancellationCharge(calculatedTotalAmount)
+    : calculatedTotalAmount;
   const tutorPayoutBase = settlement.bookingFeeApplied ? 0 : serviceAmountBeforeDiscount;
   const tutorAmount = Number((tutorPayoutBase * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
   const platformAmount = Number((bookingFeeCharged + (tutorPayoutBase * BILLING_RULES.PLATFORM_FEE_RATE)).toFixed(2));
@@ -5610,9 +6149,17 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     || paymentMethods.find((card) => card.isDefault)
     || paymentMethods[0]
     || null;
+  const paymentHold = session.paymentHold || requestData.paymentHold || null;
 
-  let charge = { ok: true, reason: null, transactionId: 'free-minutes-covered' };
-  if (totalAmount > 0) {
+  let charge = {
+    ok: true,
+    reason: null,
+    transactionId: 'free-minutes-covered',
+    paidAmount: 0,
+    unpaidAmount: 0,
+    paymentHold,
+  };
+  if (totalAmount > 0 || (paymentHold?.reference && String(paymentHold?.status || '').toLowerCase() === 'authorized')) {
     let paymentsSecrets;
     try {
       paymentsSecrets = getPaymentsSecrets();
@@ -5625,19 +6172,20 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       return;
     }
 
-    charge = await chargeAuthorizationWithPaystack({
+    charge = await settlePaystackAuthorization({
       paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
       email: studentData.email || session.studentEmail || '',
-      amount: totalAmount,
+      totalAmount,
       authorizationCode: selectedCard?.paystackAuthorizationCode || '',
+      paymentHold,
     });
   }
 
-  const paymentStatus = charge.ok ? 'paid' : 'wallet_debt_recorded';
+  const paymentStatus = charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid';
   const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
-  const nextWalletBalance = charge.ok
+  const nextWalletBalance = charge.unpaidAmount <= 0
     ? Number(wallet.balance || 0)
-    : Number((Number(wallet.balance || 0) - totalAmount).toFixed(2));
+    : Number((Number(wallet.balance || 0) - charge.unpaidAmount).toFixed(2));
 
   const batch = db.batch();
   batch.set(sessionRef, {
@@ -5653,6 +6201,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
     bookingFeeAmount: bookingFeeCharged,
     bookingFeeCharged,
+    paymentHold: charge.paymentHold || paymentHold || null,
     requestedDurationMinutes: Number(selectedDurationMinutes || snapshot.durationMinutes || 0),
     selectedCardId,
     canceledBy: closureType === 'canceled_during' ? canceledBy : null,
@@ -5677,6 +6226,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       closureType,
       earlyCancellation: settlement.isEarlyCancellation,
       earlyCancelThresholdMinutes: settlement.earlyCancelThresholdMinutes,
+      minimumCancellationSurchargeApplied: settlement.billingRule === 'booking_fee_only' && totalAmount > calculatedTotalAmount,
     },
     payoutBreakdown: {
       platformFeeRate: BILLING_RULES.PLATFORM_FEE_RATE,
@@ -5697,6 +6247,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
         ? 'Session canceled. Billing completed.'
         : 'Session ended. Billing completed.',
       endedAt,
+      paymentHold: charge.paymentHold || paymentHold || null,
       canceledBy: closureType === 'canceled_during' ? canceledBy : null,
       canceledReason: closureType === 'canceled_during' ? canceledReason : null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -5711,7 +6262,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     }, { merge: true });
   }
 
-  if (!charge.ok) {
+  if (charge.unpaidAmount > 0) {
     batch.set(studentRef, {
       wallet: {
         ...wallet,
@@ -5727,10 +6278,10 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
 
   const updatedSnap = await sessionRef.get();
   const updatedSession = { id: updatedSnap.id, ...updatedSnap.data() };
-  const paymentTitle = charge.ok ? 'Payment completed' : 'Payment needs attention';
-  const paymentMessage = charge.ok
+  const paymentTitle = charge.unpaidAmount > 0 ? 'Payment needs attention' : 'Payment completed';
+  const paymentMessage = charge.unpaidAmount <= 0
     ? `Your ${updatedSession.topic || updatedSession.subject || 'class'} payment was completed.`
-    : `Your ${updatedSession.topic || updatedSession.subject || 'class'} payment was not completed. The balance was recorded in your wallet.`;
+    : `Your ${updatedSession.topic || updatedSession.subject || 'class'} payment was only partly completed. The remaining balance was recorded in your wallet.`;
 
   await Promise.all([
     createUserNotification({
@@ -5750,13 +6301,15 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       userId: updatedSession.studentId,
       title: paymentTitle,
       message: paymentMessage,
-      type: charge.ok ? 'payment_completed' : 'payment_failed',
+      type: charge.unpaidAmount > 0 ? 'payment_failed' : 'payment_completed',
       requestId: updatedSession.requestId || null,
       sessionId,
       targetPath: '/app/student/payment',
       metadata: {
         paymentStatus,
         amount: totalAmount,
+        paidAmount: charge.paidAmount || 0,
+        unpaidAmount: charge.unpaidAmount || 0,
         transactionId: charge.transactionId || null,
         reason: charge.reason || null,
       },
@@ -5830,7 +6383,13 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
   res.status(200).json({
     success: true,
     session: updatedSession,
-    charge: { ok: charge.ok, reason: charge.reason || null },
+    charge: {
+      ok: charge.ok,
+      reason: charge.reason || null,
+      paidAmount: charge.paidAmount || 0,
+      unpaidAmount: charge.unpaidAmount || 0,
+      transactionId: charge.transactionId || null,
+    },
   });
 });
 

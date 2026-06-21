@@ -23,6 +23,7 @@ const DEFAULT_RATING_STATUS = {
   student: 'pending',
   tutor: 'pending',
 };
+const SUBMIT_CLASS_REQUEST_ENDPOINT = import.meta.env.VITE_SUBMIT_CLASS_REQUEST_ENDPOINT || '/submit-class-request';
 
 let isUpdatingRequests = false;
 let isUpdatingSessions = false;
@@ -410,42 +411,27 @@ export async function createClassRequest(payload) {
     return request.id;
   }
 
-  const { db, firestoreModule } = clients;
-  const { addDoc, collection, serverTimestamp, query, where, getDocs, updateDoc } = firestoreModule;
+  const idToken = await clients.auth?.currentUser?.getIdToken?.();
+  if (!idToken) {
+    throw new Error('You must be signed in before submitting a class request.');
+  }
 
-  const existingSnap = await getDocs(
-    query(
-      collection(db, 'classRequests'),
-      where('studentId', '==', payload.studentId),
-      where('status', 'in', [REQUEST_STATUS.PENDING, REQUEST_STATUS.MATCHING, REQUEST_STATUS.OFFERED, REQUEST_STATUS.NO_TUTOR_AVAILABLE]),
-    ),
-  );
-
-  await Promise.all(existingSnap.docs.map((item) => updateDoc(item.ref, {
-    status: REQUEST_STATUS.EXPIRED,
-    statusDetail: 'Previous request auto-expired by new request.',
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
-    updatedAt: serverTimestamp(),
-  })));
-
-  const docRef = await addDoc(collection(db, 'classRequests'), {
-    ...requestBody,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  const response = await fetch(SUBMIT_CLASS_REQUEST_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
   });
 
-  await createNotification({
-    userId: payload.studentId,
-    title: 'Class request submitted',
-    message: `Your ${payload.topic || payload.subject} request is now matching tutors.`,
-    type: 'class_request',
-    requestId: docRef.id,
-    targetPath: `/app/student/requests/${docRef.id}`,
-  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.success === false || !result?.requestId) {
+    throw new Error(result?.message || 'Unable to submit request right now.');
+  }
 
-  debugLog('classRequestService', 'Class request created. Backend lifecycle trigger will process matching.', { requestId: docRef.id });
-  return docRef.id;
+  debugLog('classRequestService', 'Class request created through backend submission.', { requestId: result.requestId });
+  return result.requestId;
 }
 
 export function subscribeToStudentRequests(studentId, callback) {
@@ -850,6 +836,7 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
               durationMinutes: Number(requestData.durationMinutes || 10),
               pricingSnapshot: requestData.pricingSnapshot || null,
               pricingQuoteId: requestData.pricingQuoteId || requestData.pricingSnapshot?.quoteId || null,
+              paymentHold: requestData.paymentHold || null,
               meetingProvider: MEETING_PROVIDERS.WEBRTC,
               sessionType: 'human',
               sessionProvider: 'webrtc_human',
@@ -919,6 +906,7 @@ export async function handleTutorOfferResponse({ requestId, tutorId, tutorName, 
               durationMinutes: Number(requestData.durationMinutes || 10),
               pricingSnapshot: requestData.pricingSnapshot || null,
               pricingQuoteId: requestData.pricingQuoteId || requestData.pricingSnapshot?.quoteId || null,
+              paymentHold: requestData.paymentHold || null,
               whiteboardRoomId: requestData.whiteboardRoomId || requestId,
               requestAttachment: requestData.attachment || null,
               attachments: Array.isArray(requestData.attachments) ? requestData.attachments : (requestData.attachment ? [requestData.attachment] : []),

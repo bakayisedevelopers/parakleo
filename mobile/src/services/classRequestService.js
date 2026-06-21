@@ -1,5 +1,4 @@
 import {
-  addDoc,
   collection,
   doc,
   getDocs,
@@ -11,13 +10,11 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { getFirebaseClients } from '../firebase/config';
+import { getFirebaseClients, getFunctionEndpoint } from '../firebase/config';
 
-const ACTIVE_CREATE_BLOCKING_STATUSES = ['pending', 'matching', 'offered', 'no_tutor_available'];
+const SUBMIT_CLASS_REQUEST_ENDPOINT = getFunctionEndpoint('submitClassRequest');
 
 export async function createClassRequest(payload) {
-  const { db } = getFirebaseClients();
-
   const requestBody = {
     ...payload,
     subject: payload.subject || 'Mathematics',
@@ -48,43 +45,28 @@ export async function createClassRequest(payload) {
       tutor: 'pending',
     },
   };
+  const { auth } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken();
 
-  const existingSnap = await getDocs(
-    query(
-      collection(db, 'classRequests'),
-      where('studentId', '==', payload.studentId),
-      where('status', 'in', ACTIVE_CREATE_BLOCKING_STATUSES),
-    ),
-  );
+  if (!idToken) {
+    throw new Error('You must be signed in before submitting a class request.');
+  }
 
-  await Promise.all(existingSnap.docs.map((item) => updateDoc(item.ref, {
-    status: 'expired',
-    statusDetail: 'Previous request auto-expired by new request.',
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
-    updatedAt: serverTimestamp(),
-  })));
-
-  const docRef = await addDoc(collection(db, 'classRequests'), {
-    ...requestBody,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  const response = await fetch(SUBMIT_CLASS_REQUEST_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
   });
 
-  await Promise.all([
-    addDoc(collection(db, 'notifications'), {
-      userId: payload.studentId,
-      title: 'Class request submitted',
-      message: `Your ${payload.topic || payload.subject || 'class'} request is now matching tutors.`,
-      type: 'class_request',
-      requestId: docRef.id,
-      targetPath: `/app/student/requests/${docRef.id}`,
-      read: false,
-      createdAt: serverTimestamp(),
-    }),
-  ]);
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.success === false || !result?.requestId) {
+    throw new Error(result?.message || 'Unable to submit request right now.');
+  }
 
-  return docRef.id;
+  return result.requestId;
 }
 
 export function subscribeToStudentRequests(studentId, callback, onError) {

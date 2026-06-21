@@ -50,6 +50,10 @@
         "function": "getPricingQuote"
       },
       {
+        "source": "/submit-class-request",
+        "function": "submitClassRequest"
+      },
+      {
         "source": "/sync-student-growth",
         "function": "syncStudentGrowth"
       },
