@@ -731,21 +731,25 @@ function hasCompletedStudentProfile(user = {}) {
 function getStudentCompletionRequirements(user = {}) {
   const studentProfile = user?.studentProfile || {};
   const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
+  const subjects = Array.isArray(user?.subjects) ? user.subjects : [];
   const hasGrade = Boolean(studentProfile.grade);
   const hasCurriculum = Boolean(String(studentProfile.curriculum || '').trim());
   const hasDiscoverySource = Boolean(String(studentProfile.discoverySource || '').trim());
+  const hasSubjects = subjects.length > 0;
   const hasPaymentMethod = paymentMethods.length > 0;
 
   return {
     hasGrade,
     hasCurriculum,
     hasDiscoverySource,
+    hasSubjects,
     hasPaymentMethod,
     paymentMethodsCount: paymentMethods.length,
     complete: Boolean(
       hasGrade
         && hasCurriculum
         && hasDiscoverySource
+        && hasSubjects
         && hasPaymentMethod,
     ),
   };
@@ -755,6 +759,7 @@ function hasCompletedTutorProfile(user = {}) {
   const tutorProfile = user?.tutorProfile || {};
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+  const policeClearance = tutorProfile.policeClearance || {};
 
   return Boolean(
     isTutorAgreementCurrent(user)
@@ -763,6 +768,7 @@ function hasCompletedTutorProfile(user = {}) {
       && String(user?.selfieUrl || '').trim()
       && Array.isArray(tutorProfile.gradesToTutor)
       && tutorProfile.gradesToTutor.length > 0
+      && (policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt)
       && activeSubjects.length > 0
       && tutorProfile.payout?.bankName
       && tutorProfile.payout?.accountNumber
@@ -777,13 +783,15 @@ function hasCompletedTutorProfileWithoutAgreement(user = {}) {
   const tutorProfile = user?.tutorProfile || {};
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
+  const policeClearance = tutorProfile.policeClearance || {};
 
   return Boolean(
-    qualifiedSubjects.length > 0
+      qualifiedSubjects.length > 0
       && user?.selfieVerified
       && String(user?.selfieUrl || '').trim()
       && Array.isArray(tutorProfile.gradesToTutor)
       && tutorProfile.gradesToTutor.length > 0
+      && (policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt)
       && activeSubjects.length > 0
       && tutorProfile.payout?.bankName
       && tutorProfile.payout?.accountNumber
@@ -1117,7 +1125,7 @@ async function mergeTutorQualifiedSubjects({ uid, docId, qualifiedSubjects }) {
       subjects: nextActiveSubjects,
       tutorProfile: {
         ...(user.tutorProfile || {}),
-        verificationStatus: nextQualifiedSubjects.length ? 'verified' : 'pending',
+        verificationStatus: user?.tutorProfile?.verificationStatus || 'pending',
       },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -1578,7 +1586,7 @@ exports.contentExtractionForWhiteboard = onDocumentWritten({
 
     const documentAiExtraction = {
       provider: 'google-gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.5-pro',
       extractionMethod: 'gemini_flash_stream',
       extractionStatus: mergedText ? 'SUCCESS' : 'FAILED',
       extractedText: mergedText,
@@ -1687,13 +1695,23 @@ exports.trackTutorSessionStats = onDocumentWritten('sessions/{sessionId}', async
 
 async function processTutorDocumentRecord({ docId, data = {} }) {
   const docRef = db.collection('tutorDocuments').doc(docId);
+  const documentType = String(data.documentType || 'results').toLowerCase();
   console.debug('[tutorResultsAI] processing document record', {
     docId,
     uid: data.uid || '',
     filePath: data.filePath || '',
     status: data.status || '',
     contentType: data.contentType || '',
+    documentType,
   });
+
+  if (documentType !== 'results') {
+    console.debug('[tutorResultsAI] skipping non-results tutor document', {
+      docId,
+      documentType,
+    });
+    return;
+  }
 
   if (!data.uid || !data.filePath) {
     console.debug('[tutorResultsAI] missing uid or filePath', {
@@ -2023,6 +2041,7 @@ exports.retryTutorDocumentProcessing = onDocumentWritten({
   const before = event.data.before.exists ? event.data.before.data() : null;
   const after = event.data.after.exists ? event.data.after.data() : null;
   if (!before || !after) return;
+  if (String(after.documentType || 'results').toLowerCase() !== 'results') return;
   if (String(after.status || '').toUpperCase() !== 'UPLOADED') return;
   if (String(before.status || '').toUpperCase() === 'UPLOADED') return;
 
@@ -2752,7 +2771,7 @@ async function buildLiveGeminiFlashPricing({
   const totalZar = toRand(textInputChargeZar + imageInputChargeZar + outputChargeZar);
   return {
     provider: 'google-gemini',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.5-pro',
     operation: 'structured_question_extraction',
     currency: 'ZAR',
     livePrice: true,
@@ -3255,12 +3274,12 @@ exports.acceptTutorAgreement = onRequest({ cors: true, memory: '1GiB' }, async (
 
     const refreshedSnap = await db.collection('users').doc(decoded.uid).get();
     const refreshedUser = refreshedSnap.data() || {};
-    const shouldBeVerified = hasCompletedTutorProfile(refreshedUser);
+    const currentVerificationStatus = String(refreshedUser.tutorProfile?.verificationStatus || '').trim().toLowerCase() || 'pending';
 
     await db.collection('users').doc(decoded.uid).set({
       tutorProfile: {
         ...(refreshedUser.tutorProfile || {}),
-        verificationStatus: shouldBeVerified ? 'verified' : 'pending',
+        verificationStatus: currentVerificationStatus,
       },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -3305,7 +3324,7 @@ exports.acceptTutorAgreement = onRequest({ cors: true, memory: '1GiB' }, async (
       emailDelivery,
       tutorProfile: {
         ...(refreshedUser.tutorProfile || {}),
-        verificationStatus: shouldBeVerified ? 'verified' : 'pending',
+        verificationStatus: currentVerificationStatus,
       },
     });
   } catch (error) {
@@ -3580,8 +3599,8 @@ async function extractAttachmentGemini(req, res) {
     return;
   }
 
-  if (images.length > 5) {
-    res.status(400).json({ error: true, message: 'Please upload a maximum of 5 pages or images.' });
+  if (images.length > 10) {
+    res.status(400).json({ error: true, message: 'Please upload a maximum of 10 pages or images.' });
     return;
   }
 
@@ -3596,7 +3615,7 @@ async function extractAttachmentGemini(req, res) {
         result = await getGeminiExtractionModule().extractStudentAttachmentWithGemini25Flash({
           images,
           firebaseConfig: aiConfig,
-          model: 'gemini-2.5-flash',
+          model: aiConfig.GEMINI_MODEL || aiConfig.FIREBASE_AI_MODEL || 'gemini-2.5-pro',
         });
         break;
       } catch (e) {
@@ -3615,7 +3634,7 @@ async function extractAttachmentGemini(req, res) {
 
     logger.info('extract_attachment_ai_completed', {
       uid: decoded.uid,
-      model: 'gemini-2.5-flash',
+      model: aiConfig.GEMINI_MODEL || aiConfig.FIREBASE_AI_MODEL || 'gemini-2.5-pro',
       imagesSent: images.length,
       inputTokens: result.usage?.promptTokenCount,
       outputTokens: result.usage?.candidatesTokenCount,
@@ -3742,12 +3761,12 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS]
     res.status(400).json({ success: false, message: 'No images provided for extraction.' });
     return;
   }
-  if (images.length > 5) {
+  if (images.length > 10) {
     logger.warn('stream_attachment_ai_payload_too_large', {
       uid: decoded.uid,
       imageCount: images.length,
     });
-    res.status(400).json({ success: false, message: 'Please upload a maximum of 5 pages or images.' });
+    res.status(400).json({ success: false, message: 'Please upload a maximum of 10 pages or images.' });
     return;
   }
 
@@ -3756,7 +3775,7 @@ exports.streamAttachmentAi = onRequest({ cors: true, secrets: [PARAKLEO_AI_KEYS]
   let requestData = {};
   const startedAtMs = Date.now();
   const aiConfig = getAiSecrets();
-  const selectedModel = String(aiConfig.GEMINI_MODEL || aiConfig.FIREBASE_AI_MODEL || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+  const selectedModel = String(aiConfig.GEMINI_MODEL || aiConfig.FIREBASE_AI_MODEL || 'gemini-2.5-pro').trim() || 'gemini-2.5-pro';
   let classificationLatencyMs = null;
   let firstQuestionLatencyMs = null;
   let totalQuestions = 0;

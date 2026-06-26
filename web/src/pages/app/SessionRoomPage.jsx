@@ -13,13 +13,11 @@ import {
   X,
 } from 'lucide-react';
 import TldrawSdkEmbed from '../../components/app/TldrawSdkEmbed';
-import AiClassWhiteboard from '../../components/ai/AiClassWhiteboard';
 import { useAuth } from '../../hooks/useAuth';
 import { useClassRequest } from '../../hooks/useClassRequests';
 import { useStudentSessions, useTutorSessions } from '../../hooks/useSessions';
 import { SESSION_STATUS } from '../../constants/lifecycle';
 import {
-  dismissSessionRating,
   endSession,
   finalizeSessionClosure,
   joinSessionAsStudent,
@@ -39,6 +37,7 @@ const RATABLE_STATUSES = new Set([
   SESSION_STATUS.CANCELED,
   SESSION_STATUS.CANCELED_DURING,
 ]);
+const HANDLED_RATING_KEY = 'parakleo_handled_session_ratings';
 
 function useLiveSeconds(startTs) {
   const [tick, setTick] = useState(Date.now());
@@ -98,6 +97,26 @@ function StageBadge({ icon: Icon, children, tone = 'default', className = '' }) 
   );
 }
 
+function StatusIconPill({ icon: Icon, tone = 'default', label = '' }) {
+  const toneClasses = {
+    default: 'border-zinc-200 bg-white text-zinc-800',
+    info: 'border-sky-200 bg-sky-50 text-sky-700',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    warning: 'border-amber-200 bg-amber-50 text-amber-700',
+    danger: 'border-rose-200 bg-rose-50 text-rose-700',
+  };
+
+  return (
+    <div
+      aria-label={label}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-md backdrop-blur ${toneClasses[tone]}`}
+      title={label}
+    >
+      {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+    </div>
+  );
+}
+
 function RailButton({
   onClick,
   icon: Icon,
@@ -119,7 +138,7 @@ function RailButton({
       disabled={disabled}
       title={label}
       type="button"
-      className={`inline-flex items-center justify-center rounded-2xl border shadow-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
+      className={`inline-flex items-center justify-center rounded-full border shadow-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
         compact ? 'h-10 w-10 md:h-12 md:w-12' : 'h-12 w-12'
       } ${classes}`}
     >
@@ -147,25 +166,15 @@ function blobToDataUrl(blob) {
   });
 }
 
-function createExcalidrawTextElement(layoutItem, index, sceneKey = '') {
-  const x = Number(layoutItem?.position?.x || 0);
-  const y = Number(layoutItem?.position?.y || 0);
+function createTutoringCanvasTextElement(layoutItem, index, sceneKey = '') {
+  const x = Number(layoutItem?.x ?? layoutItem?.position?.x ?? 0);
+  const y = Number(layoutItem?.y ?? layoutItem?.position?.y ?? 0);
   const width = Math.max(220, Number(layoutItem?.width || 600));
-  const text = String(layoutItem?.content || '').trim();
+  const text = String(layoutItem?.text || layoutItem?.content || '').trim();
   if (!text) return null;
 
-  const lineCount = Math.max(1, text.split('\n').length);
-  const fontSize = 24;
-  const lineHeight = 1.25;
   const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
   const safeIdSuffix = String(layoutItem?.questionId || index + 1).replace(/[^a-zA-Z0-9_-]+/g, '_');
-  const estimatedHeight = Math.max(
-    Number(layoutItem?.height || 0),
-    Math.ceil(lineCount * fontSize * lineHeight),
-  );
-  const seed = (Date.now() + (index * 7919)) % 2147483647;
-  const versionNonce = (Date.now() + (index * 104729)) % 2147483647;
-  const now = Date.now();
 
   return {
     id: `parsed-question-${safeSceneKey ? `${safeSceneKey}-` : ''}${safeIdSuffix}`,
@@ -173,47 +182,22 @@ function createExcalidrawTextElement(layoutItem, index, sceneKey = '') {
     x,
     y,
     width,
-    height: estimatedHeight,
-    angle: 0,
-    strokeColor: '#1f2937',
-    backgroundColor: 'transparent',
-    fillStyle: 'hachure',
-    strokeWidth: 1,
-    strokeStyle: 'solid',
-    roughness: 0,
-    opacity: 100,
-    groupIds: [],
-    frameId: null,
-    roundness: null,
-    seed,
-    version: 1,
-    versionNonce,
-    isDeleted: false,
-    boundElements: null,
-    updated: now,
-    link: null,
-    locked: false,
-    fontSize,
-    fontFamily: 1,
-    textAlign: 'left',
-    verticalAlign: 'top',
-    containerId: null,
-    originalText: text,
-    lineHeight,
+    height: Math.max(96, Number(layoutItem?.height || 0)),
     text,
+    questionId: String(layoutItem?.questionId || ''),
+    pageNumber: Number.isFinite(Number(layoutItem?.pageNumber)) ? Number(layoutItem.pageNumber) : null,
   };
 }
 
-function createExcalidrawImageElement(layoutItem, index, fileId, sceneKey = '') {
-  const x = Number(layoutItem?.position?.x || 0);
-  const y = Number(layoutItem?.position?.y || 0);
+function createTutoringCanvasImageElement(layoutItem, index, sceneKey = '') {
+  const x = Number(layoutItem?.x ?? layoutItem?.position?.x ?? 0);
+  const y = Number(layoutItem?.y ?? layoutItem?.position?.y ?? 0);
   const width = Math.max(120, Number(layoutItem?.width || 320));
   const height = Math.max(120, Number(layoutItem?.height || 220));
   const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
   const safeIdSuffix = String(layoutItem?.questionId || layoutItem?.imageId || index + 1).replace(/[^a-zA-Z0-9_-]+/g, '_');
-  const seed = (Date.now() + (index * 104729)) % 2147483647;
-  const versionNonce = (Date.now() + (index * 9176)) % 2147483647;
-  const now = Date.now();
+  const src = String(layoutItem?.dataURL || layoutItem?.dataUrl || layoutItem?.src || layoutItem?.storageUrl || '').trim();
+  if (!src) return null;
 
   return {
     id: `parsed-image-${safeSceneKey ? `${safeSceneKey}-` : ''}${safeIdSuffix}`,
@@ -222,91 +206,35 @@ function createExcalidrawImageElement(layoutItem, index, fileId, sceneKey = '') 
     y,
     width,
     height,
-    angle: 0,
-    strokeColor: '#1f2937',
-    backgroundColor: 'transparent',
-    fillStyle: 'hachure',
-    strokeWidth: 1,
-    strokeStyle: 'solid',
-    roughness: 0,
-    opacity: 100,
-    groupIds: [],
-    frameId: null,
-    roundness: null,
-    seed,
-    version: 1,
-    versionNonce,
-    isDeleted: false,
-    boundElements: null,
-    updated: now,
-    link: null,
-    locked: false,
-    fileId,
-    status: 'saved',
-    scale: [1, 1],
-    crop: null,
+    src,
+    fileName: String(layoutItem?.fileName || ''),
+    mimeType: String(layoutItem?.mimeType || 'image/png'),
+    questionId: String(layoutItem?.questionId || ''),
+    pageNumber: Number.isFinite(Number(layoutItem?.pageNumber)) ? Number(layoutItem.pageNumber) : null,
   };
 }
 
-async function resolveImageDataUrl(layoutItem = {}) {
-  const directDataUrl = String(layoutItem?.dataURL || layoutItem?.dataUrl || layoutItem?.src || layoutItem?.storageUrl || '').trim();
-  if (!directDataUrl) return '';
-  if (directDataUrl.startsWith('data:')) return directDataUrl;
-
-  const response = await fetch(directDataUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to load image asset (${response.status}).`);
-  }
-
-  const blob = await response.blob();
-  return blobToDataUrl(blob);
-}
-
-async function buildExcalidrawSceneFromLayout(layout = [], sceneKey = '') {
+function mapLayoutToTutoringCanvasElements(layout = [], sceneKey = '') {
   const elements = [];
-  const files = [];
-  const safeSceneKey = String(sceneKey || '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32);
-
   for (let index = 0; index < (Array.isArray(layout) ? layout.length : 0); index += 1) {
     const item = layout[index];
     if (item?.type === 'text') {
-      const textElement = createExcalidrawTextElement(item, index, safeSceneKey);
+      const textElement = createTutoringCanvasTextElement(item, index, sceneKey);
       if (textElement) {
         elements.push(textElement);
       }
       continue;
     }
 
-    if (item?.type !== 'image') {
-      continue;
-    }
+    if (item?.type !== 'image') continue;
 
-    const fileIdBase = String(item?.questionId || item?.imageId || `image-${index + 1}`).replace(/[^a-zA-Z0-9_-]+/g, '_');
-    const fileId = String(item?.fileId || `${safeSceneKey ? `${safeSceneKey}-` : ''}${fileIdBase}-file`);
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const dataURL = await resolveImageDataUrl(item);
-      if (!dataURL) {
-        continue;
-      }
-
-      files.push({
-        id: fileId,
-        dataURL,
-        mimeType: item?.mimeType || 'image/png',
-        created: Date.now(),
-        version: 1,
-      });
-      elements.push(createExcalidrawImageElement({ ...item, dataURL }, index, fileId, safeSceneKey));
-    } catch (error) {
-      debugLog('sessionRoom', '[whiteboardPreparation] image asset skipped.', {
-        imageId: item?.imageId || item?.questionId || index + 1,
-        message: error?.message,
-      });
+    const imageElement = createTutoringCanvasImageElement(item, index, sceneKey);
+    if (imageElement) {
+      elements.push(imageElement);
     }
   }
 
-  return { elements, files };
+  return elements;
 }
 
 const PDFJS_CDN_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
@@ -537,10 +465,6 @@ async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs =
 
     for (let regionIndex = 0; regionIndex < regions.length; regionIndex += 1) {
       const region = regions[regionIndex];
-      const regionType = String(region?.type || '').toLowerCase();
-      if (!['diagram', 'table', 'graph', 'figure', 'image', 'formula', 'equation', 'other'].includes(regionType || 'other')) {
-        continue;
-      }
       const rect = getCropRectFromVisualRegion(region, sourceEntry);
       if (!rect) continue;
       const canvas = document.createElement('canvas');
@@ -601,6 +525,7 @@ async function attachVisualCropUrlsToQuestions(parsedQuestions = [], imageRefs =
         height: rect.height,
         questionId: String(question?.questionId || ''),
         cropIndex: cropCounter,
+        regionType: String(region?.type || 'other'),
       });
     }
 
@@ -624,6 +549,15 @@ export default function SessionRoomPage() {
   const [ratingForm, setRatingForm] = useState({ overall: '5' });
   const [isSaving, setIsSaving] = useState(false);
   const [isRatingPromptOpen, setIsRatingPromptOpen] = useState(false);
+  const [handledRatingSessionIds, setHandledRatingSessionIds] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return [];
+      const parsed = JSON.parse(window.sessionStorage.getItem(HANDLED_RATING_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter(Boolean).map((value) => String(value)) : [];
+    } catch {
+      return [];
+    }
+  });
   const [selectedCardId] = useState(
     user?.paymentMethods?.find((card) => card.isDefault)?.id
       || user?.paymentMethods?.[0]?.id
@@ -694,7 +628,8 @@ export default function SessionRoomPage() {
   const needsRating = Boolean(session?.id)
     && isRatingPromptOpen
     && RATABLE_STATUSES.has(session?.status)
-    && ratingStatus === 'pending';
+    && ratingStatus === 'pending'
+    && !handledRatingSessionIds.includes(session?.id);
   const forceRelayOnly = String(import.meta.env.VITE_WEBRTC_FORCE_RELAY_ONLY || '').toLowerCase() === 'true';
   const whiteboardRoom = session?.whiteboardRoomId || session?.requestId || session?.id;
   const graceRemaining = Math.max(0, Math.ceil(((session?.joinGraceEndsAt || 0) - Date.now()) / 1000));
@@ -724,6 +659,20 @@ export default function SessionRoomPage() {
 
     navigate('/app/tutor', { replace: true });
   }, [navigate, role]);
+
+  const markRatingHandled = useCallback((sessionId) => {
+    if (!sessionId) return;
+    setHandledRatingSessionIds((prev) => {
+      if (prev.includes(sessionId)) return prev;
+      const next = [...prev, sessionId];
+      try {
+        window.sessionStorage.setItem(HANDLED_RATING_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage write failures and keep the in-memory state.
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (session) {
@@ -913,8 +862,8 @@ export default function SessionRoomPage() {
         requestId: session?.requestId || request?.id || '',
         boardKey: session?.id || request?.id || user?.uid || '',
       });
-      const layout = prepareWhiteboardLayout(parsedQuestions);
-      const scene = await buildExcalidrawSceneFromLayout(layout, injectionSignature);
+      const layout = prepareWhiteboardLayout(parsedQuestions, { pageImages: hydratedImageReferences });
+      const sceneElements = mapLayoutToTutoringCanvasElements(layout, injectionSignature);
       if (latestBoardPreparationSignatureRef.current !== injectionSignature) {
         return;
       }
@@ -923,28 +872,21 @@ export default function SessionRoomPage() {
         sessionId: session?.id || null,
         questionCount: parsedQuestions.length,
         layoutCount: layout.length,
-        elementCount: scene.elements.length,
-        fileCount: scene.files.length,
+        elementCount: sceneElements.length,
       });
 
-      if (typeof editor?.setSceneContent === 'function') {
-        editor.setSceneContent(scene);
-      } else {
-        if (typeof editor?.resetScene === 'function') {
-          editor.resetScene();
-        }
-        if (scene.files.length && typeof editor?.addFiles === 'function') {
-          editor.addFiles(scene.files);
-        }
-        if (typeof editor?.setSceneElements === 'function') {
-          editor.setSceneElements(scene.elements);
-        }
+      if (typeof editor?.setSceneElements === 'function') {
+        editor.setSceneElements(sceneElements);
+      } else if (typeof editor?.setSceneContent === 'function') {
+        editor.setSceneContent({ elements: sceneElements });
+      } else if (typeof editor?.resetScene === 'function') {
+        editor.resetScene();
       }
       if (typeof editor?.refresh === 'function') {
         editor.refresh();
       }
       lastInjectedBoardSignatureRef.current = injectionSignature;
-      debugLog('sessionRoom', '[whiteboardPreparation] board initialized for Excalidraw.', {
+      debugLog('sessionRoom', '[whiteboardPreparation] board initialized for tutoring canvas.', {
         sessionId: session?.id || null,
       });
     } catch (error) {
@@ -957,7 +899,7 @@ export default function SessionRoomPage() {
 
   const handleBoardMount = useCallback((editor) => {
     boardEditorRef.current = editor;
-    debugLog('sessionRoom', '[whiteboardPreparation] excalidraw editor mounted.', {
+    debugLog('sessionRoom', '[whiteboardPreparation] tutoring canvas mounted.', {
       sessionId: session?.id || null,
       role,
     });
@@ -1134,23 +1076,9 @@ export default function SessionRoomPage() {
   }, []);
 
   useEffect(() => {
-    async function tryLockLandscape() {
-      if (!isMobileViewport) return;
-      try {
-        if (window.screen?.orientation?.lock) {
-          await window.screen.orientation.lock('landscape');
-        }
-      } catch {
-        // Some browsers ignore or reject this.
-      }
-    }
-
-    tryLockLandscape();
-  }, [isMobileViewport]);
-
-  useEffect(() => {
     if (role !== 'student') return;
     if (!showStudentControls) return;
+    if (isPortraitMobile) return;
 
     if (studentControlsTimeoutRef.current) {
       clearTimeout(studentControlsTimeoutRef.current);
@@ -1165,7 +1093,7 @@ export default function SessionRoomPage() {
         clearTimeout(studentControlsTimeoutRef.current);
       }
     };
-  }, [role, showStudentControls]);
+  }, [isPortraitMobile, role, showStudentControls]);
 
   const initializeCall = useCallback(async ({ shouldJoinStudent }) => {
     if (isAiSession) return;
@@ -1546,6 +1474,7 @@ export default function SessionRoomPage() {
       await submitSessionRating(session, role, {
         overall: Number(overall),
       });
+      markRatingHandled(session.id);
       setIsRatingPromptOpen(false);
       navigateAfterRatingFlow();
     } finally {
@@ -1555,14 +1484,8 @@ export default function SessionRoomPage() {
 
   const closeRatingPrompt = async () => {
     if (!session || isSaving) return;
-    setIsSaving(true);
-    try {
-      await dismissSessionRating(session, role);
-      setIsRatingPromptOpen(false);
-      navigateAfterRatingFlow();
-    } finally {
-      setIsSaving(false);
-    }
+    markRatingHandled(session.id);
+    setIsRatingPromptOpen(false);
   };
 
   const toggleMute = () => {
@@ -1597,13 +1520,15 @@ export default function SessionRoomPage() {
     }
 
     setShowStudentControls(true);
-    studentControlsTimeoutRef.current = setTimeout(() => {
-      setShowStudentControls(false);
-    }, 5000);
-  }, [role]);
+    if (!isPortraitMobile) {
+      studentControlsTimeoutRef.current = setTimeout(() => {
+        setShowStudentControls(false);
+      }, 5000);
+    }
+  }, [isPortraitMobile, role]);
 
   const controlsCompact = isMobileViewport;
-  const showStudentOverlay = role !== 'student' || showStudentControls;
+  const showStudentOverlay = role !== 'student' || showStudentControls || isPortraitMobile;
   const closeHref = role === 'tutor' ? '/app/tutor/sessions' : '/app';
 
   const renderTutorStageHeader = () => (
@@ -1621,7 +1546,9 @@ export default function SessionRoomPage() {
   const renderStudentStageHeader = () => (
     <div
       className={`absolute left-20 right-4 top-4 z-20 transition-opacity duration-200 ${
-        showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
+        isPortraitMobile
+          ? 'hidden'
+          : showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
       onPointerDown={(event) => {
         event.stopPropagation();
@@ -1665,6 +1592,124 @@ export default function SessionRoomPage() {
     </div>
   );
 
+  const renderStudentPortraitHeader = () => (
+    <div
+      className={`absolute inset-x-0 top-0 z-20 px-3 pt-3 transition-opacity duration-200 ${
+        showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
+      }`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        revealStudentControls();
+      }}
+    >
+      <div className="mx-auto max-w-[calc(100vw-1.5rem)] rounded-[30px] border border-zinc-200 bg-white/92 p-3 shadow-xl backdrop-blur-md">
+        <div className="flex items-center justify-between gap-2">
+          <StageBadge icon={Clock3} className="rounded-full px-3 py-2">
+            Call {formatDuration(callSeconds)}
+          </StageBadge>
+          <StageBadge icon={BadgeDollarSign} tone={isStudentBillableActive ? 'success' : 'warning'} className="rounded-full px-3 py-2">
+            Billable {formatDuration(billedSeconds)}
+          </StageBadge>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <StatusIconPill
+            icon={Wifi}
+            tone={connectionTone}
+            label={networkError ? 'Connection issue' : connectionMessage || 'Connecting'}
+          />
+          <StatusIconPill
+            icon={Presentation}
+            tone={networkError ? 'danger' : isRemoteScreenSharing ? 'success' : 'warning'}
+            label={networkError
+              ? 'Connection issue'
+              : isRemoteScreenSharing
+                ? 'Screen live'
+                : 'Waiting for tutor to share'}
+          />
+          {session.status === SESSION_STATUS.WAITING_STUDENT ? (
+            <StageBadge icon={Clock3} tone="warning" className="rounded-full px-3 py-2">
+              Join window {graceRemaining}s
+            </StageBadge>
+          ) : null}
+          {hasAcceptedExtension ? (
+            <StageBadge
+              icon={Clock3}
+              tone={extensionGraceRemainingSeconds > 0 ? 'success' : 'info'}
+              className="rounded-full px-3 py-2"
+            >
+              {extensionGraceRemainingSeconds > 0
+                ? `Grace period ${extensionGraceRemainingSeconds}s`
+                : 'Overtime billed at locked rate'}
+            </StageBadge>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStudentControlRail = (portrait = false) => (
+    <div
+      className={`absolute z-30 transition-opacity duration-200 ${
+        portrait
+          ? `inset-x-0 bottom-4 px-3 ${showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'}`
+          : `${role === 'student'
+              ? `right-4 ${!rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? 'bottom-20' : 'bottom-4'}`
+              : 'right-4 top-1/2 -translate-y-1/2'} ${role === 'student' ? (showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0') : 'opacity-100'}`
+      }`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        revealStudentControls();
+      }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div
+        className={`mx-auto flex items-center gap-2 border border-zinc-200 bg-white/95 p-2 shadow-xl backdrop-blur-md ${
+          portrait
+            ? 'max-w-[calc(100vw-1.5rem)] flex-row flex-wrap justify-center rounded-[32px]'
+            : 'flex-col rounded-[28px]'
+        }`}
+      >
+        <RailButton
+          onClick={toggleMute}
+          icon={isMuted ? MicOff : Mic}
+          label={isMuted ? 'Unmute' : 'Mute'}
+          disabled={isAiSession ? !aiLiveRef.current : !rtcRef.current}
+          active={!isMuted}
+          compact={controlsCompact}
+        />
+
+        {role === 'tutor' && !isAiSession ? (
+          <RailButton
+            onClick={shareScreen}
+            icon={MonitorUp}
+            label={isLocalScreenSharing ? 'Stop share' : 'Share screen'}
+            disabled={!rtcRef.current}
+            active={isLocalScreenSharing}
+            compact={controlsCompact}
+          />
+        ) : null}
+
+        <RailButton
+          onClick={cancelCurrentClass}
+          icon={X}
+          label="Cancel"
+          compact={controlsCompact}
+        />
+
+        {role === 'tutor' || role === 'student' ? (
+          <RailButton
+            onClick={endCurrentSession}
+            icon={PhoneOff}
+            label={role === 'student' ? 'End session' : 'End class'}
+            danger
+            compact={controlsCompact}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+
   const renderTutorStage = () => (
     <div className="relative h-full w-full overflow-hidden bg-white">
       {renderTutorStageHeader()}
@@ -1694,7 +1739,7 @@ export default function SessionRoomPage() {
         isRemoteScreenSharing,
         hasRemoteScreenStreamObj: Boolean(remoteScreenStreamObj),
       })}
-      {renderStudentStageHeader()}
+      {!isPortraitMobile ? renderStudentStageHeader() : null}
 
       {isRemoteScreenSharing ? (
         <video
@@ -1702,11 +1747,11 @@ export default function SessionRoomPage() {
           autoPlay
           playsInline
           muted={false}
-          className="h-full w-full object-contain"
+          className={`w-full object-contain ${isPortraitMobile ? 'h-auto max-h-[calc(100dvh-17rem)]' : 'h-full'}`}
         />
       ) : (
-        <div className="flex h-full items-center justify-center p-6">
-          <div className="max-w-md rounded-[28px] border border-zinc-200 bg-white p-6 text-center shadow-xl backdrop-blur-md">
+        <div className={`flex h-full items-center justify-center ${isPortraitMobile ? 'px-3 pt-32 pb-28' : 'p-6'}`}>
+          <div className={`text-center shadow-xl backdrop-blur-md ${isPortraitMobile ? 'max-w-[20rem] rounded-[30px] border border-zinc-200 bg-white p-5' : 'max-w-md rounded-[28px] border border-zinc-200 bg-white p-6'}`}>
             <Presentation className="mx-auto h-8 w-8 text-zinc-500" />
             <p className="mt-4 text-base font-semibold text-zinc-900">
               No screen sharing has started yet.
@@ -1730,13 +1775,14 @@ export default function SessionRoomPage() {
         </StageBadge>
         <StageBadge tone="info">Preparing whiteboard</StageBadge>
       </div>
-      <AiClassWhiteboard
-        boardPreparationSource={session?.boardPreparationSource || request?.boardPreparationSource || null}
-        transcript={aiTranscript}
-        boardActions={aiBoardActions}
-        activeQuestionId={aiActiveQuestionId}
-        answersByQuestion={aiAnswersByQuestion}
-      />
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="w-full max-w-2xl rounded-[28px] border border-zinc-200 bg-zinc-50 p-6 shadow-sm">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-zinc-500">AI session</p>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
+            {aiTranscript || 'The AI tutor transcript will appear here.'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 
@@ -1752,17 +1798,6 @@ export default function SessionRoomPage() {
 
   return (
     <div className="fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-white text-zinc-900">
-      {isPortraitMobile ? (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-white/85 p-6 backdrop-blur-sm md:hidden">
-          <div className="max-w-sm rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-xl">
-            <p className="text-lg font-semibold text-zinc-900">Rotate your device</p>
-            <p className="mt-2 text-sm text-zinc-600">
-              This tutoring room is best viewed in landscape so the board or shared screen can fill the page clearly.
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       <HiddenMediaMounts
         localVideoRef={localVideoRef}
         remoteVideoRef={remoteVideoRef}
@@ -1771,9 +1806,11 @@ export default function SessionRoomPage() {
 
       <div className="relative h-full w-full">
         {isAiSession ? renderAiStage() : (role === 'tutor' ? renderTutorStage() : renderStudentStage())}
+        {role === 'student' && !isAiSession && isPortraitMobile ? renderStudentPortraitHeader() : null}
+        {role === 'student' && !isAiSession && isPortraitMobile ? renderStudentControlRail(true) : null}
 
         <div
-          className={`absolute z-30 ${
+          className={`absolute z-30 ${isPortraitMobile ? 'hidden' : ''} ${
             role === 'student'
               ? `right-4 ${!rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? 'bottom-20' : 'bottom-4'}`
               : 'right-4 top-1/2 -translate-y-1/2'
@@ -1832,8 +1869,10 @@ export default function SessionRoomPage() {
 
         {role === 'student' && !isAiSession && !rtcRef.current && session.status === SESSION_STATUS.WAITING_STUDENT ? (
           <div
-            className={`absolute bottom-4 right-4 z-30 transition-opacity duration-200 ${
-              showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'
+            className={`absolute z-30 transition-opacity duration-200 ${
+              isPortraitMobile
+                ? `bottom-24 left-1/2 -translate-x-1/2 ${showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'}`
+                : `bottom-4 right-4 ${showStudentOverlay ? 'opacity-100' : 'pointer-events-none opacity-0'}`
             }`}
             onPointerDown={(event) => {
               event.stopPropagation();

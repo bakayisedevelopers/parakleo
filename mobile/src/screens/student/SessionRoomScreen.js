@@ -5,7 +5,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { StudentRtcSessionView } from '../../components/student/StudentRtcSessionView';
@@ -39,14 +38,11 @@ function useBillableSeconds(session, isBillableActive) {
 
 export function SessionRoomScreen({ route, navigate, goBack }) {
   const { user } = useAuth();
-  const { height, width } = useWindowDimensions();
-  const isPortraitMobile = height > width;
 
   const bridgeRef = useRef(null);
   const joinAttemptedRef = useRef(false);
   const extensionPromptShownRef = useRef(false);
   const autoEndingRef = useRef(false);
-  const terminalRedirectedRef = useRef(false);
 
   const sessionId = route?.params?.sessionId || '';
   const [session, setSession] = useState(null);
@@ -251,13 +247,7 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   }, [billedSeconds, hasAcceptedExtension, selectedDurationSeconds, session]);
 
   useEffect(() => () => {
-    if (bridgeRef.current) {
-      if (typeof bridgeRef.current.close === 'function') {
-        bridgeRef.current.close();
-      } else {
-        bridgeRef.current.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
-      }
-    }
+    closeRtcBridge();
   }, []);
 
   const handleBridgeMessage = (event) => {
@@ -304,25 +294,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
     bridgeRef.current?.injectJavaScript?.('window.ParakleoSessionBridge && window.ParakleoSessionBridge.close && window.ParakleoSessionBridge.close(); true;');
   };
 
-  const navigateToRequestStatus = useCallback((requestId) => {
-    if (requestId) {
-      navigate({ key: 'RequestStatus', params: { requestId, parentTab: 'Requests' } });
-      return;
-    }
-    goBack('Sessions');
-  }, [goBack, navigate]);
-
-  useEffect(() => {
-    if (!session?.id) return;
-    const normalizedStatus = String(session.status || '').toLowerCase();
-    if (!['completed', 'canceled', 'canceled_during'].includes(normalizedStatus)) return;
-    if (terminalRedirectedRef.current) return;
-
-    terminalRedirectedRef.current = true;
-    closeRtcBridge();
-    navigateToRequestStatus(session?.requestId || '');
-  }, [session?.id, session?.requestId, session?.status, navigateToRequestStatus]);
-
   if (loading) return <LoadingState label="Loading session room" />;
   if (error && !session) return <ErrorState message={error} />;
   if (!session) return <ErrorState title="Session not found" message="Session not found or no access." />;
@@ -330,17 +301,6 @@ export function SessionRoomScreen({ route, navigate, goBack }) {
   return (
     <View style={styles.safe}>
       <View style={styles.root}>
-        {isPortraitMobile ? (
-          <View style={styles.rotateOverlay}>
-            <Card style={styles.rotateCard}>
-              <Text style={styles.rotateTitle}>Rotate your device</Text>
-              <Text style={styles.rotateCopy}>
-                This tutoring room is best viewed in landscape so the board or shared screen can fill the page clearly.
-              </Text>
-            </Card>
-          </View>
-        ) : null}
-
         <Pressable style={styles.stage}>
           {['waiting_student', 'in_progress'].includes(String(session.status || '')) ? (
             isAiSession ? (
@@ -551,31 +511,6 @@ const styles = StyleSheet.create({
     color: '#be123c',
     fontSize: 12,
     fontWeight: '600',
-  },
-  rotateOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    justifyContent: 'center',
-    padding: 24,
-    zIndex: 70,
-  },
-  rotateCard: {
-    maxWidth: 360,
-    width: '100%',
-  },
-  rotateTitle: {
-    color: '#18181b',
-    fontSize: 20,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  rotateCopy: {
-    color: '#52525b',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
-    textAlign: 'center',
   },
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,

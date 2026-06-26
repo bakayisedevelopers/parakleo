@@ -25,6 +25,7 @@ import {
 import { subscribeToStudentSessions } from '../services/sessionService';
 import { colors } from '../theme/colors';
 import { RATABLE_SESSION_STATUSES } from '../utils/sessionStatus';
+import { getStudentOnboardingStatus } from '../utils/onboarding';
 
 const authScreens = {
   Home: HomeScreen,
@@ -139,6 +140,7 @@ export function RootNavigator() {
     const [nextSessionId] = ratingQueue;
     return sessions.find((session) => session.id === nextSessionId) || null;
   }, [ratingQueue, sessions]);
+  const onboardingStatus = useMemo(() => getStudentOnboardingStatus(user), [user]);
 
   useEffect(() => {
     let mounted = true;
@@ -209,6 +211,13 @@ export function RootNavigator() {
       () => setSessions([]),
     );
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (onboardingStatus.complete) return;
+    if (activeRoute.key === 'Onboarding') return;
+    setActiveRoute({ key: 'Onboarding', params: {} });
+  }, [activeRoute.key, onboardingStatus.complete, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;

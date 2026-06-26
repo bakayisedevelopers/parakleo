@@ -152,7 +152,7 @@ export function ProfileScreen({ navigate }) {
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>Complete profile</Text>
           <Text style={styles.copy}>Finish required onboarding details before requesting classes or teaching online.</Text>
-          <Button onPress={() => navigate('Onboarding')}>Open complete profile</Button>
+          <Button onPress={() => navigate('Onboarding')}>Resume onboarding</Button>
         </Card>
       ) : null}
 

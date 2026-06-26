@@ -44,6 +44,14 @@ export function buildDefaultStudentProfile({ uid, email, displayName }) {
       accountCompletionRewardProcessed: false,
       lastGrowthSyncedAt: null,
     },
+    onboardingProgress: {
+      student: {
+        currentStep: 'academic_profile',
+        completedSteps: [],
+        complete: false,
+        updatedAt: null,
+      },
+    },
   };
 }
 

@@ -5,9 +5,11 @@ export const STUDENT_PROFILE_STEPS = {
 
 export const TUTOR_PROFILE_STEPS = {
   AGREEMENT: 'agreement',
-  QUALIFICATIONS: 'qualifications',
-  PAYOUT: 'payout_setup',
   PROFILE: 'profile_setup',
+  QUALIFICATIONS: 'qualifications',
+  POLICE_CLEARANCE: 'police_clearance',
+  PAYOUT: 'payout_setup',
+  SUBJECTS: 'subject_selection',
 };
 
 export const TUTOR_VERIFICATION_STATUSES = {
@@ -22,9 +24,15 @@ export const BILLING_CURRENCY = 'ZAR';
 
 export function getStudentOnboardingStatus(user) {
   const studentProfile = user?.studentProfile || {};
-  const paymentMethods = user?.paymentMethods || [];
+  const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
+  const subjects = Array.isArray(user?.subjects) ? user.subjects : [];
 
-  const hasAcademic = Boolean(studentProfile.grade && studentProfile.curriculum && studentProfile.discoverySource);
+  const hasAcademic = Boolean(
+    studentProfile.grade
+      && studentProfile.curriculum
+      && studentProfile.discoverySource
+      && subjects.length,
+  );
   const hasPayment = paymentMethods.length > 0;
 
   if (hasAcademic && hasPayment) {
@@ -41,7 +49,7 @@ export function getStudentOnboardingStatus(user) {
       complete: false,
       step: STUDENT_PROFILE_STEPS.ACADEMIC,
       title: 'Complete student profile',
-      message: 'Add grade, curriculum, and discovery source to continue.',
+      message: 'Add grade, curriculum, discovery source, and subjects to continue.',
     };
   }
 
@@ -58,8 +66,19 @@ export function getTutorOnboardingStatus(user) {
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
   const hasCurrentAgreement = isTutorAgreementCurrent(user?.tutorAgreement || {});
+  const policeClearance = tutorProfile.policeClearance || {};
+  const hasProfile = Boolean(
+    user?.selfieVerified
+      && user?.selfieUrl
+      && Array.isArray(tutorProfile.gradesToTutor)
+      && tutorProfile.gradesToTutor.length,
+  );
   const hasQualification = qualifiedSubjects.length > 0;
-  const qualified = hasQualification;
+  const hasPoliceClearance = Boolean(
+    policeClearance.fileUrl
+      || policeClearance.documentId
+      || tutorProfile.policeClearanceSubmittedAt,
+  );
   const hasPayout = Boolean(
     tutorProfile.payout?.bankName
     && tutorProfile.payout?.accountNumber
@@ -68,7 +87,8 @@ export function getTutorOnboardingStatus(user) {
     && tutorProfile.payout?.paystackRecipientCode
     && (tutorProfile.payout?.verificationStatus === 'verified' || tutorProfile.payout?.verified === true),
   );
-  const hasProfile = Boolean(user?.selfieVerified && user?.selfieUrl && tutorProfile.gradesToTutor?.length && activeSubjects.length);
+  const hasSubjects = activeSubjects.length > 0;
+
   if (!hasCurrentAgreement) {
     return {
       complete: false,
@@ -78,22 +98,45 @@ export function getTutorOnboardingStatus(user) {
     };
   }
 
-  if (qualified && hasPayout && hasProfile) {
+  if (hasProfile && hasQualification && hasPoliceClearance && hasPayout && hasSubjects) {
+    const verificationStatus = String(tutorProfile.verificationStatus || TUTOR_VERIFICATION_STATUSES.PENDING).toLowerCase();
     return {
       complete: true,
-      verificationStatus: tutorProfile.verificationStatus || TUTOR_VERIFICATION_STATUSES.PENDING,
+      verificationStatus,
       step: null,
-      title: 'Tutor profile complete',
-      message: 'Set your online status when you are ready to teach.',
+      title: verificationStatus === TUTOR_VERIFICATION_STATUSES.VERIFIED
+        ? 'Tutor profile verified'
+        : 'Tutor profile complete',
+      message: verificationStatus === TUTOR_VERIFICATION_STATUSES.VERIFIED
+        ? 'You can receive requests now.'
+        : 'Your profile is complete and waiting for admin verification before you can receive requests.',
     };
   }
 
-  if (!hasQualification || !qualified) {
+  if (!hasProfile) {
+    return {
+      complete: false,
+      step: TUTOR_PROFILE_STEPS.PROFILE,
+      title: 'Complete tutor profile',
+      message: 'Capture a live selfie and add the grades you teach.',
+    };
+  }
+
+  if (!hasQualification) {
     return {
       complete: false,
       step: TUTOR_PROFILE_STEPS.QUALIFICATIONS,
       title: 'Upload and pass qualification check',
       message: 'Upload results so Parakleo can verify subjects with marks of at least 60%.',
+    };
+  }
+
+  if (!hasPoliceClearance) {
+    return {
+      complete: false,
+      step: TUTOR_PROFILE_STEPS.POLICE_CLEARANCE,
+      title: 'Upload police clearance',
+      message: 'Upload your police clearance or criminal check document to continue.',
     };
   }
 
@@ -108,9 +151,9 @@ export function getTutorOnboardingStatus(user) {
 
   return {
     complete: false,
-    step: TUTOR_PROFILE_STEPS.PROFILE,
-    title: 'Complete tutor profile',
-    message: 'Capture a live selfie, add grades, and choose active subjects to finish setup.',
+    step: TUTOR_PROFILE_STEPS.SUBJECTS,
+    title: 'Choose active subjects',
+    message: 'Select the subjects you want active for tutor matching.',
   };
 }
 
@@ -123,6 +166,10 @@ export function getProfileStatusByRole(user, role) {
 
 export function hasCurrentTutorAgreement(user) {
   return isTutorAgreementCurrent(user?.tutorAgreement || {});
+}
+
+export function hasCompletedTutorProfile(user) {
+  return getTutorOnboardingStatus(user).complete;
 }
 
 export function isTutorAgreementCurrent(tutorAgreement = {}) {

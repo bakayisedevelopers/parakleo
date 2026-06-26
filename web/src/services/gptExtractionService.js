@@ -8,6 +8,9 @@ const STREAM_BOARD_EXTRACTION_ENDPOINT = import.meta.env.VITE_STREAM_BOARD_EXTRA
   || (CLOUD_FUNCTIONS_BASE_URL ? `${CLOUD_FUNCTIONS_BASE_URL}/streamAttachmentAi` : '/stream-board-extraction');
 export const LOCAL_VISUAL_CROP_FILE = Symbol('localVisualCropFile');
 const VISUAL_CROP_TYPES = new Set(['diagram', 'table', 'graph', 'figure', 'image', 'formula', 'equation', 'math']);
+const MAX_VISUALS = 10;
+const MAX_RENDER_DIMENSION = 1800;
+const RENDER_QUALITY = 0.84;
 let cachedPdfJs = null;
 
 async function loadPdfJs() {
@@ -49,24 +52,80 @@ function getImageDimensions(dataUrl) {
   });
 }
 
-function canvasToRenderedImage(canvas, source = {}) {
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  const base64 = dataUrl.split(',')[1];
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load image for resizing.'));
+    image.src = dataUrl;
+  });
+}
+
+async function downscaleDataUrl(dataUrl, {
+  mimeType = 'image/jpeg',
+  maxDimension = MAX_RENDER_DIMENSION,
+  quality = RENDER_QUALITY,
+} = {}) {
+  const image = await loadImageFromDataUrl(dataUrl);
+  const width = image.naturalWidth || image.width || 0;
+  const height = image.naturalHeight || image.height || 0;
+  if (!width || !height) {
+    return { dataUrl, mimeType, width, height };
+  }
+
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  if (scale >= 1) {
+    return { dataUrl, mimeType, width, height };
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return { dataUrl, mimeType, width, height };
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const resizedDataUrl = canvas.toDataURL(mimeType, quality);
   return {
-    mimeType: 'image/jpeg',
-    base64,
-    dataUrl,
+    dataUrl: resizedDataUrl,
+    mimeType,
     width: canvas.width,
     height: canvas.height,
+  };
+}
+
+async function canvasToRenderedImage(canvas, source = {}) {
+  const dataUrl = canvas.toDataURL('image/jpeg', RENDER_QUALITY);
+  const resized = await downscaleDataUrl(dataUrl, {
+    mimeType: 'image/jpeg',
+    maxDimension: MAX_RENDER_DIMENSION,
+    quality: RENDER_QUALITY,
+  });
+  const base64 = resized.dataUrl.split(',')[1];
+  return {
+    mimeType: resized.mimeType || 'image/jpeg',
+    base64,
+    dataUrl: resized.dataUrl,
+    width: resized.width || canvas.width,
+    height: resized.height || canvas.height,
     ...source,
   };
 }
 
 async function fileToRenderedImage(file, source = {}) {
   const imgData = await fileToBase64(file);
-  const dimensions = await getImageDimensions(imgData.dataUrl);
+  const resized = await downscaleDataUrl(imgData.dataUrl, {
+    mimeType: imgData.mimeType || 'image/jpeg',
+    maxDimension: MAX_RENDER_DIMENSION,
+    quality: RENDER_QUALITY,
+  }).catch(() => imgData);
+  const dimensions = await getImageDimensions(resized.dataUrl || imgData.dataUrl);
   return {
-    ...imgData,
+    mimeType: resized.mimeType || imgData.mimeType,
+    base64: String((resized.dataUrl || imgData.dataUrl).split(',')[1] || ''),
+    dataUrl: resized.dataUrl || imgData.dataUrl,
     ...dimensions,
     ...source,
   };
@@ -258,7 +317,6 @@ export async function attachVisualCropsToExtraction(extraction) {
 async function buildPayloadImages(files) {
   let totalVisualCount = 0;
   const pdfDocs = [];
-  const MAX_VISUALS = 5;
 
   for (const file of files) {
     if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
@@ -277,7 +335,7 @@ async function buildPayloadImages(files) {
   }
 
   if (totalVisualCount > MAX_VISUALS) {
-    throw new Error('Please upload a maximum of 5 pages or images.');
+    throw new Error('Please upload a maximum of 10 pages or images.');
   }
 
   const payloadImages = [];
@@ -292,8 +350,8 @@ async function buildPayloadImages(files) {
 
       for (let pageNumber = 1; pageNumber <= pagesToProcess; pageNumber++) {
         const page = await pdfDocument.getPage(pageNumber);
-        const canvas = await renderPdfPageToCanvas(page);
-        payloadImages.push(canvasToRenderedImage(canvas, {
+        const canvas = await renderPdfPageToCanvas(page, 1.45);
+        payloadImages.push(await canvasToRenderedImage(canvas, {
           sourceFileName: file.name,
           sourcePageNumber: pageNumber,
         }));

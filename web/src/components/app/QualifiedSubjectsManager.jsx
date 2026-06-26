@@ -12,7 +12,7 @@ function buildRows(qualifiedSubjects = [], activeSubjects = []) {
   }));
 }
 
-export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
+export default function QualifiedSubjectsManager({ user, setUser, onMessage, onSaved }) {
   const qualifiedSubjects = useMemo(() => user?.qualifiedSubjects || [], [user?.qualifiedSubjects]);
   const activeSubjectsFromUser = useMemo(
     () => user?.activeSubjects || user?.subjects || [],
@@ -45,6 +45,7 @@ export default function QualifiedSubjectsManager({ user, setUser, onMessage }) {
       const update = await updateTutorQualifiedSubjectsAndActiveSubjects(user.uid, qualifiedPayload, activePayload);
       setUser?.((prev) => ({ ...prev, ...update }));
       onMessage?.('Qualified subjects and active tutor subjects saved.');
+      onSaved?.(update);
     } catch (error) {
       onMessage?.(error.message || 'Unable to save tutor subjects.');
     } finally {

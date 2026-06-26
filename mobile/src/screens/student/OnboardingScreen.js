@@ -30,6 +30,31 @@ export function OnboardingScreen() {
   }, [user?.uid]);
 
   const status = useMemo(() => getStudentOnboardingStatus({ ...user, subjects }), [subjects, user]);
+  const currentProgress = user?.onboardingProgress?.student || {};
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const desiredStep = status.complete ? null : status.step;
+    if (String(currentProgress.currentStep || '') === String(desiredStep || '')
+      && Boolean(currentProgress.complete) === Boolean(status.complete)) {
+      return;
+    }
+
+    updateUserProfile(user.uid, {
+      onboardingProgress: {
+        ...(user?.onboardingProgress || {}),
+        student: {
+          ...currentProgress,
+          currentStep: desiredStep,
+          complete: status.complete,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    })
+      .then((profile) => setUser((prev) => ({ ...prev, ...profile })))
+      .catch(() => null);
+  }, [currentProgress, setUser, status.complete, status.step, user]);
 
   async function saveProfile() {
     setSaving(true);
@@ -71,17 +96,38 @@ export function OnboardingScreen() {
       {message ? <Card><Text style={styles.message}>{message}</Text></Card> : null}
 
       <Card style={styles.section}>
-        <Text style={styles.sectionTitle}>Student profile</Text>
-        <FormField label="Grade" keyboardType="number-pad" value={grade} onChangeText={setGrade} placeholder="11" />
-        <FormField label="Curriculum" value={curriculum} onChangeText={setCurriculum} placeholder="CAPS" />
-        <FormField label="How did you hear about us?" value={discoverySource} onChangeText={setDiscoverySource} placeholder="Instagram" />
-        <SubjectPicker value={subjects} onChange={setSubjects} />
-        <Button disabled={saving || !canSave} onPress={saveProfile}>
-          {saving ? 'Saving...' : 'Save student profile'}
-        </Button>
+        <Text style={styles.sectionTitle}>Onboarding steps</Text>
+        <View style={styles.stepRow}>
+          <View style={[styles.stepPill, status.complete || status.step !== 'academic_profile' ? styles.stepPillComplete : styles.stepPillActive]}>
+            <Text style={styles.stepPillText}>1. Profile</Text>
+          </View>
+          <View style={[styles.stepPill, status.complete ? styles.stepPillComplete : status.step === 'payment_setup' ? styles.stepPillActive : styles.stepPillMuted]}>
+            <Text style={styles.stepPillText}>2. Payment</Text>
+          </View>
+        </View>
       </Card>
 
-      <PaymentMethodsManager user={user} setUser={setUser} onMessage={setMessage} />
+      {status.complete ? (
+        <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>Profile complete</Text>
+          <Text style={styles.copy}>You can now request classes from the dashboard.</Text>
+        </Card>
+      ) : null}
+
+      {status.complete || status.step === 'payment_setup' ? (
+        <PaymentMethodsManager user={user} setUser={setUser} onMessage={setMessage} />
+      ) : (
+        <Card style={styles.section}>
+          <Text style={styles.sectionTitle}>Student profile</Text>
+          <FormField label="Grade" keyboardType="number-pad" value={grade} onChangeText={setGrade} placeholder="11" />
+          <FormField label="Curriculum" value={curriculum} onChangeText={setCurriculum} placeholder="CAPS" />
+          <FormField label="How did you hear about us?" value={discoverySource} onChangeText={setDiscoverySource} placeholder="Instagram" />
+          <SubjectPicker value={subjects} onChange={setSubjects} />
+          <Button disabled={saving || !canSave} onPress={saveProfile}>
+            {saving ? 'Saving...' : 'Save student profile'}
+          </Button>
+        </Card>
+      )}
     </View>
   );
 }
@@ -117,5 +163,32 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 18,
     fontWeight: '900',
+  },
+  stepRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  stepPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  stepPillActive: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#86efac',
+  },
+  stepPillComplete: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#bbf7d0',
+  },
+  stepPillMuted: {
+    backgroundColor: '#f8fafc',
+    borderColor: colors.border,
+  },
+  stepPillText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

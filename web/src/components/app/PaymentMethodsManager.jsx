@@ -3,7 +3,7 @@ import { setDefaultPaymentMethod, removePaymentMethod } from '../../services/pay
 import { initializeCardAuthorization, verifyCardAuthorization } from '../../services/paystackService';
 import { syncStudentGrowth } from '../../services/studentGrowthService';
 
-export default function PaymentMethodsManager({ user, setUser, onMessage }) {
+export default function PaymentMethodsManager({ user, setUser, onMessage, onSaved }) {
   const [isAuthorizingCard, setIsAuthorizingCard] = useState(false);
 
   const setMessage = (message) => {
@@ -36,6 +36,7 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
               };
             });
             await syncGrowthState();
+            onSaved?.(result.card);
 
             setMessage(
               result.refunded
@@ -64,6 +65,7 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
     setUser((prev) => ({ ...prev, ...next }));
     await syncGrowthState();
     setMessage('Primary card updated.');
+    onSaved?.(next);
   };
 
   const handleRemoveCard = async (cardId) => {
@@ -71,6 +73,7 @@ export default function PaymentMethodsManager({ user, setUser, onMessage }) {
     setUser((prev) => ({ ...prev, ...next }));
     await syncGrowthState();
     setMessage('Card removed.');
+    onSaved?.(next);
   };
 
   return (

@@ -3,6 +3,10 @@ import { appendUserAiLog } from './aiLogService';
 import { normalizeSubjectList, SUPPORTED_TUTOR_SUBJECTS } from '../constants/subjects';
 
 const DOCUMENT_STATUSES = new Set(['UPLOADED', 'PROCESSING', 'VERIFIED', 'FAILED']);
+export const TUTOR_DOCUMENT_TYPES = {
+  RESULTS: 'results',
+  POLICE_CLEARANCE: 'police_clearance',
+};
 const ALLOWED_TUTOR_SUBJECTS = new Set(SUPPORTED_TUTOR_SUBJECTS.map((subject) => String(subject).trim().toLowerCase()));
 const TUTOR_SUBJECT_ALIASES = new Map([
   ['mathematics', 'Mathematics'],
@@ -40,21 +44,26 @@ function sanitizeFileName(fileName = 'document') {
   return String(fileName || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-export async function uploadTutorDocument({ uid, file }) {
+export async function uploadTutorDocument({ uid, file, documentType = TUTOR_DOCUMENT_TYPES.RESULTS }) {
   if (!uid) throw new Error('Missing tutor id.');
   if (!file) throw new Error('No document selected.');
 
-  appendUserAiLog(uid, {
-    source: 'tutor_results_extraction',
-    step: 'upload_started',
-    status: 'info',
-    message: 'Tutor results upload started.',
-    details: {
-      fileName: file.name,
-      fileType: file.type || '',
-      fileSize: Number(file.size || 0),
-    },
-  }).catch(() => null);
+  const normalizedDocumentType = String(documentType || TUTOR_DOCUMENT_TYPES.RESULTS).toLowerCase();
+  const isResultsDocument = normalizedDocumentType !== TUTOR_DOCUMENT_TYPES.POLICE_CLEARANCE;
+
+  if (isResultsDocument) {
+    appendUserAiLog(uid, {
+      source: 'tutor_results_extraction',
+      step: 'upload_started',
+      status: 'info',
+      message: 'Tutor results upload started.',
+      details: {
+        fileName: file.name,
+        fileType: file.type || '',
+        fileSize: Number(file.size || 0),
+      },
+    }).catch(() => null);
+  }
 
   const clients = await getFirebaseClients();
   if (!clients?.storage || !clients?.db) {
@@ -77,6 +86,7 @@ export async function uploadTutorDocument({ uid, file }) {
   const record = {
     id: docRef.id,
     uid,
+    documentType: normalizedDocumentType,
     fileName: file.name,
     fileUrl,
     filePath,
@@ -91,19 +101,56 @@ export async function uploadTutorDocument({ uid, file }) {
   };
 
   await setDoc(docRef, record);
-  appendUserAiLog(uid, {
-    source: 'tutor_results_extraction',
-    step: 'upload_record_created',
-    status: 'info',
-    message: 'Tutor results upload record created.',
-    details: {
-      docId: docRef.id,
+
+  const { doc: userDoc, getDoc: getUserDoc, setDoc: setUserDoc, serverTimestamp: userServerTimestamp } = firestoreModule;
+  const userRef = userDoc(db, 'users', uid);
+  const existingUserSnap = await getUserDoc(userRef).catch(() => null);
+  const existingUser = existingUserSnap?.exists?.() ? existingUserSnap.data() : {};
+  const currentRequiredDocuments = existingUser?.tutorProfile?.requiredDocuments || {};
+  const nextRequiredDocuments = {
+    ...currentRequiredDocuments,
+    [normalizedDocumentType]: {
+      documentId: docRef.id,
       fileName: file.name,
+      fileUrl,
       filePath,
-      fileType: file.type || '',
-      fileSize: Number(file.size || 0),
+      contentType: file.type || 'application/octet-stream',
+      status: 'submitted',
+      updatedAt: new Date().toISOString(),
     },
-  }).catch(() => null);
+  };
+
+  await setUserDoc(userRef, {
+    tutorProfile: {
+      ...(existingUser?.tutorProfile || {}),
+      requiredDocuments: nextRequiredDocuments,
+      ...(normalizedDocumentType === TUTOR_DOCUMENT_TYPES.POLICE_CLEARANCE
+        ? {
+            policeClearance: nextRequiredDocuments[normalizedDocumentType],
+            policeClearanceSubmittedAt: new Date().toISOString(),
+          }
+        : {
+            resultsDocumentSubmittedAt: new Date().toISOString(),
+          }),
+    },
+    updatedAt: userServerTimestamp(),
+  }, { merge: true });
+
+  if (isResultsDocument) {
+    appendUserAiLog(uid, {
+      source: 'tutor_results_extraction',
+      step: 'upload_record_created',
+      status: 'info',
+      message: 'Tutor results upload record created.',
+      details: {
+        docId: docRef.id,
+        fileName: file.name,
+        filePath,
+        fileType: file.type || '',
+        fileSize: Number(file.size || 0),
+      },
+    }).catch(() => null);
+  }
   return { ...record, createdAt: Date.now(), updatedAt: Date.now() };
 }
 

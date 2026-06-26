@@ -3,7 +3,7 @@ import { Camera, RefreshCw } from 'lucide-react';
 import { uploadUserFile } from '../../services/storageService';
 import { updateUserProfile } from '../../services/userService';
 
-export default function LiveSelfieCapture({ user, setUser, onMessage }) {
+export default function LiveSelfieCapture({ user, setUser, onMessage, onSaved }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [cameraError, setCameraError] = useState('');
@@ -110,6 +110,7 @@ export default function LiveSelfieCapture({ user, setUser, onMessage }) {
       setCapturedFile(null);
       setUser?.((prev) => ({ ...prev, ...profile }));
       onMessage?.('Selfie saved for tutor verification.');
+      onSaved?.(profile);
     } catch (error) {
       setCameraError(error.message || 'Unable to save selfie right now.');
     } finally {

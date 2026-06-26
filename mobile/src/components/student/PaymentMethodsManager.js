@@ -10,7 +10,7 @@ import { verifyCardAuthorization } from '../../services/paystackService';
 import { syncStudentGrowth } from '../../services/studentGrowthService';
 import { colors } from '../../theme/colors';
 
-export function PaymentMethodsManager({ user, setUser, onMessage }) {
+export function PaymentMethodsManager({ user, setUser, onMessage, onSaved }) {
   const [isAuthorizingCard, setIsAuthorizingCard] = useState(false);
 
   async function syncGrowthState() {
@@ -34,6 +34,7 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
         };
       });
       await syncGrowthState();
+      onSaved?.(result.card);
       onMessage?.(
         result.refunded
           ? `Card ending in ${result.card.last4} added successfully. Your R1 authorization has been refunded.`
@@ -61,6 +62,7 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
     setUser((prev) => ({ ...prev, ...next }));
     await syncGrowthState();
     onMessage?.('Primary card updated.');
+    onSaved?.(next);
   }
 
   async function removeCard(cardId) {
@@ -68,6 +70,7 @@ export function PaymentMethodsManager({ user, setUser, onMessage }) {
     setUser((prev) => ({ ...prev, ...next }));
     await syncGrowthState();
     onMessage?.('Card removed.');
+    onSaved?.(next);
   }
 
   const methods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];

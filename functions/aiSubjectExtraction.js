@@ -6,8 +6,8 @@ const { normalizeSubjectName } = require('./subjectExtraction');
 
 const DEFAULT_MAX_PDF_PAGES = 30;
 const MAX_IMAGE_BYTES = 19 * 1024 * 1024;
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-const TUTOR_RESULTS_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-pro';
+const TUTOR_RESULTS_GEMINI_MODEL = 'gemini-2.5-pro';
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
 const DEFAULT_GEMINI_TIMEOUT_MS = 45 * 1000;
 const DEFAULT_CLASSIFICATION_TIMEOUT_MS = 30 * 1000;

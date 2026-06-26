@@ -148,7 +148,7 @@ export default function ProfilePage() {
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Role</dt><dd className="mt-1 text-lg font-semibold capitalize">{currentUser?.activeRole || currentUser?.role}</dd></div>
           <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Student onboarding</dt><dd className="mt-1 text-sm">{studentStatus.complete ? 'Complete' : studentStatus.message}</dd></div>
           {isTutorRole || (currentUser?.roles || []).includes('tutor') ? (
-            <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? 'Complete' : tutorStatus.message}</dd></div>
+            <div><dt className="text-xs uppercase tracking-wide text-zinc-500">Tutor onboarding</dt><dd className="mt-1 text-sm">{tutorStatus.complete ? (tutorStatus.verificationStatus === 'verified' ? 'Verified' : tutorStatus.message) : tutorStatus.message}</dd></div>
           ) : null}
         </dl>
       </SectionCard>
@@ -176,7 +176,7 @@ export default function ProfilePage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Tutor verification" subtitle="Capture a live selfie and upload results so Parakleo can verify your subject eligibility.">
+          <SectionCard title="Tutor verification" subtitle="Capture a live selfie, upload results, and submit police clearance so Parakleo can verify your subject eligibility.">
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
                 <h3 className="mb-2 text-sm font-bold text-zinc-800">Live selfie</h3>
@@ -185,6 +185,19 @@ export default function ProfilePage() {
               <div>
                 <h3 className="mb-2 text-sm font-bold text-zinc-800">Result documents</h3>
                 <TutorDocumentsManager user={currentUser} onMessage={setMessage} />
+              </div>
+              <div className="lg:col-span-2">
+                <h3 className="mb-2 text-sm font-bold text-zinc-800">Police clearance</h3>
+                <TutorDocumentsManager
+                  user={currentUser}
+                  onMessage={setMessage}
+                  documentType="police_clearance"
+                  title="Police clearance"
+                  subtitle="PDF, JPG, JPEG, or PNG. Upload your police clearance or criminal check document."
+                  uploadLabel="Upload police clearance"
+                  emptyMessage="Upload a police clearance or criminal check document so admin can verify your profile."
+                  allowRetry={false}
+                />
               </div>
             </div>
           </SectionCard>

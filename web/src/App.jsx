@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
+import TutorLandingPage from './pages/TutorLandingPage';
+import AdminLandingPage from './pages/AdminLandingPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import AppShell from './layouts/AppShell';
@@ -22,6 +24,7 @@ import OnboardingPage from './pages/app/OnboardingPage';
 import SessionRoomPage from './pages/app/SessionRoomPage';
 import AdminDashboardPage from './pages/app/admin/AdminDashboardPage';
 import AdminTutorsPage from './pages/app/admin/AdminTutorsPage';
+import AdminTutorDetailsPage from './pages/app/admin/AdminTutorDetailsPage';
 import AdminTutorAgreementsPage from './pages/app/admin/AdminTutorAgreementsPage';
 import AdminPaymentsPage from './pages/app/admin/AdminPaymentsPage';
 import AdminUnsupportedSubjectsPage from './pages/app/admin/AdminUnsupportedSubjectsPage';
@@ -39,6 +42,8 @@ export default function App() {
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/tutor" element={<TutorLandingPage />} />
+        <Route path="/admin" element={<AdminLandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
@@ -189,6 +194,14 @@ export default function App() {
             element={
               <ProtectedRoute requireAdmin>
                 <AdminTutorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/tutors/:uid"
+            element={
+              <ProtectedRoute requireAdmin>
+                <AdminTutorDetailsPage />
               </ProtectedRoute>
             }
           />

@@ -4,6 +4,8 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Mail, Lock } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { LegalLinksInline } from '../components/legal/LegalLinks';
+import { getPortalRoutes, resolvePostAuthPath } from '../constants/portal';
+import { usePortal } from '../hooks/usePortal';
 
 function Button({ type = 'button', children, className = '', ...props }) {
   return (
@@ -26,6 +28,8 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, setRememberMePreference } = useAuth();
+  const portal = usePortal();
+  const routes = getPortalRoutes(portal.role);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -34,9 +38,13 @@ export default function LoginPage() {
     try {
       setIsSubmitting(true);
       setRememberMePreference(rememberMe);
-      const user = await login({ email, password });
-      const fallbackPath = String(user?.activeRole || user?.role || 'student').toLowerCase() === 'tutor' ? '/app/tutor' : '/app/student';
-      navigate(location.state?.from || fallbackPath);
+      const user = await login({ email, password, expectedRole: portal.role });
+      const nextPath = resolvePostAuthPath({
+        fromPath: location.state?.from,
+        portalRole: portal.role,
+        activeRole: user?.activeRole || user?.role,
+      });
+      navigate(nextPath, { replace: true });
     } catch (submissionError) {
       setError(submissionError.message || 'Unable to sign in right now.');
     } finally {
@@ -52,20 +60,35 @@ export default function LoginPage() {
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2 text-zinc-600 transition-colors hover:text-zinc-900">
+        <Link
+          to={routes.landingPath}
+          className="mb-8 flex items-center justify-center gap-2 text-zinc-600 transition-colors hover:text-zinc-900"
+        >
           <ArrowLeft className="h-4 w-4" />
-          <span className="text-sm font-medium">Back to home</span>
+          <span className="text-sm font-medium">Back to {portal.label.toLowerCase()} home</span>
         </Link>
-        <h2 className="text-center text-4xl font-black tracking-tight text-zinc-900">Welcome back</h2>
+        <h2 className="text-center text-4xl font-black tracking-tight text-zinc-900">
+          {portal.label} sign in
+        </h2>
         <p className="mt-2 text-center text-sm text-zinc-600">
-          Don't have an account?{' '}
-          <Link to="/signup" className="font-bold text-brand hover:underline">
-            Sign up for free
-          </Link>
+          {portal.canSignUp ? (
+            <>
+              Don't have an account?{' '}
+              <Link to={routes.signupPath} className="font-bold text-brand hover:underline">
+                Sign up for free
+              </Link>
+            </>
+          ) : (
+            'Admin accounts are provisioned centrally.'
+          )}
         </p>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mx-4 mt-8 sm:mx-6 sm:w-full sm:max-w-md md:mx-auto">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mx-4 mt-8 sm:mx-6 sm:w-full sm:max-w-md md:mx-auto"
+      >
         <div className="rounded-[32px] border border-brand/20 bg-white py-10 px-6 shadow-xl sm:px-12">
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div>

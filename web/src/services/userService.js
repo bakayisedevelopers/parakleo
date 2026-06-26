@@ -1,5 +1,5 @@
 import { getFirebaseClients } from '../firebase/config';
-import { isTutorAgreementCurrent } from '../utils/onboarding';
+import { hasCompletedTutorProfile, isTutorAgreementCurrent } from '../utils/onboarding';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
 const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.1';
@@ -17,6 +17,20 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
   const normalizedRole = role || 'student';
   const safeReferralSlug = String(referralSlug || buildReferralSlug()).trim().toLowerCase();
   const defaultSubjects = normalizedRole === 'student' ? [] : [];
+  const onboardingProgress = {
+    student: {
+      currentStep: 'academic_profile',
+      completedSteps: [],
+      complete: false,
+      updatedAt: null,
+    },
+    tutor: {
+      currentStep: 'agreement',
+      completedSteps: [],
+      complete: false,
+      updatedAt: null,
+    },
+  };
 
   return {
     uid,
@@ -46,6 +60,7 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
       mathScore: null,
       gradesToTutor: [],
       verificationStatus: 'pending',
+      policeClearance: null,
       payout: {
         bankName: '',
         accountNumber: '',
@@ -92,6 +107,7 @@ function buildDefaultProfile({ uid, email, displayName, role, referralSlug, refe
       accountCompletionRewardProcessed: false,
       lastGrowthSyncedAt: null,
     },
+    onboardingProgress,
   };
 }
 
@@ -307,13 +323,19 @@ export async function getStudentsForAdmin() {
 
 export async function setTutorVerificationStatus(uid, verificationStatus) {
   const existing = await getUserProfile(uid);
-  if (String(verificationStatus || '').toLowerCase() === 'verified' && !hasCurrentTutorAgreement(existing || {})) {
-    throw new Error('Tutor must accept the current Tutor Agreement before being marked verified.');
+  const normalizedStatus = String(verificationStatus || '').toLowerCase();
+  if (normalizedStatus === 'verified') {
+    if (!hasCurrentTutorAgreement(existing || {})) {
+      throw new Error('Tutor must accept the current Tutor Agreement before being marked verified.');
+    }
+    if (!hasCompletedTutorProfile(existing || {})) {
+      throw new Error('Tutor must complete their profile, upload results, police clearance, payout details, and active subjects before verification.');
+    }
   }
   return updateUserProfile(uid, {
     tutorProfile: {
       ...(existing?.tutorProfile || {}),
-      verificationStatus,
+      verificationStatus: normalizedStatus || verificationStatus,
     },
   });
 }

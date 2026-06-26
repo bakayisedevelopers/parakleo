@@ -10,6 +10,8 @@ const QUESTION_BLOCK_SPACING = 180;
 const LONG_BLOCK_EXTRA_SPACING = 90;
 const IMAGE_BLOCK_SPACING = 120;
 const IMAGE_STACK_SPACING = 36;
+const PAGE_IMAGE_STACK_SPACING = 52;
+const QUESTION_COLUMN_OFFSET = 560;
 const MAX_RENDER_IMAGE_WIDTH = 900;
 const MAX_RENDER_IMAGE_HEIGHT = 700;
 
@@ -63,6 +65,8 @@ function pushImageElement(elements, image, position) {
     questionId: image.questionId || '',
     storageUrl: image.storageUrl || image.src || '',
     storagePath: image.storagePath || '',
+    x: position.x,
+    y: position.y,
     position,
     width,
     height,
@@ -71,10 +75,40 @@ function pushImageElement(elements, image, position) {
   return { width, height };
 }
 
-export function prepareWhiteboardLayout(parsedQuestions = []) {
+export function prepareWhiteboardLayout(parsedQuestions = [], options = {}) {
   const safeQuestions = Array.isArray(parsedQuestions) ? parsedQuestions : [];
+  const pageImageCandidates = Array.isArray(options?.pageImages) ? options.pageImages : [];
   const elements = [];
+  const pageImagesByNumber = new Map();
   let currentY = 0;
+  let currentPageY = 0;
+
+  pageImageCandidates.forEach((image) => {
+    if (!image?.src) return;
+    const pageNumber = Number(image?.pageNumber || 0);
+    const key = Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : String(image.src);
+    if (pageImagesByNumber.has(key)) return;
+    pageImagesByNumber.set(key, image);
+  });
+
+  const pageImages = [...pageImagesByNumber.values()].sort((left, right) => {
+    const leftPage = Number(left?.pageNumber || 0) || 0;
+    const rightPage = Number(right?.pageNumber || 0) || 0;
+    return leftPage - rightPage;
+  });
+
+  const questionColumnX = pageImages.length ? QUESTION_COLUMN_OFFSET : 0;
+
+  pageImages.forEach((image, imageIndex) => {
+    const size = pushImageElement(elements, image, {
+      x: 0,
+      y: currentPageY,
+    });
+    currentPageY += size.height;
+    if (imageIndex < pageImages.length - 1) {
+      currentPageY += PAGE_IMAGE_STACK_SPACING;
+    }
+  });
 
   safeQuestions.forEach((question, questionIndex) => {
     const content = normalizeQuestionText(question);
@@ -86,8 +120,11 @@ export function prepareWhiteboardLayout(parsedQuestions = []) {
       elements.push({
         type: 'text',
         content,
+        text: content,
         questionId: String(question?.questionId || ''),
-        position: { x: 0, y: currentY },
+        x: questionColumnX,
+        y: currentY,
+        position: { x: questionColumnX, y: currentY },
         width: DEFAULT_TEXT_WIDTH,
         height: textHeight,
       });
@@ -96,7 +133,7 @@ export function prepareWhiteboardLayout(parsedQuestions = []) {
     }
 
     images.forEach((image, imageIndex) => {
-      const size = pushImageElement(elements, image, { x: 48, y: currentY });
+      const size = pushImageElement(elements, image, { x: questionColumnX + 48, y: currentY });
       currentY += size.height;
       if (imageIndex < images.length - 1) {
         currentY += IMAGE_STACK_SPACING;
@@ -121,6 +158,7 @@ export function prepareWhiteboardLayout(parsedQuestions = []) {
   debugLog('whiteboardPreparation', '[layout] prepared.', {
     questionCount: safeQuestions.length,
     imageCount: safeQuestions.reduce((count, question) => count + (question?.images?.length || 0), 0),
+    pageImageCount: pageImages.length,
     elementCount: elements.length,
   });
 

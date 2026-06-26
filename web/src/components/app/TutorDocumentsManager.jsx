@@ -7,6 +7,7 @@ import {
   retryTutorDocument,
   subscribeToTutorDocuments,
   uploadTutorDocument,
+  TUTOR_DOCUMENT_TYPES,
 } from '../../services/tutorDocumentService';
 
 const STATUS_STYLES = {
@@ -17,6 +18,14 @@ const STATUS_STYLES = {
 };
 
 function getDocumentSummary(document) {
+  if (document?.documentType === TUTOR_DOCUMENT_TYPES.POLICE_CLEARANCE) {
+    const status = normalizeDocumentStatus(document.status);
+    if (status === 'FAILED') {
+      return 'Police clearance upload failed. Upload another file or try again later.';
+    }
+    return 'Police clearance uploaded. Pending admin review.';
+  }
+
   const status = normalizeDocumentStatus(document.status);
   const qualifiedSubjects = Array.isArray(document.qualifiedSubjects) ? document.qualifiedSubjects : [];
   const extractedSubjects = Array.isArray(document.extractedSubjects) ? document.extractedSubjects : [];
@@ -40,7 +49,17 @@ function getDocumentSummary(document) {
   return 'Processed, but no supported subjects were detected.';
 }
 
-export default function TutorDocumentsManager({ user, onMessage }) {
+export default function TutorDocumentsManager({
+  user,
+  onMessage,
+  onSaved,
+  documentType = TUTOR_DOCUMENT_TYPES.RESULTS,
+  title = 'Result documents',
+  subtitle = 'PDF, JPG, JPEG, or PNG. You can upload more later.',
+  emptyMessage = 'Upload your school results so Parakleo can verify which subjects you qualify to tutor.',
+  uploadLabel = 'Upload result documents',
+  allowRetry = true,
+}) {
   const [documents, setDocuments] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
@@ -50,6 +69,10 @@ export default function TutorDocumentsManager({ user, onMessage }) {
   const loggedAiLogsRef = useRef(new Set());
 
   useEffect(() => {
+    if (documentType !== TUTOR_DOCUMENT_TYPES.RESULTS) {
+      return;
+    }
+
     documents.forEach((doc) => {
       if ((doc.aiPrompt || doc.aiRawOutput) && !loggedDocsRef.current.has(doc.id)) {
         console.log(`=== TUTOR RESULTS EXTRACTION AI PROMPT (${doc.fileName || doc.id}) ===`);
@@ -59,7 +82,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
         loggedDocsRef.current.add(doc.id);
       }
     });
-  }, [documents]);
+  }, [documentType, documents]);
 
   useEffect(() => {
     if (!user?.uid) return undefined;
@@ -93,6 +116,8 @@ export default function TutorDocumentsManager({ user, onMessage }) {
     return subscribeToTutorDocuments(user.uid, setDocuments);
   }, [user?.uid]);
 
+  const filteredDocuments = documents.filter((document) => String(document?.documentType || TUTOR_DOCUMENT_TYPES.RESULTS).toLowerCase() === String(documentType || TUTOR_DOCUMENT_TYPES.RESULTS).toLowerCase());
+
   const uploadDocuments = async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
@@ -101,8 +126,11 @@ export default function TutorDocumentsManager({ user, onMessage }) {
     setIsUploading(true);
     setError('');
     try {
-      await Promise.all(files.map((file) => uploadTutorDocument({ uid: user.uid, file })));
-      onMessage?.('Result document uploaded. Processing will update automatically.');
+      await Promise.all(files.map((file) => uploadTutorDocument({ uid: user.uid, file, documentType })));
+      onMessage?.(documentType === TUTOR_DOCUMENT_TYPES.POLICE_CLEARANCE
+        ? 'Police clearance uploaded successfully.'
+        : 'Result document uploaded. Processing will update automatically.');
+      onSaved?.();
     } catch (uploadError) {
       setError(uploadError.message || 'Unable to upload result document.');
     } finally {
@@ -116,6 +144,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
     try {
       await retryTutorDocument(documentId);
       onMessage?.('Document queued for subject verification again.');
+      onSaved?.();
     } catch (retryError) {
       setError(retryError.message || 'Unable to retry document processing.');
     } finally {
@@ -129,6 +158,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
     try {
       await deleteTutorDocument(documentRecord);
       onMessage?.('Document deleted.');
+      onSaved?.();
     } catch (deleteError) {
       setError(deleteError.message || 'Unable to delete document.');
     } finally {
@@ -141,9 +171,9 @@ export default function TutorDocumentsManager({ user, onMessage }) {
       <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-5 text-center transition hover:bg-zinc-100">
         <Upload className="h-5 w-5 text-brand" />
         <span className="mt-2 text-sm font-semibold text-zinc-900">
-          {isUploading ? 'Uploading...' : 'Upload result documents'}
+          {isUploading ? 'Uploading...' : uploadLabel}
         </span>
-        <span className="mt-1 text-xs text-zinc-500">PDF, JPG, JPEG, or PNG. You can upload more later.</span>
+        <span className="mt-1 text-xs text-zinc-500">{subtitle}</span>
         <input
           type="file"
           accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
@@ -156,10 +186,17 @@ export default function TutorDocumentsManager({ user, onMessage }) {
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-900">{title}</p>
+        </div>
+      </div>
+
       <div className="space-y-2">
-        {documents.length ? documents.map((document) => {
+        {filteredDocuments.length ? filteredDocuments.map((document) => {
           const status = normalizeDocumentStatus(document.status);
           const canDelete = status !== 'VERIFIED';
+          const canRetry = allowRetry && documentType === TUTOR_DOCUMENT_TYPES.RESULTS;
           return (
             <div key={document.id} className="rounded-2xl border border-zinc-200 bg-white p-3">
               <div className="flex items-start justify-between gap-3">
@@ -174,16 +211,18 @@ export default function TutorDocumentsManager({ user, onMessage }) {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRetry(document.id)}
-                    disabled={retryingDocumentId === document.id}
-                    className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    title="Retry subject and mark detection"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${retryingDocumentId === document.id ? 'animate-spin' : ''}`} />
-                    Retry
-                  </button>
+                  {canRetry ? (
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(document.id)}
+                      disabled={retryingDocumentId === document.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Retry subject and mark detection"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${retryingDocumentId === document.id ? 'animate-spin' : ''}`} />
+                      Retry
+                    </button>
+                  ) : null}
                   {canDelete ? (
                     <button
                       type="button"
@@ -205,7 +244,7 @@ export default function TutorDocumentsManager({ user, onMessage }) {
           );
         }) : (
           <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
-            Upload your school results so Parakleo can verify which subjects you qualify to tutor.
+            {emptyMessage}
           </p>
         )}
       </div>

@@ -23,7 +23,7 @@ Tasks:
 12. If text is unreadable, mark it as unreadable instead of guessing.
 13. Return valid JSON only. No markdown. No explanation.`;
 
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-pro';
 
 function getFirebaseAiConfig(overrides = {}) {
   const config = {

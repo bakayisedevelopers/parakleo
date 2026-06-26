@@ -8,97 +8,281 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "hosting": {
-    "site": "parakleo",
-    "public": "web/dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "/ice-config",
-        "function": "getIceConfig"
-      },
-      {
-        "source": "/verify-paystack",
-        "function": "verifyPaystack"
-      },
-      {
-        "source": "/finalize-session-billing",
-        "function": "finalizeSessionBilling"
-      },
-      {
-        "source": "/pay-outstanding-balance",
-        "function": "payOutstandingBalance"
-      },
-      {
-        "source": "/delete-payment-method",
-        "function": "deletePaymentMethod"
-      },
-      {
-        "source": "/verify-tutor-payout-account",
-        "function": "verifyTutorPayoutAccount"
-      },
-      {
-        "source": "/list-tutor-payout-banks",
-        "function": "listTutorPayoutBanks"
-      },
-      {
-        "source": "/pricing-quote",
-        "function": "getPricingQuote"
-      },
-      {
-        "source": "/submit-class-request",
-        "function": "submitClassRequest"
-      },
-      {
-        "source": "/sync-student-growth",
-        "function": "syncStudentGrowth"
-      },
-      {
-        "source": "/image-ocr",
-        "function": "extractImageOcr"
-      },
-      {
-        "source": "/classify-subject",
-        "function": "classifySubject"
-      },
-      {
-        "source": "/extract-attachment-ai",
-        "function": "extractAttachmentAi"
-      },
-      {
-        "source": "/stream-board-extraction",
-        "function": "streamAttachmentAi"
-      },
-      {
-        "source": "/mobile-webview-auth",
-        "function": "mobileWebviewAuth"
-      },
-      {
-        "source": "/getTutorAgreement",
-        "function": "getTutorAgreement"
-      },
-      {
-        "source": "/acceptTutorAgreement",
-        "function": "acceptTutorAgreement"
-      },
-      {
-        "source": "/emailSignedTutorAgreement",
-        "function": "emailSignedTutorAgreement"
-      },
-      {
-        "source": "/publishTutorAgreementVersion",
-        "function": "publishTutorAgreementVersion"
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  },
+  "hosting": [
+    {
+      "site": "parakleo",
+      "public": "web/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/ice-config",
+          "function": "getIceConfig"
+        },
+        {
+          "source": "/verify-paystack",
+          "function": "verifyPaystack"
+        },
+        {
+          "source": "/finalize-session-billing",
+          "function": "finalizeSessionBilling"
+        },
+        {
+          "source": "/pay-outstanding-balance",
+          "function": "payOutstandingBalance"
+        },
+        {
+          "source": "/delete-payment-method",
+          "function": "deletePaymentMethod"
+        },
+        {
+          "source": "/verify-tutor-payout-account",
+          "function": "verifyTutorPayoutAccount"
+        },
+        {
+          "source": "/list-tutor-payout-banks",
+          "function": "listTutorPayoutBanks"
+        },
+        {
+          "source": "/pricing-quote",
+          "function": "getPricingQuote"
+        },
+        {
+          "source": "/submit-class-request",
+          "function": "submitClassRequest"
+        },
+        {
+          "source": "/sync-student-growth",
+          "function": "syncStudentGrowth"
+        },
+        {
+          "source": "/image-ocr",
+          "function": "extractImageOcr"
+        },
+        {
+          "source": "/classify-subject",
+          "function": "classifySubject"
+        },
+        {
+          "source": "/extract-attachment-ai",
+          "function": "extractAttachmentAi"
+        },
+        {
+          "source": "/stream-board-extraction",
+          "function": "streamAttachmentAi"
+        },
+        {
+          "source": "/mobile-webview-auth",
+          "function": "mobileWebviewAuth"
+        },
+        {
+          "source": "/getTutorAgreement",
+          "function": "getTutorAgreement"
+        },
+        {
+          "source": "/acceptTutorAgreement",
+          "function": "acceptTutorAgreement"
+        },
+        {
+          "source": "/emailSignedTutorAgreement",
+          "function": "emailSignedTutorAgreement"
+        },
+        {
+          "source": "/publishTutorAgreementVersion",
+          "function": "publishTutorAgreementVersion"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    {
+      "site": "parakleo-tutors",
+      "public": "web/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/ice-config",
+          "function": "getIceConfig"
+        },
+        {
+          "source": "/verify-paystack",
+          "function": "verifyPaystack"
+        },
+        {
+          "source": "/finalize-session-billing",
+          "function": "finalizeSessionBilling"
+        },
+        {
+          "source": "/pay-outstanding-balance",
+          "function": "payOutstandingBalance"
+        },
+        {
+          "source": "/delete-payment-method",
+          "function": "deletePaymentMethod"
+        },
+        {
+          "source": "/verify-tutor-payout-account",
+          "function": "verifyTutorPayoutAccount"
+        },
+        {
+          "source": "/list-tutor-payout-banks",
+          "function": "listTutorPayoutBanks"
+        },
+        {
+          "source": "/pricing-quote",
+          "function": "getPricingQuote"
+        },
+        {
+          "source": "/submit-class-request",
+          "function": "submitClassRequest"
+        },
+        {
+          "source": "/sync-student-growth",
+          "function": "syncStudentGrowth"
+        },
+        {
+          "source": "/image-ocr",
+          "function": "extractImageOcr"
+        },
+        {
+          "source": "/classify-subject",
+          "function": "classifySubject"
+        },
+        {
+          "source": "/extract-attachment-ai",
+          "function": "extractAttachmentAi"
+        },
+        {
+          "source": "/stream-board-extraction",
+          "function": "streamAttachmentAi"
+        },
+        {
+          "source": "/mobile-webview-auth",
+          "function": "mobileWebviewAuth"
+        },
+        {
+          "source": "/getTutorAgreement",
+          "function": "getTutorAgreement"
+        },
+        {
+          "source": "/acceptTutorAgreement",
+          "function": "acceptTutorAgreement"
+        },
+        {
+          "source": "/emailSignedTutorAgreement",
+          "function": "emailSignedTutorAgreement"
+        },
+        {
+          "source": "/publishTutorAgreementVersion",
+          "function": "publishTutorAgreementVersion"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    {
+      "site": "parakleo-admin",
+      "public": "web/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/ice-config",
+          "function": "getIceConfig"
+        },
+        {
+          "source": "/verify-paystack",
+          "function": "verifyPaystack"
+        },
+        {
+          "source": "/finalize-session-billing",
+          "function": "finalizeSessionBilling"
+        },
+        {
+          "source": "/pay-outstanding-balance",
+          "function": "payOutstandingBalance"
+        },
+        {
+          "source": "/delete-payment-method",
+          "function": "deletePaymentMethod"
+        },
+        {
+          "source": "/verify-tutor-payout-account",
+          "function": "verifyTutorPayoutAccount"
+        },
+        {
+          "source": "/list-tutor-payout-banks",
+          "function": "listTutorPayoutBanks"
+        },
+        {
+          "source": "/pricing-quote",
+          "function": "getPricingQuote"
+        },
+        {
+          "source": "/submit-class-request",
+          "function": "submitClassRequest"
+        },
+        {
+          "source": "/sync-student-growth",
+          "function": "syncStudentGrowth"
+        },
+        {
+          "source": "/image-ocr",
+          "function": "extractImageOcr"
+        },
+        {
+          "source": "/classify-subject",
+          "function": "classifySubject"
+        },
+        {
+          "source": "/extract-attachment-ai",
+          "function": "extractAttachmentAi"
+        },
+        {
+          "source": "/stream-board-extraction",
+          "function": "streamAttachmentAi"
+        },
+        {
+          "source": "/mobile-webview-auth",
+          "function": "mobileWebviewAuth"
+        },
+        {
+          "source": "/getTutorAgreement",
+          "function": "getTutorAgreement"
+        },
+        {
+          "source": "/acceptTutorAgreement",
+          "function": "acceptTutorAgreement"
+        },
+        {
+          "source": "/emailSignedTutorAgreement",
+          "function": "emailSignedTutorAgreement"
+        },
+        {
+          "source": "/publishTutorAgreementVersion",
+          "function": "publishTutorAgreementVersion"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ],
   "emulators": {
     "auth": {
       "host": "0.0.0.0",

@@ -1,4 +1,11 @@
 import { getFirebaseClients } from '../firebase/config';
+import {
+  buildPortalRoleMismatchMessage,
+  normalizePortalRole,
+  readPendingSignupPortalRole,
+  clearPendingSignupPortalRole,
+} from '../constants/portal';
+import { isEmailAllowlistedAdmin } from '../utils/admin';
 import { syncStudentGrowth } from './studentGrowthService';
 import { deleteUserProfile, getUserProfile, upsertUserProfile } from './userService';
 
@@ -72,27 +79,37 @@ function normalizeRole(role) {
   return normalized === 'tutor' ? 'tutor' : 'student';
 }
 
+function normalizeExpectedRole(role) {
+  return normalizePortalRole(role);
+}
+
 function normalizeUserProfile(profile = {}, fallback = {}) {
   const rawRoles = Array.isArray(profile.roles) && profile.roles.length ? profile.roles : [profile.role || fallback.role || 'student'];
   const roles = rawRoles.map((role) => normalizeRole(role));
-  const activeRole = normalizeRole(profile.activeRole || profile.role || fallback.role || roles[0] || 'student');
+  const isAdminAccount = isEmailAllowlistedAdmin(profile.email) || profile.isAdmin === true || roles.includes('admin');
+  const activeRole = isAdminAccount
+    ? 'admin'
+    : normalizeRole(profile.activeRole || profile.role || fallback.role || roles[0] || 'student');
 
   return {
     ...fallback,
     ...profile,
-    roles,
+    roles: isAdminAccount ? Array.from(new Set([...roles, 'admin'])) : roles,
     role: activeRole,
     activeRole,
+    isAdmin: isAdminAccount || profile.isAdmin === true,
   };
 }
 
 function getFallbackProfile(firebaseUser) {
+  const pendingSignupRole = readPendingSignupPortalRole();
+  const fallbackRole = pendingSignupRole || 'student';
   return {
     uid: firebaseUser.uid,
     email: firebaseUser.email,
     fullName: firebaseUser.displayName,
     displayName: firebaseUser.displayName,
-    role: 'student',
+    role: fallbackRole,
   };
 }
 
@@ -115,6 +132,9 @@ export function subscribeToAuthChanges(callback) {
       try {
         await syncStudentGrowth().catch(() => null);
         const profile = (await getUserProfile(firebaseUser.uid)) || getFallbackProfile(firebaseUser);
+        if (profile?.role !== 'student' || readPendingSignupPortalRole()) {
+          clearPendingSignupPortalRole();
+        }
         callback(normalizeUserProfile({
           ...profile,
           uid: firebaseUser.uid,
@@ -130,9 +150,11 @@ export function subscribeToAuthChanges(callback) {
   return () => unsub();
 }
 
-export async function loginWithEmail({ email, password }) {
+export async function loginWithEmail({ email, password, expectedRole } = {}) {
   const rememberMe = readRememberMePreference();
   const clients = await getFirebaseClients();
+  const normalizedExpectedRole = expectedRole ? normalizeExpectedRole(expectedRole) : '';
+  clearPendingSignupPortalRole();
 
   if (!clients) {
     const mockUser = {
@@ -142,6 +164,10 @@ export async function loginWithEmail({ email, password }) {
       displayName: email.split('@')[0],
       role: 'student',
     };
+    if (normalizedExpectedRole && normalizeRole(mockUser.role) !== normalizedExpectedRole) {
+      clearStoredMockUser();
+      throw new Error(buildPortalRoleMismatchMessage(normalizedExpectedRole, mockUser.role));
+    }
     persistMockUser(mockUser, rememberMe);
     return normalizeUserProfile(mockUser, mockUser);
   }
@@ -161,7 +187,7 @@ export async function loginWithEmail({ email, password }) {
     console.warn('Failed to load Firestore profile after login. Falling back to auth identity.', error);
   }
 
-  return normalizeUserProfile({
+  const normalizedUser = normalizeUserProfile({
     uid: credential.user.uid,
     email: credential.user.email,
     fullName: profile?.fullName || profile?.displayName || credential.user.displayName,
@@ -169,6 +195,14 @@ export async function loginWithEmail({ email, password }) {
     role: profile?.role || 'student',
     ...profile,
   });
+
+  if (normalizedExpectedRole && normalizeRole(normalizedUser.role) !== normalizedExpectedRole) {
+    await clients.authModule.signOut(clients.auth).catch(() => null);
+    clearStoredMockUser();
+    throw new Error(buildPortalRoleMismatchMessage(normalizedExpectedRole, normalizedUser.role));
+  }
+
+  return normalizedUser;
 }
 
 export function setRememberMePreference(rememberMe) {
@@ -179,8 +213,14 @@ export function getRememberMePreference() {
   return readRememberMePreference();
 }
 
-export async function signupWithEmail({ name, email, password, role, referralSlug = '' }) {
+export async function signupWithEmail({ name, email, password, role, referralSlug = '', expectedRole } = {}) {
   const clients = await getFirebaseClients();
+  const normalizedExpectedRole = expectedRole ? normalizeExpectedRole(expectedRole) : '';
+  const normalizedRole = normalizeRole(expectedRole || role);
+
+  if (normalizedRole === 'admin') {
+    throw new Error('Admin accounts are provisioned centrally and cannot be created from this portal.');
+  }
 
   if (!clients) {
     const mockUser = {
@@ -188,7 +228,7 @@ export async function signupWithEmail({ name, email, password, role, referralSlu
       email,
       fullName: name,
       displayName: name,
-      role,
+      role: normalizedRole,
     };
     localStorage.setItem(MOCK_USER_KEY, JSON.stringify(mockUser));
     return normalizeUserProfile(mockUser, mockUser);
@@ -204,7 +244,7 @@ export async function signupWithEmail({ name, email, password, role, referralSlu
       uid: credential.user.uid,
       email,
       displayName: name,
-      role,
+      role: normalizedRole,
       pendingReferralSlug: String(referralSlug || '').trim().toLowerCase() || null,
     });
   } catch (error) {
@@ -214,13 +254,13 @@ export async function signupWithEmail({ name, email, password, role, referralSlu
       email,
       fullName: name,
       displayName: name,
-      role,
+      role: normalizedRole,
     };
   }
 
   await syncStudentGrowth().catch(() => null);
 
-  return normalizeUserProfile({
+  const normalizedUser = normalizeUserProfile({
     uid: credential.user.uid,
     email,
     fullName: profile.fullName,
@@ -228,6 +268,13 @@ export async function signupWithEmail({ name, email, password, role, referralSlu
     role: profile.role,
     ...profile,
   });
+
+  if (normalizedExpectedRole && normalizeRole(normalizedUser.role) !== normalizedExpectedRole) {
+    await clients.authModule.signOut(clients.auth).catch(() => null);
+    throw new Error(buildPortalRoleMismatchMessage(normalizedExpectedRole, normalizedUser.role));
+  }
+
+  return normalizedUser;
 }
 
 export async function logoutUser() {
