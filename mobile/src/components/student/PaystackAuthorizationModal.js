@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { buildPaystackAuthorizationHtml, getPaystackPublicKey } from '../../services/paystackService';
@@ -5,15 +6,28 @@ import { colors } from '../../theme/colors';
 
 export function PaystackAuthorizationModal({ email, onClose, onError, onSuccess, visible }) {
   const publicKey = getPaystackPublicKey();
+  const handledMessageRef = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      handledMessageRef.current = false;
+    }
+  }, [visible]);
 
   function handleMessage(event) {
     try {
       const message = JSON.parse(event.nativeEvent.data);
+      if (handledMessageRef.current && ['success', 'close', 'error'].includes(message.type)) {
+        return;
+      }
       if (message.type === 'success') {
+        handledMessageRef.current = true;
         onSuccess?.(message.payload);
       } else if (message.type === 'close') {
+        handledMessageRef.current = true;
         onClose?.();
       } else if (message.type === 'error') {
+        handledMessageRef.current = true;
         onError?.(new Error(message.payload?.message || 'Paystack authorization failed.'));
       }
     } catch (error) {

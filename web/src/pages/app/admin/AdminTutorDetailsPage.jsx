@@ -57,16 +57,44 @@ export default function AdminTutorDetailsPage() {
   const onboardingStatus = useMemo(() => getTutorOnboardingStatus(tutor || {}), [tutor]);
   const resultsDocuments = documents.filter((document) => String(document?.documentType || TUTOR_DOCUMENT_TYPES.RESULTS).toLowerCase() === TUTOR_DOCUMENT_TYPES.RESULTS);
   const policeClearanceDocuments = documents.filter((document) => String(document?.documentType || '').toLowerCase() === TUTOR_DOCUMENT_TYPES.POLICE_CLEARANCE);
+  const idDocuments = documents.filter((document) => String(document?.documentType || '').toLowerCase() === TUTOR_DOCUMENT_TYPES.ID_DOCUMENT);
 
-  const updateStatus = async (status) => {
+  const allPoliceClearance = policeClearanceDocuments.length > 0
+    ? policeClearanceDocuments
+    : (tutor?.tutorProfile?.policeClearance?.fileUrl ? [{
+        id: 'profile_police_clearance',
+        fileName: tutor.tutorProfile.policeClearance.fileName || 'Police clearance document',
+        fileUrl: tutor.tutorProfile.policeClearance.fileUrl,
+        status: tutor.tutorProfile.policeClearance.status || 'uploaded',
+      }] : []);
+
+  const allIdDocuments = idDocuments.length > 0
+    ? idDocuments
+    : (tutor?.tutorProfile?.idDocument?.fileUrl || tutor?.tutorProfile?.idVerificationUrl ? [{
+        id: 'profile_id_document',
+        fileName: tutor?.tutorProfile?.idDocument?.fileName || 'Official ID Document',
+        fileUrl: tutor?.tutorProfile?.idDocument?.fileUrl || tutor?.tutorProfile?.idVerificationUrl,
+        status: tutor?.tutorProfile?.idDocument?.status || 'uploaded',
+      }] : []);
+
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const updateStatus = async (status, reason = '') => {
     if (!uid) return;
     try {
-      await setTutorVerificationStatus(uid, status);
+      setIsSubmitting(true);
+      await setTutorVerificationStatus(uid, status, reason);
       const refreshed = await getUserProfile(uid);
       setTutor(refreshed);
       setMessage(`Tutor verification updated to ${status}.`);
+      setRejectModalOpen(false);
+      setRejectionReason('');
     } catch (error) {
       setMessage(error.message || 'Unable to update tutor verification.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -78,6 +106,59 @@ export default function AdminTutorDetailsPage() {
       />
 
       {message ? <p className="rounded-2xl border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-700">{message}</p> : null}
+
+      {rejectModalOpen ? (
+        <div className="rounded-2xl border border-rose-300 bg-rose-50 p-4">
+          <h4 className="text-sm font-bold text-rose-900">Reject Tutor Verification</h4>
+          <p className="mt-1 text-xs text-rose-700">
+            Provide feedback explaining why verification was rejected so the tutor understands which document to re-upload.
+          </p>
+          <p className="mt-1 text-xs font-semibold text-rose-800">
+            Policy Notice: Uploaded private identity and police clearance documents are subject to permanent deletion within 24 hours of rejection.
+          </p>
+          <textarea
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+            placeholder="e.g. Police clearance certificate is expired, or results transcript is unreadable..."
+            rows={3}
+            className="mt-3 w-full rounded-xl border border-rose-300 bg-white p-2.5 text-sm text-zinc-900 focus:border-rose-500 focus:outline-none"
+          />
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => updateStatus('rejected', rejectionReason)}
+              className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+            >
+              {isSubmitting ? 'Saving...' : 'Confirm Rejection'}
+            </button>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => {
+                setRejectModalOpen(false);
+                setRejectionReason('');
+              }}
+              className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {tutor?.tutorProfile?.verificationStatus === 'rejected' ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <p className="text-xs uppercase tracking-wide font-bold text-rose-700">Current Rejection Feedback</p>
+          <p className="mt-1 text-sm font-medium text-rose-900">{tutor?.tutorProfile?.rejectionReason || 'No specific feedback provided.'}</p>
+          <p className="mt-2 text-xs font-semibold text-rose-800">
+            Policy Reminder: Private identity documents and police clearance records are permanently deleted 24 hours after rejection.
+          </p>
+          {tutor?.tutorProfile?.rejectedAt ? (
+            <p className="mt-1 text-xs text-rose-500">Rejected on: {formatDateTime(tutor.tutorProfile.rejectedAt)}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {isLoading ? <LoadingState message="Loading tutor details..." /> : null}
 
@@ -97,17 +178,39 @@ export default function AdminTutorDetailsPage() {
                 <button
                   type="button"
                   onClick={() => updateStatus('verified')}
-                  disabled={!onboardingStatus.complete || !hasCurrentTutorAgreement(tutor)}
+                  disabled={
+                    isSubmitting
+                    || !onboardingStatus.complete
+                    || !hasCurrentTutorAgreement(tutor)
+                    || !allPoliceClearance.length
+                    || !allIdDocuments.length
+                  }
+                  title={
+                    !allPoliceClearance.length
+                      ? 'Police clearance document required before verification'
+                      : !allIdDocuments.length
+                        ? 'Right-to-work ID document required before verification'
+                        : undefined
+                  }
                   className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Verify
                 </button>
                 <button
                   type="button"
-                  onClick={() => updateStatus('rejected')}
-                  className="rounded-xl border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-600"
+                  onClick={() => setRejectModalOpen(true)}
+                  disabled={isSubmitting}
+                  className="rounded-xl border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
                 >
                   Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateStatus('pending')}
+                  disabled={isSubmitting}
+                  className="rounded-xl border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                >
+                  Reset
                 </button>
                 <Link to="/app/admin/tutors" className="rounded-xl border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">
                   Back
@@ -130,7 +233,10 @@ export default function AdminTutorDetailsPage() {
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Selfie</p>
-                <p className="mt-1 text-sm font-semibold text-zinc-900">{tutor?.selfieUrl ? 'Uploaded' : 'Missing'}</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-900">{tutor?.selfieUrl || tutor?.profilePhoto ? 'Uploaded' : 'Missing'}</p>
+                {tutor?.selfieUrl || tutor?.profilePhoto ? (
+                  <a className="mt-1 inline-flex text-xs font-semibold text-brand hover:underline" href={tutor.selfieUrl || tutor.profilePhoto} target="_blank" rel="noreferrer">View photo</a>
+                ) : null}
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Grades to tutor</p>
@@ -138,13 +244,13 @@ export default function AdminTutorDetailsPage() {
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Active subjects</p>
-                <p className="mt-1 text-sm font-semibold text-zinc-900">{Array.isArray(tutor?.activeSubjects) && tutor.activeSubjects.length ? tutor.activeSubjects.join(', ') : 'None'}</p>
+                <p className="mt-1 text-sm font-semibold text-zinc-900">{Array.isArray(tutor?.activeSubjects) && tutor.activeSubjects.length ? tutor.activeSubjects.join(', ') : (Array.isArray(tutor?.tutorProfile?.teachingSubjects) && tutor.tutorProfile.teachingSubjects.length ? tutor.tutorProfile.teachingSubjects.join(', ') : 'None')}</p>
               </div>
             </div>
           </SectionCard>
 
-          <SectionCard title="Uploaded documents" subtitle="Result documents and police clearance submissions.">
-            <div className="grid gap-5 lg:grid-cols-2">
+          <SectionCard title="Uploaded documents" subtitle="Result documents, police clearance, and ID verification submissions.">
+            <div className="grid gap-5 lg:grid-cols-3">
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-zinc-800">Result documents</h3>
                 {resultsDocuments.length ? resultsDocuments.map((document) => (
@@ -161,13 +267,24 @@ export default function AdminTutorDetailsPage() {
 
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-zinc-800">Police clearance</h3>
-                {policeClearanceDocuments.length ? policeClearanceDocuments.map((document) => (
+                {allPoliceClearance.length ? allPoliceClearance.map((document) => (
                   <div key={document.id} className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
                     <p className="font-semibold text-zinc-900">{document.fileName || 'Police clearance document'}</p>
                     <p className="mt-1 text-xs text-zinc-500">Status: {document.status || 'uploaded'}</p>
                     {document.fileUrl ? <a className="mt-2 inline-flex font-semibold text-brand hover:underline" href={document.fileUrl} target="_blank" rel="noreferrer">Open file</a> : null}
                   </div>
                 )) : <EmptyState title="No police clearance" description="The tutor has not uploaded a police clearance document yet." />}
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-zinc-800">ID document</h3>
+                {allIdDocuments.length ? allIdDocuments.map((document) => (
+                  <div key={document.id} className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
+                    <p className="font-semibold text-zinc-900">{document.fileName || 'ID document'}</p>
+                    <p className="mt-1 text-xs text-zinc-500">Status: {document.status || 'uploaded'}</p>
+                    {document.fileUrl ? <a className="mt-2 inline-flex font-semibold text-brand hover:underline" href={document.fileUrl} target="_blank" rel="noreferrer">Open file</a> : null}
+                  </div>
+                )) : <EmptyState title="No ID document" description="The tutor has not uploaded an ID document yet." />}
               </div>
             </div>
           </SectionCard>
@@ -176,23 +293,23 @@ export default function AdminTutorDetailsPage() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Bank</p>
-                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.bankName || 'Not set'}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.bankName || tutor?.payout?.bankName || 'Not set'}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Account holder</p>
-                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.accountHolder || 'Not set'}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.accountHolder || tutor?.payout?.accountHolder || 'Not set'}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Account number</p>
-                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.accountNumber || 'Not set'}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.accountNumber || tutor?.payout?.accountNumber || 'Not set'}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Bank verification</p>
-                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.verificationStatus || 'unverified'}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{tutor?.tutorProfile?.payout?.verificationStatus || tutor?.payout?.verificationStatus || (tutor?.tutorProfile?.payout?.verified || tutor?.payout?.verified ? 'verified' : 'unverified')}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Checked at</p>
-                <p className="mt-1 font-semibold text-zinc-900">{formatDateTime(tutor?.tutorProfile?.payout?.verificationCheckedAt)}</p>
+                <p className="mt-1 font-semibold text-zinc-900">{formatDateTime(tutor?.tutorProfile?.payout?.verificationCheckedAt || tutor?.tutorProfile?.payout?.verifiedAt)}</p>
               </div>
               <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-wide text-zinc-500">Grades taught</p>

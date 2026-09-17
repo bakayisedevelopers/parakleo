@@ -1,6 +1,11 @@
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import { getPortalRoutes, normalizePortalRole } from '../constants/portal';
+import {
+  getPortalRoutes,
+  normalizePortalRole,
+  STUDENT_APP_DOWNLOAD_URL,
+  TUTOR_APP_DOWNLOAD_URL,
+} from '../constants/portal';
 import { usePortal } from '../hooks/usePortal';
 
 export default function MainLayout({ children }) {
@@ -23,13 +28,47 @@ export default function MainLayout({ children }) {
       </main>
       <footer className="border-t border-zinc-200 bg-zinc-50 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mb-12">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
             <div>
               <h4 className="mb-4 font-bold text-zinc-900">Product</h4>
               <ul className="space-y-2 text-sm text-zinc-600">
                 {showFeaturesLink ? (
-                  <li><a href={`${routes.landingPath}#features`} className={footerLinkClassName}>Features</a></li>
+                  <>
+                    <li><a href={`${routes.landingPath}#about`} className={footerLinkClassName}>About</a></li>
+                    <li><a href={`${routes.landingPath}#features`} className={footerLinkClassName}>Features</a></li>
+                    <li><a href={`${routes.landingPath}#how-it-works`} className={footerLinkClassName}>How it Works</a></li>
+                  </>
                 ) : null}
+                {role === 'student' ? (
+                  <li><Link to="/tutor" className={footerLinkClassName}>For Tutors</Link></li>
+                ) : role === 'tutor' ? (
+                  <li><Link to="/" className={footerLinkClassName}>For Students</Link></li>
+                ) : null}
+              </ul>
+            </div>
+            <div>
+              <h4 className="mb-4 font-bold text-zinc-900">Mobile Apps</h4>
+              <ul className="space-y-2 text-sm text-zinc-600">
+                <li>
+                  <a
+                    href={STUDENT_APP_DOWNLOAD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={footerLinkClassName}
+                  >
+                    Download Student App
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href={TUTOR_APP_DOWNLOAD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={footerLinkClassName}
+                  >
+                    Download Tutor App
+                  </a>
+                </li>
               </ul>
             </div>
             <div>
@@ -38,6 +77,7 @@ export default function MainLayout({ children }) {
                 <li><Link to="/privacy-policy" className={footerLinkClassName}>Privacy Policy</Link></li>
                 <li><Link to="/terms" className={footerLinkClassName}>Terms of Service</Link></li>
                 <li><Link to="/refund-policy" className={footerLinkClassName}>Refund Policy</Link></li>
+                <li><Link to="/payment-pricing-policy" className={footerLinkClassName}>Payment Policy</Link></li>
                 <li><Link to="/data-voice-policy" className={footerLinkClassName}>Data and Voice Handling</Link></li>
               </ul>
             </div>

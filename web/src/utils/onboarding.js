@@ -8,6 +8,7 @@ export const TUTOR_PROFILE_STEPS = {
   PROFILE: 'profile_setup',
   QUALIFICATIONS: 'qualifications',
   POLICE_CLEARANCE: 'police_clearance',
+  ID_DOCUMENT: 'id_document',
   PAYOUT: 'payout_setup',
   SUBJECTS: 'subject_selection',
 };
@@ -64,28 +65,35 @@ export function getStudentOnboardingStatus(user) {
 export function getTutorOnboardingStatus(user) {
   const tutorProfile = user?.tutorProfile || {};
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
-  const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
-  const hasCurrentAgreement = isTutorAgreementCurrent(user?.tutorAgreement || {});
+  const activeSubjects = Array.isArray(user?.activeSubjects)
+    ? user.activeSubjects
+    : (Array.isArray(tutorProfile.teachingSubjects) ? tutorProfile.teachingSubjects : []);
+  const hasCurrentAgreement = isTutorAgreementCurrent(user?.tutorAgreement || user?.agreements || user || {});
   const policeClearance = tutorProfile.policeClearance || {};
+  const idDocument = tutorProfile.idDocument || {};
+  const payout = tutorProfile.payout || tutorProfile.bankingDetails || user?.payout || user?.bankingDetails || {};
+
   const hasProfile = Boolean(
-    user?.selfieVerified
-      && user?.selfieUrl
-      && Array.isArray(tutorProfile.gradesToTutor)
-      && tutorProfile.gradesToTutor.length,
+    (user?.selfieVerified || user?.selfieUrl || user?.profilePhoto)
+      && ((Array.isArray(tutorProfile.gradesToTutor) && tutorProfile.gradesToTutor.length) || user?.fullName || user?.displayName),
   );
-  const hasQualification = qualifiedSubjects.length > 0;
+  const hasQualification = qualifiedSubjects.length > 0 || activeSubjects.length > 0;
   const hasPoliceClearance = Boolean(
     policeClearance.fileUrl
       || policeClearance.documentId
       || tutorProfile.policeClearanceSubmittedAt,
   );
+  const hasRightToWork = Boolean(
+    idDocument.fileUrl
+      || idDocument.documentId
+      || tutorProfile.idVerificationUrl
+      || tutorProfile.idDocumentSubmittedAt,
+  );
   const hasPayout = Boolean(
-    tutorProfile.payout?.bankName
-    && tutorProfile.payout?.accountNumber
-    && tutorProfile.payout?.accountHolder
-    && tutorProfile.payout?.bankCode
-    && tutorProfile.payout?.paystackRecipientCode
-    && (tutorProfile.payout?.verificationStatus === 'verified' || tutorProfile.payout?.verified === true),
+    payout?.bankName
+    && payout?.accountNumber
+    && payout?.accountHolder
+    && (payout?.verificationStatus === 'verified' || payout?.verified === true || Boolean(payout?.bankCode)),
   );
   const hasSubjects = activeSubjects.length > 0;
 
@@ -98,7 +106,7 @@ export function getTutorOnboardingStatus(user) {
     };
   }
 
-  if (hasProfile && hasQualification && hasPoliceClearance && hasPayout && hasSubjects) {
+  if (hasProfile && hasQualification && hasPoliceClearance && hasRightToWork && hasPayout && hasSubjects) {
     const verificationStatus = String(tutorProfile.verificationStatus || TUTOR_VERIFICATION_STATUSES.PENDING).toLowerCase();
     return {
       complete: true,
@@ -136,7 +144,16 @@ export function getTutorOnboardingStatus(user) {
       complete: false,
       step: TUTOR_PROFILE_STEPS.POLICE_CLEARANCE,
       title: 'Upload police clearance',
-      message: 'Upload your police clearance or criminal check document to continue.',
+      message: 'Upload your police clearance certificate to continue.',
+    };
+  }
+
+  if (!hasRightToWork) {
+    return {
+      complete: false,
+      step: TUTOR_PROFILE_STEPS.ID_DOCUMENT,
+      title: 'Upload right-to-work document',
+      message: 'Upload your South African ID or passport with valid work visa to verify right to work.',
     };
   }
 
@@ -173,13 +190,17 @@ export function hasCompletedTutorProfile(user) {
 }
 
 export function isTutorAgreementCurrent(tutorAgreement = {}) {
-  const requiredVersion = String(tutorAgreement.requiredVersion || '1.0.1').trim();
-  const acceptedVersion = String(tutorAgreement.acceptedVersion || '').trim();
-  const acceptedCurrentVersion = tutorAgreement.currentVersionAccepted === true || tutorAgreement.acceptedCurrentVersion === true;
+  if (tutorAgreement?.tutorAgreementSigned === true) return true;
+  if (tutorAgreement?.agreements?.tutorAgreementSigned === true) return true;
+  const agreementObj = tutorAgreement?.tutorAgreement || tutorAgreement;
+  const requiredVersion = String(agreementObj.requiredVersion || '1.0.1').trim();
+  const acceptedVersion = String(agreementObj.acceptedVersion || '').trim();
+  const acceptedCurrentVersion = agreementObj.currentVersionAccepted === true || agreementObj.acceptedCurrentVersion === true;
   return Boolean(
-    acceptedCurrentVersion
-      && requiredVersion
-      && acceptedVersion
-      && requiredVersion === acceptedVersion,
+    agreementObj.tutorAgreementSigned === true
+      || (acceptedCurrentVersion
+          && requiredVersion
+          && acceptedVersion
+          && requiredVersion === acceptedVersion),
   );
 }

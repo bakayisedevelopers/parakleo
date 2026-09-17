@@ -225,8 +225,21 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
 
   useEffect(() => {
     if (!shouldAutoOpenSession || !joinSessionId) return;
-    navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
-  }, [joinSessionId, navigate, shouldAutoOpenSession]);
+    if (relatedSession?.meetingProvider === 'gemini_live' || relatedSession?.sessionType === 'ai') {
+      navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
+    } else {
+      navigate({
+        key: 'ActiveSession',
+        params: {
+          sessionId: joinSessionId,
+          session: relatedSession,
+          requestId,
+          request,
+          parentTab: 'Requests',
+        },
+      });
+    }
+  }, [joinSessionId, navigate, relatedSession, request, requestId, shouldAutoOpenSession]);
 
   if (loading) {
     return <LoadingState label="Loading request status" />;
@@ -309,10 +322,25 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
             {canJoin && joinSessionId ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } })}
+                onPress={() => {
+                  if (relatedSession?.meetingProvider === 'gemini_live' || relatedSession?.sessionType === 'ai') {
+                    navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
+                  } else {
+                    navigate({
+                      key: 'ActiveSession',
+                      params: {
+                        sessionId: joinSessionId,
+                        session: relatedSession,
+                        requestId,
+                        request,
+                        parentTab: 'Requests',
+                      },
+                    });
+                  }
+                }}
                 style={styles.topJoinButton}
               >
-                <Text style={styles.topJoinButtonText}>Join session</Text>
+                <Text style={styles.topJoinButtonText}>Join lesson</Text>
                 <Ionicons name="arrow-forward" size={14} color="#ffffff" />
               </Pressable>
             ) : null}
@@ -379,11 +407,48 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
           {canJoin ? (
             <Pressable
               accessibilityRole="button"
-              onPress={() => navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } })}
+              onPress={() => {
+                if (relatedSession?.meetingProvider === 'gemini_live' || relatedSession?.sessionType === 'ai') {
+                  navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
+                } else {
+                  navigate({
+                    key: 'ActiveSession',
+                    params: {
+                      sessionId: joinSessionId,
+                      session: relatedSession,
+                      requestId,
+                      request,
+                      parentTab: 'Requests',
+                    },
+                  });
+                }
+              }}
               style={styles.joinButton}
             >
-              <Text style={styles.joinButtonText}>Join session</Text>
+              <Text style={styles.joinButtonText}>Join lesson</Text>
               <Ionicons name="arrow-forward" size={16} color="#ffffff" />
+            </Pressable>
+          ) : null}
+
+          {Boolean(joinSessionId) && ['completed', 'settled', 'canceled', 'canceled_during'].includes(relatedSessionStatus) ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                navigate({
+                  key: 'SessionSummary',
+                  params: {
+                    sessionId: joinSessionId,
+                    session: relatedSession,
+                    requestId,
+                    request,
+                    parentTab: 'Requests',
+                  },
+                });
+              }}
+              style={styles.joinButton}
+            >
+              <Text style={styles.joinButtonText}>View lesson summary & rating</Text>
+              <Ionicons name="star" size={16} color="#ffffff" />
             </Pressable>
           ) : null}
 

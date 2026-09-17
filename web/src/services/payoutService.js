@@ -247,8 +247,8 @@ export async function getAdminPayoutWeekDetails({ weekKey, tutorId }) {
         where('tutorId', '==', tutorId),
         where('status', '==', 'completed'),
       ),
-    );
-    sessions = fallback.docs
+    ).catch(() => null);
+    sessions = (fallback?.docs || [])
       .map((item) => ({ id: item.id, ...item.data() }))
       .filter((session) => getWeekKey(getSessionCompletedDate(session)) === weekKey);
   }

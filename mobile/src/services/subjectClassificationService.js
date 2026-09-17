@@ -2,7 +2,9 @@ import { getFirebaseClients, getFunctionEndpoint } from '../firebase/config';
 
 const CLASSIFY_SUBJECT_ENDPOINT = getFunctionEndpoint('classifySubject');
 const MAX_CLASSIFICATION_INPUT_CHARS = 6000;
-const CLASSIFICATION_TIMEOUT_MS = 12000;
+// Auto Free can take 20–40 seconds for a multimodal request; aborting at 12 seconds
+// discarded valid Kilo responses before the UI could use them.
+const CLASSIFICATION_TIMEOUT_MS = 120000;
 
 function buildFallbackClassification() {
   return {
@@ -200,9 +202,12 @@ export function buildSubjectClassificationInput({ typedText = '', attachmentExtr
   };
 }
 
-export async function classifySubjectFromText({ inputText = '', inputPayload = null, supportedSubjects = [] } = {}) {
+export async function classifySubjectFromText({ inputText = '', imageBase64s = [], attachments = [], inputPayload = null, supportedSubjects = [] } = {}) {
   const normalizedInput = normalizeText(inputText || inputPayload?.combinedText || inputPayload?.typedTextPreview || '');
-  if (!normalizedInput) {
+  const validAttachments = Array.isArray(attachments)
+    ? attachments.filter((attachment) => normalizeText(attachment?.base64))
+    : [];
+  if (!normalizedInput && (!Array.isArray(imageBase64s) || !imageBase64s.length) && !validAttachments.length) {
     return buildFallbackClassification();
   }
 
@@ -221,6 +226,8 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       },
       body: JSON.stringify({
         inputText: normalizedInput,
+        imageBase64s,
+        attachments: validAttachments,
         inputPayload,
         supportedSubjects,
       }),
@@ -238,6 +245,10 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       ? parsed.subjectConfidence
       : 'unknown';
     const topic = normalizeText(parsed?.topic);
+    const topics = Array.isArray(parsed?.topics)
+      ? parsed.topics.map((t) => normalizeText(t)).filter(Boolean)
+      : (topic ? [topic] : []);
+    const isPastExamPaper = Boolean(parsed?.isPastExamPaper);
     const estimatedMinutes = clampEstimatedMinutes(parsed?.estimatedMinutes);
     const needsManualSubjectSelection = Boolean(parsed?.needsManualSubjectSelection) || !supportedSubject;
 
@@ -245,15 +256,32 @@ export async function classifySubjectFromText({ inputText = '', inputPayload = n
       subject: supportedSubject,
       unsupportedSubject: normalizeText(parsed?.unsupportedSubject),
       topic,
+      topics,
+      isPastExamPaper,
       estimatedMinutes: estimatedMinutes || estimateMinutesFromPayload({ structuredPayload: inputPayload || {} }),
+      extractedText: normalizeText(parsed?.extractedText),
+      aiReasoning: normalizeText(parsed?.aiReasoning),
       subjectConfidence: confidence,
       needsManualSubjectSelection,
       unsupportedSubjectRequested: Boolean(parsed?.unsupportedSubjectRequested || parsed?.unsupportedSubject),
       unsupportedSubjectRecorded: Boolean(payload?.unsupportedSubjectRecorded),
-      academicBrainOutput: parsed?.academicBrainOutput || null,
+      provider: String(payload?.provider || 'kilo-ai-gateway'),
       isFallback: false,
     };
   } catch (error) {
-    return buildFallbackClassification();
+    console.warn('[subjectClassificationService] classification failed, using graceful fallback:', error?.message);
+    const fallback = buildFallbackClassification();
+    const defaultSubject = (supportedSubjects && supportedSubjects[0])
+      ? (supportedSubjects[0]?.value || supportedSubjects[0])
+      : 'Mathematics';
+    return {
+      ...fallback,
+      subject: defaultSubject,
+      topic: normalizedInput ? normalizedInput.slice(0, 60) : 'Uploaded Worksheet',
+      topics: [normalizedInput ? normalizedInput.slice(0, 60) : 'Uploaded Worksheet'],
+      estimatedMinutes: estimateMinutesFromPayload({ structuredPayload: inputPayload || {} }) || 30,
+      isFallback: true,
+      error: error?.message,
+    };
   }
 }

@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Parakleo Tutors",
+    "slug": "parakleo-tutors",
+    "scheme": "parakleotutors",
+    "version": "0.1.0",
+    "extra": {
+      "previewBuildCoordinator": true
+    },
+    "icon": "./assets/Logo.png",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/Logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.parakleo.tutors",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
+    },
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Parakleo Tutors uses your microphone so you can speak with your student during live tutoring sessions.",
+        "NSCameraUsageDescription": "Parakleo Tutors uses your camera for live video tutoring sessions.",
+        "NSLocationWhenInUseUsageDescription": "Parakleo Tutors uses your location to match you with nearby in-person student requests."
+      },
+      "bundleIdentifier": "com.parakleo.tutors"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Parakleo Tutors uses your camera to capture your profile selfie."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Parakleo Tutors uses your location to match you with nearby in-person student requests."
+        }
+      ]
+    ]
+  }
+}

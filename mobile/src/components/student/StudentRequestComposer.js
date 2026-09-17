@@ -26,6 +26,7 @@ import {
 import { recordAcademicBrainFeedback } from '../../services/academicBrainFeedbackService';
 import { estimateFreeMinutePricing } from '../../services/studentGrowthService';
 import { uploadUserFile } from '../../services/storageService';
+import { buildSafetySnapshot } from '../../constants/safety';
 import { colors } from '../../theme/colors';
 import { getStudentOnboardingStatus } from '../../utils/onboarding';
 import {
@@ -671,6 +672,8 @@ export function StudentRequestComposer({
         attachmentExtractionByKey,
       });
 
+      const safetySnapshot = buildSafetySnapshot(user);
+
       const requestId = await createClassRequest({
         studentId: user.uid,
         studentName: user.fullName || user.displayName || 'Student',
@@ -686,6 +689,12 @@ export function StudentRequestComposer({
         selectedCardId: cardId,
         pricingSnapshot: quoteWithDiscount,
         boardPreparationSource,
+        mode: 'in_person',
+        safetySnapshot,
+        isMinor: safetySnapshot.isMinor,
+        guardianPresenceRequired: safetySnapshot.guardianPresenceRequired,
+        preferSameGenderTutor: safetySnapshot.preferSameGenderTutor,
+        preferPublicMeetingPlace: safetySnapshot.preferPublicMeetingPlace,
       });
       setPendingStatusRequestId(requestId);
       openRequestStatus(requestId);

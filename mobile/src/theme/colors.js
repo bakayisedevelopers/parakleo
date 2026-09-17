@@ -1,5 +1,5 @@
 export const colors = {
-  background: '#f8fafc',
+  background: '#f0fdf4',
   surface: '#ffffff',
   surfaceMuted: '#f4f4f5',
   border: '#e4e4e7',
@@ -7,6 +7,7 @@ export const colors = {
   muted: '#71717a',
   brand: '#10b981',
   brandDark: '#047857',
+  brandLight: '#ecfdf5',
   cyan: '#06b6d4',
   indigo: '#4f46e5',
   danger: '#dc2626',

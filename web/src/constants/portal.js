@@ -1,3 +1,6 @@
+export const STUDENT_APP_DOWNLOAD_URL = 'https://parakleo-student-download.bakayisedevelopers.co.za';
+export const TUTOR_APP_DOWNLOAD_URL = 'https://parakleo-tutors-download.bakayisedevelopers.co.za';
+
 const PORTAL_STORAGE_KEY = 'parakleo_active_portal';
 const PENDING_SIGNUP_ROLE_KEY = 'parakleo_pending_signup_role';
 
@@ -13,6 +16,7 @@ const PORTAL_ROUTES = {
     loginPath: '/login',
     signupPath: '/signup',
     dashboardPath: '/app/student',
+    downloadUrl: STUDENT_APP_DOWNLOAD_URL,
     canSignUp: true,
   },
   tutor: {
@@ -20,6 +24,7 @@ const PORTAL_ROUTES = {
     loginPath: '/login',
     signupPath: '/signup',
     dashboardPath: '/app/tutor',
+    downloadUrl: TUTOR_APP_DOWNLOAD_URL,
     canSignUp: true,
   },
   admin: {

@@ -32,26 +32,21 @@ export function NotificationsScreen({
 }) {
   return (
     <View style={styles.page}>
-      <View style={styles.pageGlowTop} />
-      <View style={styles.pageGlowBottom} />
       <View style={styles.wrap}>
-        <Card style={styles.heroCard}>
-          <View style={styles.heroGlowTopLeft} />
-          <View style={styles.heroGlowBottomRight} />
-          <View style={styles.heroContent}>
-            <Text style={styles.kicker}>In-app notifications</Text>
-            <Text style={styles.title}>Notifications</Text>
-            <Text style={styles.subtitle}>
-              {unreadCount ? `${unreadCount} unread update${unreadCount === 1 ? '' : 's'}.` : 'Everything is up to date.'}
-            </Text>
-          </View>
-        </Card>
-
         <Card style={styles.actionsCard}>
-          <Pressable accessibilityRole="button" onPress={onMarkAllRead} style={styles.primaryAction}>
-            <Ionicons name="checkmark-done" size={16} color="#ffffff" />
-            <Text style={styles.primaryActionText}>Mark all read</Text>
-          </Pressable>
+          <View style={styles.actionsRow}>
+            <Pressable accessibilityRole="button" onPress={onMarkAllRead} style={styles.primaryAction}>
+              <Ionicons name="checkmark-done" size={16} color="#ffffff" />
+              <Text style={styles.primaryActionText}>Mark all read</Text>
+            </Pressable>
+            {unreadCount > 0 ? (
+              <View style={styles.unreadPill}>
+                <Text style={styles.unreadPillText}>
+                  {unreadCount} unread
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={styles.helperCopy}>Real-time request, session, and payment updates appear here.</Text>
         </Card>
 
@@ -122,78 +117,33 @@ export function NotificationsScreen({
 
 const styles = StyleSheet.create({
   page: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: 'transparent',
     flex: 1,
-  },
-  pageGlowTop: {
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    borderRadius: 180,
-    height: 260,
-    position: 'absolute',
-    right: -110,
-    top: 24,
-    width: 260,
-  },
-  pageGlowBottom: {
-    backgroundColor: 'rgba(59,130,246,0.10)',
-    borderRadius: 220,
-    bottom: 80,
-    height: 300,
-    left: -140,
-    position: 'absolute',
-    width: 300,
   },
   wrap: {
     gap: 16,
     paddingBottom: 12,
   },
-  heroCard: {
-    overflow: 'hidden',
-    padding: 0,
-  },
-  heroGlowTopLeft: {
-    backgroundColor: 'rgba(16,185,129,0.18)',
-    borderRadius: 220,
-    height: 220,
-    left: -70,
-    position: 'absolute',
-    top: -40,
-    width: 220,
-  },
-  heroGlowBottomRight: {
-    backgroundColor: 'rgba(59,130,246,0.14)',
-    borderRadius: 200,
-    bottom: -70,
-    height: 220,
-    position: 'absolute',
-    right: -80,
-    width: 220,
-  },
-  heroContent: {
-    gap: 8,
-    padding: 18,
-  },
-  kicker: {
-    color: 'rgba(16,185,129,0.8)',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: '#0f172a',
-    fontSize: 30,
-    fontWeight: '900',
-    letterSpacing: -0.8,
-    lineHeight: 34,
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   actionsCard: {
     gap: 10,
+  },
+  actionsRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  unreadPill: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#bbf7d0',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  unreadPillText: {
+    color: '#15803d',
+    fontSize: 12,
+    fontWeight: '700',
   },
   primaryAction: {
     alignItems: 'center',

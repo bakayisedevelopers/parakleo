@@ -85,7 +85,8 @@ const LEGACY_SAFE_PRICING_SNAPSHOT = {
 };
 
 function roundCurrency(value) {
-  return Number((Number(value || 0)).toFixed(2));
+  const num = Number(value || 0);
+  return Number((Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2));
 }
 
 function getTimeOfDayBucket(hour) {
@@ -614,13 +615,177 @@ async function loadPricingConfig(db, fallback = DEFAULT_PRICING_CONFIG) {
   }
 }
 
+const BILLING_RULES = {
+  PLATFORM_FEE_RATE: 0.27,
+  TUTOR_PAYOUT_RATE: 0.73,
+};
+
+function computeTravelFee(distanceKm = 0) {
+  const km = Math.max(0, Number(distanceKm || 0));
+  const baseFee = 40.00;
+  const extraKm = Math.max(0, km - 10);
+  const extraFee = extraKm * 4.00;
+  return roundCurrency(baseFee + extraFee);
+}
+
+function computeBookingFee(lessonTuitionAmount = 0) {
+  const tuition = Number(lessonTuitionAmount || 0);
+  if (tuition <= 0) return 0;
+  const rawFee = roundCurrency(tuition * 0.01);
+  return roundCurrency(Math.min(2.00, Math.max(1.00, rawFee)));
+}
+
+function computeCancellationQuote({
+  status,
+  mode = 'in_person',
+  canceledBy = 'student',
+  distanceTravelledKm = 0,
+  totalRouteKm = 10,
+  estimatedAmount = 100,
+  elapsedMinutes = 0,
+  agreedRatePerMinute = 3.0,
+  acceptedElapsedMinutes = 0,
+  isPastAcceptedGrace = false,
+} = {}) {
+  // If tutor cancels at any time: student pays R0, tutor receives R0, platform receives R0 (100% full refund)
+  if (canceledBy === 'tutor') {
+    return {
+      cancellationFee: 0,
+      bookingFee: 0,
+      travelFee: 0,
+      lessonFee: 0,
+      tutorPayout: 0,
+      platformFee: 0,
+      finalAmount: 0,
+      explanation: 'Tutor canceled the session. No charge applies to student (100% refund).',
+    };
+  }
+
+  const normalizedStatus = String(status || '').toLowerCase();
+
+  // Student cancels before acceptance: R0 (pending, matching, searching, requested, offered)
+  if (['pending', 'matching', 'searching', 'requested', 'offered'].includes(normalizedStatus)) {
+    return {
+      cancellationFee: 0,
+      bookingFee: 0,
+      travelFee: 0,
+      lessonFee: 0,
+      tutorPayout: 0,
+      platformFee: 0,
+      finalAmount: 0,
+      explanation: 'Session canceled before tutor accepted. No charge applies.',
+    };
+  }
+
+  // Booking fee: 1% of lesson-only amount bounded to R1.00-R2.00 retaining cents (100% to platform)
+  const bookingFee = computeBookingFee(estimatedAmount);
+
+  // Student cancels after acceptance but before travel starts
+  if (normalizedStatus === 'accepted') {
+    const isPastGrace = Boolean(isPastAcceptedGrace || Number(acceptedElapsedMinutes || 0) > 2);
+    if (!isPastGrace) {
+      return {
+        cancellationFee: 0,
+        bookingFee: 0,
+        travelFee: 0,
+        lessonFee: 0,
+        tutorPayout: 0,
+        platformFee: 0,
+        finalAmount: 0,
+        explanation: 'Session canceled within 2-minute acceptance grace period. No charge applies.',
+      };
+    }
+
+    return {
+      cancellationFee: bookingFee,
+      bookingFee,
+      travelFee: 0,
+      lessonFee: 0,
+      tutorPayout: 0,
+      platformFee: bookingFee,
+      finalAmount: bookingFee,
+      explanation: 'Session canceled after 2-minute acceptance grace period (pre-travel). Booking fee retained by platform.',
+    };
+  }
+
+  const fullTravelFee = computeTravelFee(totalRouteKm);
+
+  // Student cancels while tutor is travelling
+  if (normalizedStatus === 'travelling') {
+    // 100% of travel surcharge allocated to tutor, 100% of booking fee to platform
+    let travelCompensation = fullTravelFee;
+    if (distanceTravelledKm > 0 && distanceTravelledKm < totalRouteKm) {
+      travelCompensation = Math.min(fullTravelFee, Math.max(20.00, roundCurrency(distanceTravelledKm * 4)));
+    }
+    const finalAmount = roundCurrency(bookingFee + travelCompensation);
+    return {
+      cancellationFee: finalAmount,
+      bookingFee,
+      travelFee: travelCompensation,
+      lessonFee: 0,
+      tutorPayout: travelCompensation,
+      platformFee: bookingFee,
+      finalAmount,
+      explanation: `Canceled while tutor was travelling (R${travelCompensation.toFixed(2)} travel surcharge + R${bookingFee.toFixed(2)} booking fee).`,
+    };
+  }
+
+  // Student cancels after tutor arrives or during preparation window
+  if (['arrived', 'waiting_student', 'preparing_for_lesson'].includes(normalizedStatus)) {
+    // Travel surcharge (100% to tutor) + 30-min minimum lesson fee (73% tutor / 27% platform) + booking fee (100% to platform)
+    const minLessonFee = roundCurrency(30 * agreedRatePerMinute);
+    const stageBookingFee = computeBookingFee(minLessonFee);
+    const tutorLessonPortion = roundCurrency(minLessonFee * BILLING_RULES.TUTOR_PAYOUT_RATE);
+    const platformLessonPortion = roundCurrency(minLessonFee * BILLING_RULES.PLATFORM_FEE_RATE);
+    const tutorPayout = roundCurrency(fullTravelFee + tutorLessonPortion);
+    const platformFee = roundCurrency(stageBookingFee + platformLessonPortion);
+    const finalAmount = roundCurrency(stageBookingFee + fullTravelFee + minLessonFee);
+    return {
+      cancellationFee: finalAmount,
+      bookingFee: stageBookingFee,
+      travelFee: fullTravelFee,
+      lessonFee: minLessonFee,
+      tutorPayout,
+      platformFee,
+      finalAmount,
+      explanation: `Canceled after tutor arrived / during preparation (R${fullTravelFee.toFixed(2)} travel surcharge + 30-min lesson fee of R${minLessonFee.toFixed(2)} + R${stageBookingFee.toFixed(2)} booking fee).`,
+    };
+  }
+
+  // Active lesson cancellation (after lesson started: in_session, in_progress, etc.)
+  // Elapsed billable time (subject to 30-min minimum, 73% tutor / 27% platform) + travel surcharge (100% to tutor) + booking fee (100% to platform)
+  const billedMinutes = Math.max(30, Number(elapsedMinutes || 0));
+  const lessonFee = roundCurrency(billedMinutes * agreedRatePerMinute);
+  const stageBookingFee = computeBookingFee(lessonFee);
+  const tutorLessonPortion = roundCurrency(lessonFee * BILLING_RULES.TUTOR_PAYOUT_RATE);
+  const platformLessonPortion = roundCurrency(lessonFee * BILLING_RULES.PLATFORM_FEE_RATE);
+  const tutorPayout = roundCurrency(fullTravelFee + tutorLessonPortion);
+  const platformFee = roundCurrency(stageBookingFee + platformLessonPortion);
+  const finalAmount = roundCurrency(stageBookingFee + fullTravelFee + lessonFee);
+  return {
+    cancellationFee: finalAmount,
+    bookingFee: stageBookingFee,
+    travelFee: fullTravelFee,
+    lessonFee,
+    tutorPayout,
+    platformFee,
+    finalAmount,
+    explanation: `Lesson ended early for ${billedMinutes} mins billed at R${agreedRatePerMinute.toFixed(2)}/min + R${fullTravelFee.toFixed(2)} travel surcharge + R${stageBookingFee.toFixed(2)} booking fee.`,
+  };
+}
+
 module.exports = {
+  BILLING_RULES,
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
   PRICING_CONFIG_VERSION,
-  computePricingQuote,
-  loadPricingConfig,
-  sanitizePricingSnapshot,
+  computeBookingFee,
+  computeCancellationQuote,
   computeFinalAmountFromSnapshot,
+  computePricingQuote,
+  computeTravelFee,
+  loadPricingConfig,
   roundCurrency,
+  sanitizePricingSnapshot,
 };
+

@@ -82,9 +82,18 @@ function buildPickerHtml({ accept, capture, title }) {
 
       const readFile = (file) => new Promise((resolve, reject) => {
         const reader = new FileReader();
+        let mimeType = file.type || '';
+        const nameLower = String(file.name || '').toLowerCase();
+        if (!mimeType || mimeType === 'application/octet-stream') {
+          if (nameLower.endsWith('.pdf')) mimeType = 'application/pdf';
+          else if (nameLower.endsWith('.png')) mimeType = 'image/png';
+          else if (nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg')) mimeType = 'image/jpeg';
+          else mimeType = 'application/octet-stream';
+        }
+
         reader.onload = () => resolve({
           name: file.name,
-          type: file.type,
+          type: mimeType,
           size: file.size,
           lastModified: file.lastModified,
           dataUrl: String(reader.result || ''),
@@ -113,7 +122,6 @@ function buildPickerHtml({ accept, capture, title }) {
 
       document.getElementById('openPicker').addEventListener('click', () => input.click());
       document.getElementById('cancelPicker').addEventListener('click', () => post({ type: 'cancel' }));
-      window.addEventListener('load', () => setTimeout(() => input.click(), 250));
     </script>
   </body>
 </html>`;
@@ -128,7 +136,7 @@ export function AttachmentPickerModal({
 }) {
   const isCamera = mode === 'camera';
   const html = buildPickerHtml({
-    accept: isCamera ? 'image/*' : 'image/*,application/pdf',
+    accept: isCamera ? 'image/*' : 'image/*,application/pdf,.pdf',
     capture: isCamera ? 'environment' : '',
     title: isCamera ? 'Take Picture' : 'Upload files',
   });
@@ -144,6 +152,11 @@ export function AttachmentPickerModal({
             <WebView
               originWhitelist={['*']}
               source={{ html }}
+              allowFileAccess
+              domStorageEnabled
+              javaScriptEnabled
+              allowFileAccessFromFileURLs
+              allowUniversalAccessFromFileURLs
               onMessage={(event) => {
                 try {
                   const payload = JSON.parse(event.nativeEvent.data || '{}');

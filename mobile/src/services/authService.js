@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -95,6 +96,11 @@ export async function signupWithEmail({ name, email, password }) {
 export async function logoutUser() {
   const { auth } = getFirebaseClients();
   await signOut(auth);
+}
+
+export async function resetPasswordWithEmail(email) {
+  const { auth } = getFirebaseClients();
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 export async function deleteAccount(uid) {

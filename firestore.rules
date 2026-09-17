@@ -14,9 +14,17 @@ service cloud.firestore {
       return signedIn()
         && (
           request.auth.token.email == 'jabuobed1@gmail.com'
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
-          || 'admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles
+          || request.auth.token.admin == true
+          || request.auth.token.role == 'admin'
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && (
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true
+              || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
+              || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('activeRole', '') == 'admin'
+              || ('admin' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('roles', []))
+            )
+          )
         );
     }
 
@@ -100,9 +108,31 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /system/{documentId} {
-      allow read: if signedIn();
-      allow write: if isAdmin();
+    match /referrals/{referralId} {
+      allow get, list: if isAdmin()
+        || isOwner(resource.data.referrerId)
+        || isOwner(resource.data.referredUserId);
+    }
+
+    match /tutorWeeklyPayouts/{payoutId} {
+      allow get, list: if isAdmin() || (signedIn() && resource.data.tutorId == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /legalDocuments/{documentId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /legalDocumentVersions/{versionId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /userAgreementAcceptances/{acceptanceId} {
+      allow get, list: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
     match /{document=**} {

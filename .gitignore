@@ -13,6 +13,13 @@ mobile/android/app/build/
 mobile/android/.gradle/
 mobile/.expo/
 mobile/.expo-shared/
+tutors/node_modules/
+tutors/android/app/build/
+tutors/android/.gradle/
+tutors/android/local.properties
+mobile/android/local.properties
+tutors/.expo/
+tutors/.expo-shared/
 
 # Python
 __pycache__/
@@ -49,3 +56,17 @@ firebase-debug.*.log
 *.log
 commands.txt
 .tools/
+
+# Local agent / preview runtime artifacts
+.codex-remote-attachments/
+mobile/.tmp-export-check/
+mobile/.tmp-student-map-export/
+mobile/dist-download/
+mobile/dist-export/
+mobile/eas-build-log.*
+tutors/dist-download/
+tutors/dist/
+tutors/.tmp*/
+tutors/.expo-verify*/
+preview-dashboard-site*.tar.gz
+preview-dashboard/

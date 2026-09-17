@@ -2,21 +2,30 @@
   "name": "parakleo-mobile",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "npm@11.12.1",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
+    "start:preview": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "stage:debug-apk": "node scripts/stage-debug-apk.mjs",
+    "compile:debug-apk": "node scripts/compile-debug-apk.mjs",
+    "build:debug-apk": "npm run compile:debug-apk && npm run stage:debug-apk"
   },
   "dependencies": {
     "@types/react": "~19.1.10",
     "expo": "~54.0.35",
+    "expo-dev-client": "~6.0.21",
+    "expo-image-picker": "~17.0.11",
+    "expo-location": "~19.0.8",
     "expo-status-bar": "~3.0.9",
     "firebase": "^11.10.0",
     "react": "19.1.0",
     "react-dom": "^19.1.0",
     "react-native": "0.81.5",
+    "react-native-maps": "1.20.1",
     "react-native-web": "^0.21.2",
     "react-native-webview": "13.15.0"
   },

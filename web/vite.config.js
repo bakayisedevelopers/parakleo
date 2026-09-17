@@ -2,10 +2,16 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const functionsEmulatorTarget = 'http://localhost:5001/parakleo/us-central1'
+const previewHost = process.env.PREVIEW_PUBLIC_HOST
 
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: '127.0.0.1',
+    allowedHosts: previewHost ? [previewHost] : [],
+    hmr: previewHost
+      ? { protocol: 'wss', host: previewHost, clientPort: 443 }
+      : undefined,
     proxy: {
       '/ice-config': {
         target: functionsEmulatorTarget,

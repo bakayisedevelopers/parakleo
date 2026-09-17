@@ -18,16 +18,30 @@
       "package": "com.anonymous.parakleomobile",
       "permissions": [
         "RECORD_AUDIO",
-        "MODIFY_AUDIO_SETTINGS"
+        "MODIFY_AUDIO_SETTINGS",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "ios": {
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Parakleo uses your microphone so you can speak with your tutor during live sessions."
+        "NSMicrophoneUsageDescription": "Parakleo uses your microphone so you can speak with your tutor during live sessions.",
+        "NSCameraUsageDescription": "Parakleo uses your camera to capture worksheets and homework problems.",
+        "NSLocationWhenInUseUsageDescription": "Parakleo uses your location to find nearby tutors for in-person sessions."
       },
       "bundleIdentifier": "com.anonymous.parakleomobile"
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Parakleo uses your location to find nearby tutors for in-person sessions."
+        }
+      ]
+    ],
     "extra": {
+      "previewBuildCoordinator": true,
       "eas": {
         "projectId": "f2cfebb4-9452-4496-8730-b265efb2e25b"
       }

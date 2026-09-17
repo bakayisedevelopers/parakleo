@@ -6,6 +6,7 @@ const DOCUMENT_STATUSES = new Set(['UPLOADED', 'PROCESSING', 'VERIFIED', 'FAILED
 export const TUTOR_DOCUMENT_TYPES = {
   RESULTS: 'results',
   POLICE_CLEARANCE: 'police_clearance',
+  ID_DOCUMENT: 'id_document',
 };
 const ALLOWED_TUTOR_SUBJECTS = new Set(SUPPORTED_TUTOR_SUBJECTS.map((subject) => String(subject).trim().toLowerCase()));
 const TUTOR_SUBJECT_ALIASES = new Map([

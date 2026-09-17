@@ -1,4 +1,16 @@
-import { deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from 'firebase/firestore';
 import { getFirebaseClients } from '../firebase/config';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
@@ -23,7 +35,24 @@ export function buildDefaultStudentProfile({ uid, email, displayName }) {
       grade: null,
       curriculum: '',
       discoverySource: '',
+      safety: {
+        learnerType: 'adult',
+        isMinor: false,
+        guardian: {
+          name: '',
+          relationship: '',
+          phoneNumber: '',
+          email: '',
+          consentAcceptedAt: null,
+        },
+        preferences: {
+          preferSameGenderTutor: false,
+          preferPublicMeetingPlace: false,
+          guardianPresenceRequired: false,
+        },
+      },
     },
+    gender: '',
     paymentMethods: [],
     wallet: {
       balance: 0,
@@ -59,6 +88,29 @@ export async function getUserProfile(uid) {
   const { db } = getFirebaseClients();
   const snapshot = await getDoc(doc(db, 'users', uid));
   return snapshot.exists() ? { uid: snapshot.id, ...snapshot.data() } : null;
+}
+
+export async function getStudentReferralInvitees(uid, maximum = 3) {
+  if (!uid) return [];
+
+  const { db } = getFirebaseClients();
+  const referrals = await getDocs(
+    query(
+      collection(db, 'referrals'),
+      where('referrerId', '==', uid),
+      limit(Math.max(1, maximum)),
+    ),
+  );
+
+  const invitees = await Promise.all(
+    referrals.docs.map(async (referral) => {
+      const referredUserId = String(referral.data()?.referredUserId || '');
+      if (!referredUserId) return null;
+      return getUserProfile(referredUserId);
+    }),
+  );
+
+  return invitees.filter(Boolean);
 }
 
 export async function updateUserProfile(uid, updates) {

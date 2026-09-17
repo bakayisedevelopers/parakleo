@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "liveTracking": {
+      "classRequests": {
+        "$requestId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}

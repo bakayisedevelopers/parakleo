@@ -6,7 +6,7 @@ const PDFDocument = require('pdfkit');
 const LEGAL_ENTITY_NAME = 'Parakleo, operated by Jabu Msiza';
 const TUTOR_AGREEMENT_DOCUMENT_ID = 'tutor_agreement';
 const TUTOR_AGREEMENT_TITLE = 'Tutor Agreement';
-const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.1';
+const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.1.0';
 const TUTOR_AGREEMENT_STAMP_LABEL = 'PARAKLEO AGREEMENT RECORD';
 const TUTOR_AGREEMENT_VERSION_PREFIX = 'tutor_agreement_';
 const TUTOR_AGREEMENT_STATUS = {
@@ -82,11 +82,13 @@ This Tutor Agreement is entered into between **${LEGAL_ENTITY_NAME}** ("Parakleo
 - Parakleo may use AI-assisted tools for extraction, classification, whiteboard preparation, lesson support, or moderation.
 - The tutor must not rely blindly on AI output and remains responsible for checking educational correctness during lessons.
 
-**10. Payouts and fees**
+**10. Payouts, fees, and promotional lesson compensation**
 
-- Tutor payout percentages and rules are determined by Parakleo and may be displayed in-product or communicated separately.
-- Payouts may be subject to refunds, disputes, chargebacks, cancellations, platform fees, payment processor fees, fraud checks, or policy violations.
-- The tutor is responsible for all taxes and associated obligations.
+- Standard billable lesson revenue is split 73% to the tutor and 27% to Parakleo. Approved in-person travel surcharges (R40.00 base up to 10 km, plus R4.00 per km beyond 10 km) are allocated 100% to the tutor to reimburse out-of-pocket travel costs.
+- **First-Time Student Promotional Lessons**: In accordance with platform launch promotional rules, new students may receive a 25% discount (capped at R50 maximum discount) on their first completed paid lesson. For any first-time student promotional lesson, the tutor receives 75% of the discounted total amount paid and settled by the student for that lesson. This 75% promotional payout is inclusive of all travel compensation and lesson compensation for that booking. Parakleo retains only the remaining amount after tutor payout and operational gateway fees, with no separate promotional upside. The tutor explicitly acknowledges and agrees to this 75% promotional payout structure prior to accepting student bookings.
+- Payouts are disbursed to the tutor's registered and verified South African bank account.
+- Payouts may be adjusted or withheld in cases of cancellations, disputes, refunds, chargebacks, fraud, or policy violations.
+- The tutor is responsible for all personal taxes, statutory obligations, and registrations arising from tutoring earnings.
 
 **11. Cancellations, disputes, refunds, and chargebacks**
 
@@ -458,9 +460,17 @@ function buildUserAgreementSnapshot({
   activeVersion,
   acceptanceId,
   pdfUrl = '',
+  typedSignatureName = '',
 }) {
   const acceptanceUserId = tutorId || userId;
   return {
+    agreements: {
+      ...(user?.agreements || {}),
+      tutorAgreementSigned: true,
+      tutorAgreementSignedAt: new Date().toISOString(),
+      tutorAgreementVersion: activeVersion?.version || TUTOR_AGREEMENT_DEFAULT_VERSION,
+      typedSignatureName: String(typedSignatureName || user?.agreements?.typedSignatureName || '').trim(),
+    },
     tutorAgreement: {
       ...(user?.tutorAgreement || {}),
       documentId: TUTOR_AGREEMENT_DOCUMENT_ID,
@@ -481,6 +491,7 @@ function buildUserAgreementSnapshot({
       latestAcceptedAt: new Date().toISOString(),
       latestAcceptanceId: acceptanceId,
       latestAcceptancePdfUrl: pdfUrl || '',
+      typedSignatureName: String(typedSignatureName || user?.tutorAgreement?.typedSignatureName || '').trim(),
       acceptedByUserId: acceptanceUserId,
     },
   };
@@ -579,6 +590,7 @@ async function acceptTutorAgreement({
       activeVersion,
       acceptanceId,
       pdfUrl: existingAcceptance.pdfUrl,
+      typedSignatureName: existingAcceptance.typedSignatureName || '',
     });
 
     await db.collection('users').doc(user.uid).set({
@@ -657,6 +669,7 @@ async function acceptTutorAgreement({
           activeVersion,
           acceptanceId,
           pdfUrl,
+          typedSignatureName: signatureName,
         }),
         tutorProfile: {
           ...(user.tutorProfile || {}),

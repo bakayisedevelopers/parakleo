@@ -4,7 +4,12 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node C:\\Commander\\PreviewRouter\\src\\cli.js launch --config ..\\preview.json --app student-web",
+    "start": "npm run dev",
+    "dev:students": "node C:\\Commander\\PreviewRouter\\src\\cli.js launch --config ..\\preview.json --app student-web",
+    "dev:tutors": "node C:\\Commander\\PreviewRouter\\src\\cli.js launch --config ..\\preview.json --app tutors-web",
+    "dev:admin": "node C:\\Commander\\PreviewRouter\\src\\cli.js launch --config ..\\preview.json --app admin-web",
+    "dev:raw": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },

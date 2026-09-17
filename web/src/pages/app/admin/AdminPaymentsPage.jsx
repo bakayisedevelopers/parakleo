@@ -39,9 +39,12 @@ export default function AdminPaymentsPage() {
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const load = async () => {
     setIsLoading(true);
+    setErrorMessage('');
     try {
       const [payoutItems, tutorItems] = await Promise.all([
         listAdminWeeklyPayouts(),
@@ -49,6 +52,9 @@ export default function AdminPaymentsPage() {
       ]);
       setItems(payoutItems);
       setTutors(tutorItems);
+    } catch (error) {
+      console.error('Failed to load admin payouts:', error);
+      setErrorMessage(error?.message || 'Unable to load weekly payouts or tutor profiles. Please verify your admin permissions.');
     } finally {
       setIsLoading(false);
     }
@@ -60,9 +66,15 @@ export default function AdminPaymentsPage() {
 
   const syncData = async () => {
     setIsSyncing(true);
+    setErrorMessage('');
+    setSuccessMessage('');
     try {
       await syncWeeklyPayoutRecordsFromSessions({ lookbackWeeks: 12 });
       await load();
+      setSuccessMessage('Weekly payout records synchronized from completed sessions.');
+    } catch (error) {
+      console.error('Failed to sync weekly payouts:', error);
+      setErrorMessage(error?.message || 'Unable to sync weekly payout records.');
     } finally {
       setIsSyncing(false);
     }
@@ -86,27 +98,38 @@ export default function AdminPaymentsPage() {
   }, [filter, items, search]);
 
   const updateStatus = async (item, status) => {
-    await updateWeeklyPayoutStatus({
-      weekKey: item.weekKey,
-      tutorId: item.tutorId,
-      status,
-      paidBy: {
-        uid: user?.uid || null,
-        email: user?.email || null,
-      },
-    });
-    await load();
+    setErrorMessage('');
+    try {
+      await updateWeeklyPayoutStatus({
+        weekKey: item.weekKey,
+        tutorId: item.tutorId,
+        status,
+        paidBy: {
+          uid: user?.uid || null,
+          email: user?.email || null,
+        },
+      });
+      await load();
+    } catch (error) {
+      console.error('Failed to update payout status:', error);
+      setErrorMessage(error?.message || 'Unable to update payout status.');
+    }
   };
 
   const updateNotes = async (item, notes) => {
-    await updateWeeklyPayoutStatus({
-      weekKey: item.weekKey,
-      tutorId: item.tutorId,
-      status: item.status,
-      notes,
-      paidBy: item.paidBy || null,
-    });
-    await load();
+    try {
+      await updateWeeklyPayoutStatus({
+        weekKey: item.weekKey,
+        tutorId: item.tutorId,
+        status: item.status,
+        notes,
+        paidBy: item.paidBy || null,
+      });
+      await load();
+    } catch (error) {
+      console.error('Failed to update payout notes:', error);
+      setErrorMessage(error?.message || 'Unable to update payout notes.');
+    }
   };
 
   const toggleDetails = async (item) => {
@@ -118,14 +141,32 @@ export default function AdminPaymentsPage() {
 
     setExpandedId(targetId);
     if (!detailsMap[targetId]) {
-      const details = await getAdminPayoutWeekDetails({ weekKey: item.weekKey, tutorId: item.tutorId });
-      setDetailsMap((prev) => ({ ...prev, [targetId]: details }));
+      try {
+        const details = await getAdminPayoutWeekDetails({ weekKey: item.weekKey, tutorId: item.tutorId });
+        setDetailsMap((prev) => ({ ...prev, [targetId]: details }));
+      } catch (error) {
+        console.error('Failed to load payout week details:', error);
+        setErrorMessage(error?.message || 'Unable to load payout details.');
+      }
     }
   };
 
   return (
     <div className="space-y-6">
       <PageHeader title="Manual Payout Management" description="Track weekly tutor amounts, mark payout state, and add payout notes." />
+
+      {errorMessage ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p className="font-semibold">Permission or Load Error</p>
+          <p className="mt-1">{errorMessage}</p>
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+          {successMessage}
+        </div>
+      ) : null}
 
       <SectionCard className="border border-zinc-200 bg-white shadow-sm">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

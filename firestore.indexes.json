@@ -1,0 +1,65 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "classRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "currentOfferTutorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "endedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tutorWeeklyPayouts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tutorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "weekStart",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tutorWeeklyPayouts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tutorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "weekKey",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

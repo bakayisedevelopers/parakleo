@@ -4,8 +4,9 @@ const IMAGE_OCR_ENDPOINT = getFunctionEndpoint('extractImageOcr');
 
 function getAttachmentFileType(attachment) {
   const mimeType = String(attachment?.type || '').toLowerCase();
-  if (mimeType === 'application/pdf') return 'pdf';
-  if (mimeType.startsWith('image/')) return 'image';
+  const nameLower = String(attachment?.name || '').toLowerCase();
+  if (mimeType === 'application/pdf' || nameLower.endsWith('.pdf')) return 'pdf';
+  if (mimeType.startsWith('image/') || nameLower.endsWith('.png') || nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg')) return 'image';
   return 'image';
 }
 
@@ -57,9 +58,18 @@ export async function extractSingleAttachment(attachment) {
     throw new Error('You must be signed in before extracting attachment text.');
   }
 
+  const nameLower = String(attachment?.name || '').toLowerCase();
+  let mimeType = String(attachment?.type || '').toLowerCase();
+  if (!mimeType || mimeType === 'application/octet-stream') {
+    if (nameLower.endsWith('.pdf')) mimeType = 'application/pdf';
+    else if (nameLower.endsWith('.png')) mimeType = 'image/png';
+    else if (nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg')) mimeType = 'image/jpeg';
+    else mimeType = 'application/octet-stream';
+  }
+
   const body = {
     imageBase64: getBase64Payload(attachment?.dataUrl),
-    mimeType: attachment?.type || 'application/octet-stream',
+    mimeType,
     fileName: attachment?.name || 'attachment',
   };
   let response = null;

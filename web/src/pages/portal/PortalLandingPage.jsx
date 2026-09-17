@@ -1,31 +1,69 @@
+import { useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowRight,
   BookOpen,
   Calendar,
   CheckCircle2,
+  Download,
   Globe,
   ShieldCheck,
   Sparkles,
-  UserCheck,
   Wallet,
   Zap,
 } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import MainLayout from '../../layouts/MainLayout';
 import { useAuth } from '../../hooks/useAuth';
-import { getPortalLabel, getPortalRoutes, normalizePortalRole } from '../../constants/portal';
+import {
+  getPortalLabel,
+  getPortalRoutes,
+  normalizePortalRole,
+  persistPortalRole,
+  STUDENT_APP_DOWNLOAD_URL,
+  TUTOR_APP_DOWNLOAD_URL,
+} from '../../constants/portal';
 
-function CTAButton({ children, variant = 'primary', ...props }) {
+function CTAButton({
+  children,
+  variant = 'primary',
+  href,
+  isExternal = false,
+  className = '',
+  ...props
+}) {
   const styles =
     variant === 'primary'
       ? 'bg-brand text-white hover:bg-brand-dark shadow-lg shadow-brand/30'
       : 'border border-brand/30 bg-brand/10 text-brand hover:bg-brand/20';
 
+  const classes = `inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-bold transition ${styles} ${className}`;
+
+  if (href) {
+    if (isExternal || href.startsWith('http')) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={classes}
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <Link to={href} className={classes} {...props}>
+        {children}
+      </Link>
+    );
+  }
+
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-bold transition ${styles}`}
+      className={classes}
       {...props}
     >
       {children}
@@ -47,72 +85,90 @@ function FeatureCard({ icon: Icon, title, description }) {
 
 const PORTAL_COPY = {
   student: {
-    badge: 'Student Portal',
-    title: 'Request help in minutes.',
+    badge: 'In-Person Tutoring',
+    title: 'Request verified in-person tutors near you.',
     subtitle:
-      'Discover verified tutors, submit a request quickly, and follow your session flow from one polished workspace.',
-    aboutTitle: 'About the student portal',
+      'Connect with qualified tutors for one-on-one, in-person academic support. Download the Parakleo Student mobile app to request a lesson, track arrival in real time, and verify meeting with a secure 4-digit PIN.',
+    aboutTitle: 'About Parakleo for students',
     aboutBody:
-      'The student portal is built for fast access to help. It keeps requests, payments, session progress, and follow-up in one place so students can move from problem to live support without friction.',
-    primaryCta: { label: 'Request Class Now', href: '/signup', icon: Zap },
-    secondaryCta: { label: 'Student Login', href: '/login', variant: 'secondary' },
-    chips: ['Verified tutors only', 'Secure card authorization', 'Flexible live sessions'],
+      'Parakleo is dedicated exclusively to in-person tutoring. When you need help with a school subject, use the Parakleo Student mobile app to request a tutor nearby. Our proximity dispatch matches you with verified tutors, provides 3-second live GPS travel tracking, and unlocks the lesson only after 4-digit PIN confirmation on physical meeting.',
+    primaryCta: {
+      label: 'Download Student App',
+      href: STUDENT_APP_DOWNLOAD_URL,
+      icon: Download,
+      isExternal: true,
+    },
+    secondaryCta: {
+      label: 'Teach on Parakleo',
+      href: '/tutor',
+      variant: 'secondary',
+    },
+    chips: ['Android mobile app', 'Live GPS travel tracking', 'Verified background checks'],
     features: [
-      { icon: Zap, title: 'Instant Requests', description: 'Submit a topic in seconds and notify online tutors immediately.' },
-      { icon: ShieldCheck, title: 'Verified Tutors', description: 'Tutor profile checks and qualification thresholds for safer matching.' },
-      { icon: Globe, title: 'Learn Anywhere', description: 'Join sessions from mobile or desktop with live status tracking.' },
-      { icon: Calendar, title: 'Flexible Sessions', description: 'Start now or schedule around your day with minimal setup.' },
+      { icon: Zap, title: 'Proximity Matching', description: 'Request help and match with top-rated verified tutors teaching nearby.' },
+      { icon: ShieldCheck, title: 'Background Verified', description: 'Every tutor undergoes thorough transcript checks and police clearance verification.' },
+      { icon: Globe, title: 'Live Route Tracking', description: 'Watch your tutor approach with 3-second realtime GPS location updates.' },
+      { icon: Calendar, title: '4-Digit Arrival PIN', description: 'Meet safely. Confirm physical arrival with a one-time PIN before billing begins.' },
     ],
     steps: [
-      { step: '01', title: 'Complete profile', text: 'Set up your student details once.' },
-      { step: '02', title: 'Request help', text: 'Describe the work you need and confirm your subject.' },
-      { step: '03', title: 'Join and learn', text: 'Track the session and pay from the same workspace.' },
+      { step: '01', title: 'Download Student App', text: 'Install the Parakleo Student mobile app on your Android device.' },
+      { step: '02', title: 'Request an in-person tutor', text: 'Select your subject, describe your problem, and confirm your location.' },
+      { step: '03', title: 'Verify arrival PIN & learn', text: 'Enter the tutor’s 4-digit PIN upon arrival to start your lesson.' },
     ],
   },
   tutor: {
-    badge: 'Tutor Portal',
-    title: 'Teach on your schedule.',
+    badge: 'Teach in Person',
+    title: 'Teach on your schedule and earn fairly.',
     subtitle:
-      'Accept live requests, manage classes, track payments, and keep your tutoring workflow in one place.',
-    aboutTitle: 'About the tutor portal',
+      'Accept nearby in-person tutoring requests, navigate directly with built-in GPS, and get paid 73% of lesson fees plus 100% of the travel surcharge. Download the Parakleo Tutors mobile app to apply and go online.',
+    aboutTitle: 'About Parakleo for tutors',
     aboutBody:
-      'The tutor portal is a focused workspace for accepting requests, managing availability, reviewing agreements, and following live sessions from one control surface.',
-    primaryCta: { label: 'Create Tutor Account', href: '/signup', icon: UserCheck },
-    secondaryCta: { label: 'Tutor Login', href: '/login', variant: 'secondary' },
-    chips: ['Tutor-only access', 'Live request dispatch', 'Payout tracking'],
+      'The Parakleo Tutors mobile app is your in-person teaching companion. Set your availability, receive direct proximity dispatch offers with audio chimes, navigate directly to students, verify meetings with a 4-digit arrival PIN, and receive automated, transparent payouts.',
+    primaryCta: {
+      label: 'Download Tutor App',
+      href: TUTOR_APP_DOWNLOAD_URL,
+      icon: Download,
+      isExternal: true,
+    },
+    secondaryCta: {
+      label: 'Looking for a Tutor?',
+      href: '/',
+      variant: 'secondary',
+    },
+    chips: ['Android mobile app', '73% tutor revenue split', '100% travel surcharge payout'],
     features: [
-      { icon: BookOpen, title: 'Qualified Requests', description: 'See class requests that match your subject and availability.' },
-      { icon: Sparkles, title: 'Agreement Flow', description: 'Review tutor terms and onboarding steps before you go live.' },
-      { icon: Wallet, title: 'Payments', description: 'Monitor earnings and payout activity from your dashboard.' },
-      { icon: ShieldCheck, title: 'Role enforced access', description: 'This portal only accepts tutor accounts and routes them to tutor tools.' },
+      { icon: BookOpen, title: 'Radial Proximity Offers', description: 'Receive direct 45-second timed lesson offers from nearby students when online.' },
+      { icon: Sparkles, title: 'Built-in GPS Navigation', description: 'Turn-by-turn navigation guided directly to the student’s meeting address.' },
+      { icon: Wallet, title: 'Fair, Guaranteed Payouts', description: 'Keep 73% of lesson earnings, plus 100% of fuel/transit travel surcharges.' },
+      { icon: ShieldCheck, title: '4-Digit Meeting PIN', description: 'Display your unique one-time PIN on arrival to confirm physical meeting.' },
     ],
     steps: [
-      { step: '01', title: 'Create tutor profile', text: 'Register as a tutor and complete your details.' },
-      { step: '02', title: 'Go online', text: 'Switch availability on to receive class requests.' },
-      { step: '03', title: 'Accept and teach', text: 'Open the session room and manage the class from one flow.' },
+      { step: '01', title: 'Download Tutor App', text: 'Get the Parakleo Tutors mobile app on your Android device.' },
+      { step: '02', title: 'Complete Verification', text: 'Upload your academic transcripts and police clearance PDF for admin review.' },
+      { step: '03', title: 'Go Online & Teach', text: 'Toggle your online status, accept nearby requests, and navigate to students.' },
     ],
   },
   admin: {
-    badge: 'Admin Portal',
+    badge: 'Platform Operations',
     title: 'Operate the platform from one control room.',
     subtitle:
-      'Review tutors, monitor payments, and manage agreements and subject demand without exposing student tools.',
-    aboutTitle: 'About the admin portal',
+      'Review tutor verification documents, manage legal agreements, and monitor payout batches without exposing student or tutor tools.',
+    aboutTitle: 'About platform administration',
     aboutBody:
-      'The admin portal exists for platform operations. It keeps governance, tutoring oversight, payment review, and policy work separate from student and tutor workflows.',
+      'The Parakleo Admin portal is the operational control center. Dedicated administrators use this web workspace to review uploaded tutor qualifications, inspect police clearance certificates, verify applicants, and oversee platform financials.',
     primaryCta: { label: 'Admin Login', href: '/login', icon: ShieldCheck },
     secondaryCta: null,
-    chips: ['Restricted access', 'Platform oversight', 'Operational tools only'],
+    chips: ['Restricted access', 'Tutor verification queue', 'Manual payout tracking'],
     features: [
-      { icon: ShieldCheck, title: 'Access control', description: 'Keep admin-only tools separate from tutor and student flows.' },
-      { icon: Wallet, title: 'Payments', description: 'Monitor payouts and billing status across the platform.' },
-      { icon: Globe, title: 'Platform visibility', description: 'Track operational health across tutors and students.' },
-      { icon: Sparkles, title: 'Policy management', description: 'Manage agreements and unsupported subjects centrally.' },
+      { icon: ShieldCheck, title: 'Tutor Verification', description: 'Inspect academic transcripts and police clearance certificates.' },
+      { icon: Wallet, title: 'Payment Management', description: 'Audit lesson revenues, travel surcharges, and approve tutor payouts.' },
+      { icon: Globe, title: 'Platform Oversight', description: 'Monitor active tutor density, subject requests, and service health.' },
+      { icon: Sparkles, title: 'Legal & Agreements', description: 'Manage tutor agreement versions and terms compliance.' },
     ],
     steps: [
-      { step: '01', title: 'Authenticate securely', text: 'Sign in with an approved admin account.' },
-      { step: '02', title: 'Review operations', text: 'Inspect tutors, agreements, and payments from the dashboard.' },
-      { step: '03', title: 'Act on exceptions', text: 'Resolve issues without exposing student or tutor tools.' },
+      { step: '01', title: 'Authenticate securely', text: 'Sign in with authorized administrative credentials.' },
+      { step: '02', title: 'Inspect verification queue', text: 'Review pending tutor documentation and police clearances.' },
+      { step: '03', title: 'Manage operations', text: 'Approve qualified tutors and manage manual payout batches.' },
     ],
   },
 };
@@ -127,7 +183,11 @@ export default function PortalLandingPage({ portalRole }) {
   const portal = getLandingCopy(role);
   const routes = getPortalRoutes(role);
 
-  if (!isInitializing && user && rememberMe && normalizePortalRole(user?.activeRole || user?.role) === role) {
+  useEffect(() => {
+    persistPortalRole(role);
+  }, [role]);
+
+  if (!isInitializing && user && rememberMe && role === 'admin' && normalizePortalRole(user?.activeRole || user?.role) === 'admin') {
     return <Navigate to={routes.dashboardPath} replace />;
   }
 
@@ -153,19 +213,22 @@ export default function PortalLandingPage({ portalRole }) {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link to={portal.primaryCta.href}>
-                <CTAButton>
-                  <portal.primaryCta.icon className="mr-2 h-4 w-4" />
-                  {portal.primaryCta.label}
-                </CTAButton>
-              </Link>
+              <CTAButton
+                href={portal.primaryCta.href}
+                isExternal={portal.primaryCta.isExternal}
+              >
+                <portal.primaryCta.icon className="mr-2 h-4 w-4" />
+                {portal.primaryCta.label}
+              </CTAButton>
               {portal.secondaryCta ? (
-                <Link to={portal.secondaryCta.href}>
-                  <CTAButton variant={portal.secondaryCta.variant || 'secondary'}>
-                    {portal.secondaryCta.label}
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </CTAButton>
-                </Link>
+                <CTAButton
+                  href={portal.secondaryCta.href}
+                  isExternal={portal.secondaryCta.isExternal}
+                  variant={portal.secondaryCta.variant || 'secondary'}
+                >
+                  {portal.secondaryCta.label}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </CTAButton>
               ) : null}
             </div>
 

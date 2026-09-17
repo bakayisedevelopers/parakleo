@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "projectName": "parakleo",
+  "commanderProjectId": "NX2k5vUAU3929xvD4mLx",
+  "apps": [
+    {
+      "id": "student-web",
+      "type": "vite-web",
+      "directory": "web",
+      "start": "npm run dev:raw"
+    },
+    {
+      "id": "tutors-web",
+      "type": "vite-web",
+      "directory": "web",
+      "start": "npm run dev:raw"
+    },
+    {
+      "id": "admin-web",
+      "type": "vite-web",
+      "directory": "web",
+      "start": "npm run dev:raw"
+    },
+    {
+      "id": "mobile-metro",
+      "type": "expo-mobile",
+      "directory": "mobile",
+      "start": "node node_modules/expo/bin/cli start --dev-client",
+      "hostname": "parakleo-mobile-metro.bakayisedevelopers.co.za",
+      "publicProxy": true,
+      "build": {
+        "kind": "android-debug",
+        "command": "npm run compile:debug-apk",
+        "publishCommand": "npm run stage:debug-apk",
+        "artifact": "android/app/build/outputs/apk/debug/app-debug.apk",
+        "automation": {
+          "enabled": true,
+          "settleMs": 45000,
+          "sourceSettleMs": 3000,
+          "nativeInputs": [
+            "app.json",
+            "app.config.js",
+            "app.config.ts",
+            "../Logo.png",
+            "android/settings.gradle",
+            "android/build.gradle",
+            "android/gradle.properties",
+            "android/app/build.gradle",
+            "android/app/src"
+          ],
+          "toolingInputs": [
+            "tsconfig.json"
+          ],
+          "sourceInputs": [
+            "App.js",
+            "src",
+            "assets",
+            "babel.config.js",
+            "metro.config.js"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preview-portal",
+      "type": "node-service",
+      "directory": ".",
+      "start": "node C:/Commander/PreviewRouter/dist/portal-server.js",
+      "hostname": "preview.bakayisedevelopers.co.za"
+    },
+    {
+      "id": "student-apk-download",
+      "type": "node-service",
+      "directory": ".",
+      "start": "node scripts/serve-student-download.mjs",
+      "hostname": "parakleo-student-download.bakayisedevelopers.co.za"
+    },
+    {
+      "id": "tutors-apk-download",
+      "type": "node-service",
+      "directory": ".",
+      "start": "node scripts/serve-tutors-download.mjs",
+      "hostname": "parakleo-tutors-download.bakayisedevelopers.co.za"
+    },
+    {
+      "id": "tutors-metro",
+      "type": "expo-mobile",
+      "directory": "tutors",
+      "start": "node node_modules/expo/bin/cli start --dev-client",
+      "hostname": "parakleo-tutors-dev.bakayisedevelopers.co.za",
+      "publicProxy": true,
+      "build": {
+        "kind": "android-debug",
+        "command": "npm run compile:debug-apk",
+        "publishCommand": "npm run stage:debug-apk",
+        "artifact": "android/app/build/outputs/apk/debug/app-debug.apk",
+        "automation": {
+          "enabled": true,
+          "settleMs": 45000,
+          "sourceSettleMs": 3000,
+          "nativeInputs": [
+            "app.json",
+            "app.config.js",
+            "app.config.ts",
+            "android/settings.gradle",
+            "android/build.gradle",
+            "android/gradle.properties",
+            "android/app/build.gradle",
+            "android/app/src"
+          ],
+          "toolingInputs": [
+            "tsconfig.json"
+          ],
+          "sourceInputs": [
+            "App.js",
+            "src",
+            "assets",
+            "babel.config.js",
+            "metro.config.js"
+          ]
+        }
+      }
+    }
+  ],
+  "services": [
+    {
+      "id": "firebase-functions",
+      "directory": "functions",
+      "exposure": "internal"
+    },
+    {
+      "id": "gemini-live-proxy",
+      "directory": "services/gemini-live-proxy",
+      "exposure": "internal",
+      "defaultPort": 8080
+    }
+  ]
+}

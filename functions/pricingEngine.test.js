@@ -1,8 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  BILLING_RULES,
+  computeBookingFee,
+  computeCancellationQuote,
   computeFinalAmountFromSnapshot,
   computePricingQuote,
+  computeTravelFee,
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
   sanitizePricingSnapshot,
@@ -392,3 +396,204 @@ test('minimum discounted rate is respected', () => {
   assert.equal(quote.effectiveRatePerMinute, 1.67);
   assert.equal(quote.totalAmount, 157);
 });
+
+test('BILLING_RULES adheres to 73% tutor / 27% platform revenue split', () => {
+  assert.equal(BILLING_RULES.TUTOR_PAYOUT_RATE, 0.73);
+  assert.equal(BILLING_RULES.PLATFORM_FEE_RATE, 0.27);
+  assert.equal(Number((BILLING_RULES.TUTOR_PAYOUT_RATE + BILLING_RULES.PLATFORM_FEE_RATE).toFixed(2)), 1.00);
+});
+
+test('computeTravelFee applies R40 base up to 10 km and R4/km beyond 10 km', () => {
+  assert.equal(computeTravelFee(0), 40.00);
+  assert.equal(computeTravelFee(5), 40.00);
+  assert.equal(computeTravelFee(10), 40.00);
+  assert.equal(computeTravelFee(10.5), 42.00);
+  assert.equal(computeTravelFee(11), 44.00);
+  assert.equal(computeTravelFee(15), 60.00);
+  assert.equal(computeTravelFee(25), 100.00);
+  assert.equal(computeTravelFee(-5), 40.00);
+  assert.equal(computeTravelFee(null), 40.00);
+});
+
+test('computeBookingFee satisfies 6 required boundary conditions (BUG-002)', () => {
+  // 1. Tuition R50.00: 1% = R0.50 -> clamped to floor of R1.00
+  assert.equal(computeBookingFee(50), 1.00);
+
+  // 2. Tuition R100.00: 1% = R1.00 -> exactly R1.00
+  assert.equal(computeBookingFee(100), 1.00);
+
+  // 3. Tuition R150.00: 1% = R1.50 -> retains cents as R1.50
+  assert.equal(computeBookingFee(150), 1.50);
+
+  // 4. Tuition R185.50: 1% = R1.855 -> rounded to R1.86 retaining cents
+  assert.equal(computeBookingFee(185.50), 1.86);
+
+  // 5. Tuition R200.00: 1% = R2.00 -> R2.00
+  assert.equal(computeBookingFee(200), 2.00);
+
+  // 6. Tuition R350.00: 1% = R3.50 -> clamped to ceiling of R2.00
+  assert.equal(computeBookingFee(350), 2.00);
+
+  // Zero and negative tuition return 0
+  assert.equal(computeBookingFee(0), 0);
+  assert.equal(computeBookingFee(-20), 0);
+});
+
+test('computeCancellationQuote: tutor cancellation gives 100% full refund at any stage', () => {
+  const stages = ['accepted', 'travelling', 'arrived', 'in_session'];
+  for (const status of stages) {
+    const quote = computeCancellationQuote({
+      status,
+      canceledBy: 'tutor',
+      estimatedAmount: 200,
+      totalRouteKm: 15,
+      elapsedMinutes: 20,
+    });
+    assert.equal(quote.cancellationFee, 0);
+    assert.equal(quote.bookingFee, 0);
+    assert.equal(quote.travelFee, 0);
+    assert.equal(quote.lessonFee, 0);
+    assert.equal(quote.tutorPayout, 0);
+    assert.equal(quote.platformFee, 0);
+    assert.equal(quote.finalAmount, 0);
+  }
+});
+
+test('computeCancellationQuote: student cancel before acceptance is free (R0)', () => {
+  const preAcceptanceStatuses = ['pending', 'matching', 'searching', 'requested', 'offered'];
+  for (const status of preAcceptanceStatuses) {
+    const quote = computeCancellationQuote({
+      status,
+      canceledBy: 'student',
+      estimatedAmount: 150,
+    });
+    assert.equal(quote.cancellationFee, 0);
+    assert.equal(quote.bookingFee, 0);
+    assert.equal(quote.finalAmount, 0);
+  }
+});
+
+test('computeCancellationQuote: student cancel in accepted status within 2-min grace is free (R0)', () => {
+  const quote = computeCancellationQuote({
+    status: 'accepted',
+    canceledBy: 'student',
+    estimatedAmount: 150,
+    acceptedElapsedMinutes: 1.5,
+    isPastAcceptedGrace: false,
+  });
+  assert.equal(quote.cancellationFee, 0);
+  assert.equal(quote.bookingFee, 0);
+  assert.equal(quote.finalAmount, 0);
+});
+
+test('computeCancellationQuote: student cancel in accepted status past 2-min grace retains booking fee only', () => {
+  const quote = computeCancellationQuote({
+    status: 'accepted',
+    canceledBy: 'student',
+    estimatedAmount: 150,
+    acceptedElapsedMinutes: 3,
+    isPastAcceptedGrace: true,
+  });
+  assert.equal(quote.bookingFee, 1.50);
+  assert.equal(quote.travelFee, 0);
+  assert.equal(quote.lessonFee, 0);
+  assert.equal(quote.tutorPayout, 0);
+  assert.equal(quote.platformFee, 1.50);
+  assert.equal(quote.cancellationFee, 1.50);
+  assert.equal(quote.finalAmount, 1.50);
+});
+
+test('computeCancellationQuote: student cancel while tutor is travelling charges travel surcharge + booking fee', () => {
+  // Total route 12 km -> Travel surcharge: 40 + (12-10)*4 = 48.00 (100% tutor)
+  // Estimated tuition R150 -> Booking fee: 1.50 (100% platform)
+  const quote = computeCancellationQuote({
+    status: 'travelling',
+    canceledBy: 'student',
+    estimatedAmount: 150,
+    totalRouteKm: 12,
+  });
+  assert.equal(quote.travelFee, 48.00);
+  assert.equal(quote.bookingFee, 1.50);
+  assert.equal(quote.lessonFee, 0);
+  assert.equal(quote.tutorPayout, 48.00);
+  assert.equal(quote.platformFee, 1.50);
+  assert.equal(quote.finalAmount, 49.50);
+});
+
+test('computeCancellationQuote: student cancel while tutor is travelling with en-route distance compensation', () => {
+  // Total route 15 km (full fee 60.00). Distance travelled 5 km -> compensation is max(20.00, 5*4) = 20.00
+  const quote = computeCancellationQuote({
+    status: 'travelling',
+    canceledBy: 'student',
+    estimatedAmount: 150,
+    totalRouteKm: 15,
+    distanceTravelledKm: 5,
+  });
+  assert.equal(quote.travelFee, 20.00);
+  assert.equal(quote.bookingFee, 1.50);
+  assert.equal(quote.tutorPayout, 20.00);
+  assert.equal(quote.platformFee, 1.50);
+  assert.equal(quote.finalAmount, 21.50);
+});
+
+test('computeCancellationQuote: student cancel in arrived/preparing charges travel + 30-min lesson fee + booking fee', () => {
+  // Route 10 km -> Travel fee 40.00
+  // Rate 3.60/min -> 30-min lesson fee = 108.00 (73% tutor = 78.84, 27% platform = 29.16)
+  // Booking fee on 108.00 = 1.08 (100% platform)
+  // Total = 40.00 + 108.00 + 1.08 = 149.08
+  // Tutor payout = 40.00 + 78.84 = 118.84
+  // Platform fee = 1.08 + 29.16 = 30.24
+  const quote = computeCancellationQuote({
+    status: 'arrived',
+    canceledBy: 'student',
+    agreedRatePerMinute: 3.60,
+    totalRouteKm: 10,
+  });
+  assert.equal(quote.travelFee, 40.00);
+  assert.equal(quote.lessonFee, 108.00);
+  assert.equal(quote.bookingFee, 1.08);
+  assert.equal(quote.tutorPayout, 118.84);
+  assert.equal(quote.platformFee, 30.24);
+  assert.equal(quote.finalAmount, 149.08);
+});
+
+test('computeCancellationQuote: student cancel during active session enforces 30-min minimum', () => {
+  // Elapsed 10 minutes < 30-min minimum -> billed for 30 minutes
+  const quote = computeCancellationQuote({
+    status: 'in_session',
+    canceledBy: 'student',
+    elapsedMinutes: 10,
+    agreedRatePerMinute: 3.60,
+    totalRouteKm: 10,
+  });
+  assert.equal(quote.travelFee, 40.00);
+  assert.equal(quote.lessonFee, 108.00);
+  assert.equal(quote.bookingFee, 1.08);
+  assert.equal(quote.tutorPayout, 118.84);
+  assert.equal(quote.platformFee, 30.24);
+  assert.equal(quote.finalAmount, 149.08);
+});
+
+test('computeCancellationQuote: student cancel during active session with elapsed > 30 minutes', () => {
+  // Elapsed 45 mins at 3.00/min = 135.00
+  // Route 15 km -> Travel fee: 40 + 5*4 = 60.00
+  // Booking fee on 135.00: 1.35
+  // Lesson 73% tutor: 98.55; 27% platform: 36.45
+  // Tutor payout: 60.00 + 98.55 = 158.55
+  // Platform fee: 1.35 + 36.45 = 37.80
+  // Final amount: 60.00 + 135.00 + 1.35 = 196.35
+  const quote = computeCancellationQuote({
+    status: 'in_session',
+    canceledBy: 'student',
+    elapsedMinutes: 45,
+    agreedRatePerMinute: 3.00,
+    totalRouteKm: 15,
+  });
+  assert.equal(quote.travelFee, 60.00);
+  assert.equal(quote.lessonFee, 135.00);
+  assert.equal(quote.bookingFee, 1.35);
+  assert.equal(quote.tutorPayout, 158.55);
+  assert.equal(quote.platformFee, 37.80);
+  assert.equal(quote.finalAmount, 196.35);
+});
+

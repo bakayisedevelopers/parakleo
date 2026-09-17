@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "projectName": "Parakleo",
+  "projectStatus": "active",
+  "reviewStatus": "plan_approved",
+  "currentMilestoneId": "M7",
+  "lastCompletedMilestoneId": "M6",
+  "activeWorker": null,
+  "lastCompletedTask": "[M7-T7-ACTIVITY-LIFECYCLE-CRASH-FIX-AND-METRO-RESTORE]",
+  "nextScheduledTask": "[M7-T2-DUAL-DEVICE-VERIFICATION]",
+  "lock": {
+    "isLocked": false,
+    "lockedBy": null,
+    "lockedAt": null
+  },
+  "reviewGates": {
+    "planApprovedByHuman": true,
+    "lastHumanReviewDate": "2026-09-13T17:15:00.000Z",
+    "pendingActionsCount": 3,
+    "notes": "Plan approved by project owner. Confirmed decisions adopted for stage cancellation charges, 100% tutor travel surcharge allocation, 100% platform booking fee allocation, 4-digit PIN, and arrival PIN unlock with 5-minute prep grace before billing clock start. 2026-09-14 owner added development cloud deployment policy: deploy affected low-risk functions after code changes; require approval and cost estimate for high-frequency schedules, bulk data operations, payment capture risk, or unclear paid-service exposure. 2026-09-14 user manual testing logged UTR-20260914-01 with changes requested; M7-T3 student mobile stabilization completed (BUG-005, BUG-006, BUG-007 resolved). 2026-09-14 Admin Web manual testing logged UTR-20260914-02: BUG-008 Agreements startTime TypeError (resolved by investigation as browser extension noise), BUG-009 Payouts insufficient permissions (resolved with firestore rules and admin error handling), and BUG-010 sessions index resolved and configured in firestore.indexes.json. M7-T4 Admin Web stabilization completed. 2026-09-14 owner approved launch feature intake: student onboarding requires selfie plus phone/email verification with optional card/cash default; automatic new-account free minutes should be replaced by a 25% first paid lesson discount capped at R50; referral rewards grant 15 free minutes only after referred student completes first paid/discounted lesson; tutor onboarding requires police clearance plus right-to-work ID/passport/work-visa manual admin review; scheduled/recurring lessons and broader rewards remain post-launch planning items. 2026-09-14 owner approved REQ-011 for Student Safety Profile, Guardian Mode for minors, tutor safety badges, and soft same-gender tutor preference matching."
+  },
+  "launchScope": {
+    "studentMobile": "in_person_primary",
+    "tutorMobile": "in_person_primary",
+    "adminWeb": "operational_primary",
+    "publicWeb": "informational_download_only",
+    "onlineTutoring": "preserved_post_launch"
+  },
+  "confirmedDecisions": {
+    "travelSurcharge": "R40.00 up to 10 km + R4.00/km beyond 10 km (100% allocated to Tutor)",
+    "bookingFee": "1% of lesson-only amount bounded to R1.00 - R2.00 retaining cents (100% allocated to Platform)",
+    "revenueSplit": "73% Tutor / 27% Platform for applicable lesson revenue",
+    "telemetryTargetIntervalSeconds": 3,
+    "physicalLessonUnlock": "4-digit one-time PIN confirmation on arrival (Tutor displays, Student enters)",
+    "billingStartTrigger": "PIN verification confirms arrival/meeting and starts 5-minute preparation grace window; billing clock begins when either user taps Start Lesson or when the 5-minute preparation grace elapses",
+    "cancellationStageCharges": "Requested/Searching: R0. Accepted <2 min: R0. Accepted >2 min pre-travel: Booking fee (R1-R2) to platform. Travelling: Travel surcharge (100% to tutor) + booking fee to platform. Arrived/Preparing: Travel surcharge (100% to tutor) + 30-min lesson charge (73% tutor / 27% platform) + booking fee to platform. In Session: Elapsed billable time (min 30 min, 73/27 split) + travel surcharge (100% to tutor) + booking fee to platform. Tutor cancellation at any stage: R0 to student, 100% refund.",
+    "studentLaunchPromotion": "No automatic new-account free minutes. First completed paid lesson receives 25% discount capped at R50 against the full student-facing order total. Referral rewards grant 15 free minutes only after referred student verifies phone/email, completes onboarding, and completes first paid/discounted lesson without cancellation/refund/dispute.",
+    "promotionalTutorPayout": "For first-time-user promotional lessons only, tutor receives 75% of the discounted total amount paid/settled, inclusive of travel and lesson compensation; this must be disclosed in the Tutor Agreement.",
+    "tutorRightToWorkVerification": "Tutor approval requires police clearance plus South African ID, or passport plus valid South African work visa/right-to-work evidence, manually reviewed by admin before the tutor can go online or receive requests.",
+    "studentSafetyGuardianMode": "In-person launch must support Student Safety Profile and Guardian Mode. Minor learners require guardian details, consent/presence confirmation, and safety reminders. Same-gender tutor matching is a soft preference/ranking signal, not a blanket hard exclusion by default."
+  },
+  "executionPriority": {
+    "m7": [
+      "[M7-T3-STUDENT-MOBILE-STABILIZATION]",
+      "[M7-T4-ADMIN-WEB-STABILIZATION]",
+      "[M7-T5-TUTOR-ONBOARDING-PROMO-GOVERNANCE]",
+      "[M7-T6-SAFETY-GUARDIAN-MODE]",
+      "[M7-T2-DUAL-DEVICE-VERIFICATION]",
+      "[ACT-006-PRE-LAUNCH-SECURITY-RULES-TIGHTENING]"
+    ],
+    "selectionRule": "During M7, ACT-004/M7-T2 is a final human physical-device verification gate only. Do not stop there while open implementation work remains in M7. Select nextScheduledTask when eligible; otherwise choose the first unblocked implementation task from this priority list."
+  },
+  "pendingDecisions": {},
+  "blockers": {
+    "global": [],
+    "taskLevel": [
+      "ACT-002: Google Maps Navigation SDK key blocks real-device navigation testing in M3 (does not block other tasks)",
+      "ACT-004: Physical dual-device verification blocks final release in M7 (does not block development tasks)",
+      "ACT-006: Pre-launch security rules tightening blocks public production launch after development testing",
+      "ACT-004/M7-T2 is deferred until M7-T5 and M7-T6 implementation work is complete; it must not stop autonomous implementation work",
+      "REQ-005/REQ-006/REQ-007/REQ-011 launch feature updates must be implemented before final release sign-off",
+      "REQ-009/REQ-010 are post-launch planning items and must not block initial release unless reprioritized by the owner"
+    ]
+  },
+  "updatedAt": "2026-09-17T03:02:00.000Z"
+}

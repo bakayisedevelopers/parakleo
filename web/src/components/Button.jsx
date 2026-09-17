@@ -3,6 +3,7 @@ export default function Button({
   variant = 'primary', 
   size = 'md', 
   className = '',
+  href,
   ...props 
 }) {
   const baseStyles = 'font-bold rounded-lg transition-all duration-200 inline-flex items-center justify-center';
@@ -18,9 +19,23 @@ export default function Button({
     secondary: 'bg-white hover:bg-zinc-50 text-zinc-900 border border-zinc-200 shadow-md hover:shadow-lg dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:text-white dark:border-zinc-700',
   };
 
+  const classes = `${baseStyles} ${sizeStyles[size]} ${variantStyles[variant]} ${className}`;
+
+  if (href) {
+    return (
+      <a 
+        href={href}
+        className={classes}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+
   return (
     <button 
-      className={`${baseStyles} ${sizeStyles[size]} ${variantStyles[variant]} ${className}`}
+      className={classes}
       {...props}
     >
       {children}

@@ -51,8 +51,24 @@ export function SessionsScreen({ navigate }) {
     );
   }, [user?.uid]);
 
-  const openSession = (sessionId) => {
-    navigate({ key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } });
+  const openSession = (targetSession) => {
+    if (!targetSession) return;
+    const sessionObj = typeof targetSession === 'string'
+      ? sessions.find((s) => s.id === targetSession) || { id: targetSession }
+      : targetSession;
+    const status = String(sessionObj?.status || '').toLowerCase();
+
+    if (['completed', 'settled', 'canceled', 'canceled_during', 'expired'].includes(status)) {
+      navigate({ key: 'SessionSummary', params: { sessionId: sessionObj.id, session: sessionObj, parentTab: 'Sessions' } });
+      return;
+    }
+
+    if (sessionObj?.meetingProvider === 'gemini_live' || sessionObj?.sessionType === 'ai') {
+      navigate({ key: 'SessionRoom', params: { sessionId: sessionObj.id, parentTab: 'Sessions' } });
+      return;
+    }
+
+    navigate({ key: 'ActiveSession', params: { sessionId: sessionObj.id, session: sessionObj, parentTab: 'Sessions' } });
   };
 
   if (loading) return <LoadingState label="Loading classes" />;
@@ -83,7 +99,7 @@ export function SessionsScreen({ navigate }) {
           <Pressable
             key={session.id}
             accessibilityRole="button"
-            onPress={() => openSession(session.id)}
+            onPress={() => openSession(session)}
             style={({ pressed }) => [
               styles.sessionCard,
               pressed && styles.sessionCardPressed,

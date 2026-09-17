@@ -15,10 +15,13 @@ test('tutor agreement template includes legal entity wording and starter section
   assert.ok(markdown.includes('Independent contractor status'));
   assert.ok(markdown.includes('Student safety and minors'));
   assert.ok(markdown.includes('Acceptance records capture the date, time, version'));
+  assert.ok(markdown.includes('First-Time Student Promotional Lessons'));
+  assert.ok(markdown.includes('75% of the discounted total amount paid and settled'));
 });
 
 test('tutor agreement version ids are deterministic', () => {
-  assert.equal(makeVersionDocId(TUTOR_AGREEMENT_DEFAULT_VERSION), 'tutor_agreement_1.0.1');
+  assert.equal(makeVersionDocId(TUTOR_AGREEMENT_DEFAULT_VERSION), 'tutor_agreement_1.1.0');
+  assert.equal(makeVersionDocId('1.1.0'), 'tutor_agreement_1.1.0');
   assert.equal(makeVersionDocId('1.0.1'), 'tutor_agreement_1.0.1');
 });
 

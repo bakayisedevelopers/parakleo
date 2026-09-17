@@ -6,11 +6,13 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
 import { getFirebaseClients, getFunctionEndpoint } from '../firebase/config';
 import { updateUserRatingSummary } from './userService';
+import { updateLiveTracking } from './liveTrackingRealtimeService';
 
 const FINALIZE_SESSION_BILLING_ENDPOINT = 'finalizeSessionBilling';
 const DEFAULT_RATING_STATUS = {
@@ -202,6 +204,7 @@ export async function submitSessionRating(session, role, payload) {
   const ratingEntry = {
     overall: Number(payload?.overall || 0),
     comment: payload?.comment || '',
+    tags: Array.isArray(payload?.tags) ? payload.tags : [],
     submittedAt,
   };
   const ratingStatus = mergeRatingStatus(session?.ratingStatus, role, 'submitted');
@@ -234,3 +237,464 @@ export async function submitSessionRating(session, role, payload) {
     await updateUserRatingSummary(session.studentId, 'asStudent', ratingEntry.overall).catch(() => null);
   }
 }
+
+export async function requestEndLesson({ requestId, sessionId }) {
+  const effSessionId = sessionId || requestId;
+  if (!effSessionId) return;
+  const { auth, db } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('requestEndInPersonLesson');
+
+  if (idToken && endpoint) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requestId, sessionId: effSessionId }),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.success) return payload;
+      }
+    } catch (err) {
+      console.warn('requestEndLesson endpoint failed, falling back to direct write:', err);
+    }
+  }
+
+  const now = Date.now();
+  const uid = auth.currentUser?.uid || '';
+  const sRef = doc(db, 'sessions', effSessionId);
+  await updateDoc(sRef, {
+    status: 'ending_requested',
+    endRequestedBy: uid,
+    endRequestedAt: now,
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+
+  if (requestId) {
+    const reqRef = doc(db, 'classRequests', requestId);
+    await updateDoc(reqRef, {
+      status: 'ending_requested',
+      endRequestedBy: uid,
+      endRequestedAt: now,
+      statusDetail: 'Lesson completion requested.',
+      updatedAt: serverTimestamp(),
+    }).catch(() => null);
+
+    await updateLiveTracking(requestId, {
+      status: 'ending_requested',
+      endRequestedBy: uid,
+      endRequestedAtMs: now,
+      updatedAtMs: now,
+    }).catch(() => null);
+  }
+
+  return { success: true, status: 'ending_requested', endRequestedAt: now };
+}
+
+export async function confirmEndLesson({ requestId, sessionId, session }) {
+  const effSessionId = sessionId || requestId || session?.id;
+  if (!effSessionId) return;
+  const { auth } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('confirmEndInPersonLesson');
+
+  if (idToken && endpoint) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requestId, sessionId: effSessionId }),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.success) return payload;
+      }
+    } catch (err) {
+      console.warn('confirmEndLesson endpoint failed, falling back to finalizeSessionClosure:', err);
+    }
+  }
+
+  const currentSession = session || { id: effSessionId, requestId };
+  return finalizeSessionClosure(currentSession, { closureType: 'completed' });
+}
+
+export async function toggleSessionPause({ sessionId, requestId, isPaused, pausedIntervals = [], currentTotalSeconds = 0 }) {
+  const effSessionId = sessionId || requestId;
+  if (!effSessionId) return;
+  const { db } = getFirebaseClients();
+  const sRef = doc(db, 'sessions', effSessionId);
+  await updateDoc(sRef, {
+    isPaused: Boolean(isPaused),
+    pausedIntervals,
+    totalPausedSeconds: Number(currentTotalSeconds || 0),
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+
+  if (requestId) {
+    await updateLiveTracking(requestId, {
+      isPaused: Boolean(isPaused),
+      updatedAtMs: Date.now(),
+    }).catch(() => null);
+  }
+}
+
+export function computeLocalCancellationQuote({
+  status,
+  canceledBy = 'student',
+  distanceTravelledKm = 0,
+  totalRouteKm = 10,
+  estimatedAmount = 100,
+  elapsedMinutes = 0,
+  agreedRatePerMinute = 3.0,
+}) {
+  if (canceledBy === 'tutor') {
+    return {
+      cancellationCharge: 0,
+      tutorPayout: 0,
+      breakdown: { bookingFee: 0, travelFee: 0, lessonFee: 0 },
+      reason: 'Tutor cancellation: R0 charge to student, R0 payout to tutor.',
+    };
+  }
+  const normStatus = String(status || '').toLowerCase();
+  if (['pending', 'matching', 'offered', 'accepted'].includes(normStatus)) {
+    return {
+      cancellationCharge: 0,
+      tutorPayout: 0,
+      breakdown: { bookingFee: 0, travelFee: 0, lessonFee: 0 },
+      reason: 'Canceled before tutor travel started: no fee.',
+    };
+  }
+  let bookingFee = Math.max(100, Math.min(200, Number(estimatedAmount) * 0.01));
+  bookingFee = Number(bookingFee.toFixed(2));
+  if (normStatus === 'travelling') {
+    const travelRatio = totalRouteKm > 0 ? Math.min(1, Math.max(0, distanceTravelledKm / totalRouteKm)) : 0.5;
+    const fullTravelFee = 40;
+    const partialTravelFee = Number((fullTravelFee * travelRatio).toFixed(2));
+    const totalCharge = Number((bookingFee + partialTravelFee).toFixed(2));
+    return {
+      cancellationCharge: totalCharge,
+      tutorPayout: partialTravelFee,
+      breakdown: { bookingFee, travelFee: partialTravelFee, lessonFee: 0 },
+      reason: 'Canceled while tutor is travelling.',
+    };
+  }
+  if (['arrived', 'waiting_student', 'preparing_for_lesson'].includes(normStatus)) {
+    const fullTravelFee = 40;
+    const totalCharge = Number((bookingFee + fullTravelFee).toFixed(2));
+    return {
+      cancellationCharge: totalCharge,
+      tutorPayout: fullTravelFee,
+      breakdown: { bookingFee, travelFee: fullTravelFee, lessonFee: 0 },
+      reason: 'Canceled after tutor arrived.',
+    };
+  }
+  if (['in_session', 'in_progress', 'ending_requested'].includes(normStatus)) {
+    const fullTravelFee = 40;
+    const lessonFee = Number((elapsedMinutes * agreedRatePerMinute).toFixed(2));
+    const totalCharge = Number((bookingFee + fullTravelFee + lessonFee).toFixed(2));
+    return {
+      cancellationCharge: totalCharge,
+      tutorPayout: Number((fullTravelFee + lessonFee).toFixed(2)),
+      breakdown: { bookingFee, travelFee: fullTravelFee, lessonFee },
+      reason: 'Canceled after lesson started.',
+    };
+  }
+  return {
+    cancellationCharge: 0,
+    tutorPayout: 0,
+    breakdown: { bookingFee: 0, travelFee: 0, lessonFee: 0 },
+    reason: 'Standard cancellation.',
+  };
+}
+
+export async function getCancellationQuote({
+  requestId,
+  sessionId,
+  canceledBy = 'student',
+  distanceTravelledKm = 0,
+  totalRouteKm = 10,
+  estimatedAmount = 100,
+  elapsedMinutes = 0,
+  agreedRatePerMinute = 3.0,
+  status = 'accepted',
+}) {
+  const { auth } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('getCancellationQuote');
+
+  if (idToken && endpoint) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requestId,
+          sessionId,
+          canceledBy,
+          distanceTravelledKm,
+          totalRouteKm,
+        }),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.quote) return payload.quote;
+      }
+    } catch (err) {
+      console.warn('getCancellationQuote endpoint error, using local computation:', err);
+    }
+  }
+
+  return computeLocalCancellationQuote({
+    status,
+    canceledBy,
+    distanceTravelledKm,
+    totalRouteKm,
+    estimatedAmount,
+    elapsedMinutes,
+    agreedRatePerMinute,
+  });
+}
+
+export async function cancelInPersonSession({
+  requestId,
+  sessionId,
+  session,
+  canceledBy = 'student',
+  reason = 'Canceled by user',
+  distanceTravelledKm = 0,
+  totalRouteKm = 10,
+}) {
+  const { auth, db } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('cancelInPersonLesson');
+
+  if (idToken && endpoint) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requestId,
+          sessionId,
+          canceledBy,
+          reason,
+          distanceTravelledKm,
+          totalRouteKm,
+        }),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.success) return payload;
+      }
+    } catch (err) {
+      console.warn('cancelInPersonLesson endpoint error, falling back to local closure:', err);
+    }
+  }
+
+  const effSessionId = sessionId || requestId || session?.id;
+  const canceledAt = Date.now();
+  const closureType = canceledBy === 'tutor' ? 'canceled_by_tutor' : 'canceled_by_student';
+
+  // 1. Unconditionally update classRequests doc in Firestore
+  if (requestId) {
+    try {
+      const reqRef = doc(db, 'classRequests', requestId);
+      await updateDoc(reqRef, {
+        status: 'canceled',
+        statusDetail: canceledBy === 'tutor' ? 'Request canceled by tutor.' : 'Request canceled by student.',
+        canceledAt,
+        canceledBy,
+        canceledReason: reason || '',
+        currentOfferTutorId: null,
+        offerExpiresAt: null,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (reqErr) {
+      console.warn('cancelInPersonSession Firestore classRequests update warning:', reqErr);
+    }
+
+    // 2. Unconditionally update RTDB liveTracking
+    try {
+      await updateLiveTracking(requestId, {
+        status: 'canceled',
+        canceledBy,
+        closedAtMs: canceledAt,
+        closedReason: reason || '',
+        updatedAtMs: canceledAt,
+      });
+    } catch (rtdbErr) {
+      console.warn('cancelInPersonSession RTDB liveTracking update warning:', rtdbErr);
+    }
+  }
+
+  // 3. Update sessions doc in Firestore if effSessionId exists
+  if (effSessionId) {
+    try {
+      const sRef = doc(db, 'sessions', effSessionId);
+      await updateDoc(sRef, {
+        status: 'canceled',
+        endedAt: canceledAt,
+        canceledAt,
+        canceledBy,
+        canceledReason: reason || '',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (_sErr) {
+      // Session document may not exist if request was canceled prior to acceptance
+    }
+  }
+
+  // 4. Attempt billing closure, but NEVER let errors crash or revert the cancellation
+  const currentSession = session || { id: effSessionId, requestId };
+  try {
+    const finalSession = await finalizeSessionClosure(currentSession, {
+      closureType,
+      canceledBy,
+      canceledReason: reason,
+    });
+    return { success: true, status: 'canceled', session: finalSession };
+  } catch (closureErr) {
+    console.warn('cancelInPersonSession finalizeSessionClosure warning (local cancel succeeded):', closureErr?.message);
+    return { success: true, status: 'canceled', requestId, sessionId: effSessionId };
+  }
+}
+
+export async function verifyMeetingPin({ requestId, sessionId, enteredPin }) {
+  if (!requestId) throw new Error('Missing requestId');
+  const normalizedPin = String(enteredPin || '').trim();
+  if (!normalizedPin) throw new Error('Please enter the 4-digit PIN');
+
+  const { auth, db } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('verifyInPersonMeetingPin');
+
+  if (idToken && endpoint) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requestId, sessionId, enteredPin: normalizedPin }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        return data;
+      }
+      if (!response.ok) {
+        const error = new Error(data.message || 'Invalid meeting PIN');
+        error.code = data.code || 'PIN_MISMATCH';
+        error.attemptsRemaining = data.attemptsRemaining;
+        throw error;
+      }
+    } catch (err) {
+      if (err.code === 'PIN_MISMATCH' || err.code === 'MAX_ATTEMPTS_EXCEEDED' || err.code === 'PIN_EXPIRED') {
+        throw err;
+      }
+      console.warn('verifyInPersonMeetingPin endpoint network error, attempting direct check:', err);
+    }
+  }
+
+  // Fallback direct Firestore validation
+  const reqRef = doc(db, 'classRequests', requestId);
+  const snap = await getDoc(reqRef);
+  if (!snap.exists()) throw new Error('Request not found');
+  const reqData = snap.data() || {};
+
+  const maxAttempts = Number(reqData.maxVerificationPinAttempts || 3);
+  const currentAttempts = Number(reqData.verificationPinAttempts || 0);
+
+  if (currentAttempts >= maxAttempts) {
+    const err = new Error('Maximum PIN verification attempts exceeded. Please contact support.');
+    err.code = 'MAX_ATTEMPTS_EXCEEDED';
+    err.attemptsRemaining = 0;
+    throw err;
+  }
+
+  const expectedPin = String(reqData.verificationPin || '').trim();
+  const paddedEntered = normalizedPin.padStart(4, '0');
+
+  if (paddedEntered !== expectedPin) {
+    const nextAttempts = currentAttempts + 1;
+    const attemptsRemaining = Math.max(0, maxAttempts - nextAttempts);
+    await updateDoc(reqRef, {
+      verificationPinAttempts: nextAttempts,
+      updatedAt: serverTimestamp(),
+    }).catch(() => null);
+
+    const err = new Error(
+      attemptsRemaining > 0
+        ? `Incorrect PIN. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
+        : 'Maximum PIN verification attempts exceeded. Please contact support.'
+    );
+    err.code = 'PIN_MISMATCH';
+    err.attemptsRemaining = attemptsRemaining;
+    throw err;
+  }
+
+  // Direct success
+  const now = Date.now();
+  const prepGraceMs = 5 * 60 * 1000;
+  const prepGraceEndsAt = (reqData.preparationGraceEndsAt && reqData.preparationGraceEndsAt > now)
+    ? reqData.preparationGraceEndsAt
+    : now + prepGraceMs;
+
+  await updateDoc(reqRef, {
+    pinVerified: true,
+    pinVerifiedAt: now,
+    meetingConfirmed: true,
+    meetingConfirmedAt: now,
+    status: 'preparing_for_lesson',
+    statusDetail: 'Physical meeting verified. 5-minute preparation grace active.',
+    preparationGraceStartedAt: reqData.preparationGraceStartedAt || now,
+    preparationGraceEndsAt: prepGraceEndsAt,
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+
+  const effSessionId = sessionId || reqData.sessionId || requestId;
+  if (effSessionId) {
+    await updateDoc(doc(db, 'sessions', effSessionId), {
+      pinVerified: true,
+      pinVerifiedAt: now,
+      meetingConfirmed: true,
+      meetingConfirmedAt: now,
+      status: 'preparing_for_lesson',
+      preparationGraceStartedAt: reqData.preparationGraceStartedAt || now,
+      preparationGraceEndsAt: prepGraceEndsAt,
+      updatedAt: serverTimestamp(),
+    }).catch(() => null);
+  }
+
+  await updateLiveTracking(requestId, {
+    pinVerified: true,
+    pinVerifiedAtMs: now,
+    status: 'preparing_for_lesson',
+    preparationGraceEndsAt: prepGraceEndsAt,
+    preparationGraceEndsAtMs: prepGraceEndsAt,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return {
+    success: true,
+    pinVerified: true,
+    pinVerifiedAt: now,
+    status: 'preparing_for_lesson',
+    preparationGraceEndsAt: prepGraceEndsAt,
+  };
+}
+
+

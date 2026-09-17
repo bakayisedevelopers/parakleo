@@ -1,278 +1,407 @@
-import { useEffect, useState } from 'react';
-import { Clipboard, Pressable, Share, StyleSheet, Text, View } from 'react-native';
-import { Card } from '../../components/ui/Card';
-import { LoadingState } from '../../components/ui/States';
-import { StudentRequestComposer } from '../../components/student/StudentRequestComposer';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Image,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { NotificationsButton } from '../../components/navigation/NotificationsButton';
 import { useAuth } from '../../context/AuthContext';
-import { subscribeToStudentRequests } from '../../services/classRequestService';
+import {
+  expireClassRequest,
+  shouldExpireClassRequest,
+  subscribeToStudentRequests,
+} from '../../services/classRequestService';
 import { subscribeToStudentSessions } from '../../services/sessionService';
-import { shadows } from '../../theme/shadows';
-import { getStudentOnboardingStatus } from '../../utils/onboarding';
-import { colors } from '../../theme/colors';
 
-export function DashboardScreen({ navigate }) {
+function getTimeOfDayGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good Morning,';
+  if (hour < 17) return 'Good Afternoon,';
+  return 'Good Evening,';
+}
+
+export function DashboardScreen({ navigate, unreadCount = 0 }) {
   const { user } = useAuth();
-  const onboardingStatus = getStudentOnboardingStatus(user);
+  const { width, height } = useWindowDimensions();
   const [requests, setRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [loadingRequests, setLoadingRequests] = useState(true);
-  const [loadingSessions, setLoadingSessions] = useState(true);
-  const [composerStage, setComposerStage] = useState('input');
-  const [shareFeedback, setShareFeedback] = useState('');
-  const referralSlug = String(user?.referralSlug || user?.referralCode || '').trim();
-  const referralLink = referralSlug ? `https://parakleo.bakayise.com/signup?ref=${encodeURIComponent(referralSlug)}` : '';
-  const referralPreview = referralLink.length > 42 ? `${referralLink.slice(0, 42)}...` : referralLink;
 
-  useEffect(() => subscribeToStudentRequests(
-    user?.uid,
-    (items) => {
-      setRequests(items);
-      setLoadingRequests(false);
-    },
-    () => setLoadingRequests(false),
-  ), [user?.uid]);
+  const expiringRequestIdsRef = useRef(new Set());
 
-  useEffect(() => subscribeToStudentSessions(
-    user?.uid,
-    (items) => {
-      setSessions(items);
-      setLoadingSessions(false);
-    },
-    () => setLoadingSessions(false),
-  ), [user?.uid]);
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsubRequests = subscribeToStudentRequests(user.uid, (data) => {
+      setRequests(Array.isArray(data) ? data : []);
+    }, () => {});
+    const unsubSessions = subscribeToStudentSessions(user.uid, (data) => {
+      setSessions(Array.isArray(data) ? data : []);
+    }, () => {});
 
-  if (loadingRequests || loadingSessions) {
-    return <LoadingState label="Loading dashboard" />;
-  }
+    return () => {
+      if (typeof unsubRequests === 'function') unsubRequests();
+      if (typeof unsubSessions === 'function') unsubSessions();
+    };
+  }, [user?.uid]);
 
-  const firstName = String(user?.displayName || 'there').trim().split(' ')[0] || 'there';
+  const displayName = String(user?.fullName || user?.displayName || 'Student').trim();
+  const greeting = getTimeOfDayGreeting();
+  const photoURL = user?.profilePhoto || user?.photoURL;
+  const initial = displayName.charAt(0).toUpperCase() || 'S';
+  const activeSession = useMemo(() => {
+    return sessions.find((s) =>
+      ['in_progress', 'in_session', 'ending_requested'].includes(String(s?.status || '').toLowerCase())
+    ) || null;
+  }, [sessions]);
 
-  const handleShareReferral = async () => {
-    if (!referralLink) return;
-    try {
-      await Share.share({
-        title: 'Join Parakleo',
-        message: `Use my Parakleo referral link to sign up and start learning.\n${referralLink}`,
-        url: referralLink,
+  const trackingSession = useMemo(() => {
+    return sessions.find((s) =>
+      [
+        'accepted',
+        'tutor_accepted',
+        'tutor_assigned',
+        'traveling',
+        'travelling',
+        'in_transit',
+        'arrived',
+        'waiting_student',
+        'preparing_for_lesson',
+      ].includes(String(s?.status || '').toLowerCase())
+    ) || null;
+  }, [sessions]);
+
+  const activeRequest = useMemo(() => {
+    return requests.find((r) =>
+      ['pending', 'matching', 'offered', 'accepted', 'tutor_accepted', 'tutor_assigned', 'traveling', 'travelling', 'in_transit', 'arrived', 'waiting_student', 'preparing_for_lesson'].includes(
+        String(r?.status || '').toLowerCase()
+      ) && !shouldExpireClassRequest(r)
+    ) || null;
+  }, [requests]);
+
+  useEffect(() => {
+    requests.forEach((request) => {
+      const requestId = String(request?.id || '').trim();
+      if (!requestId || !shouldExpireClassRequest(request) || expiringRequestIdsRef.current.has(requestId)) {
+        return;
+      }
+
+      expiringRequestIdsRef.current.add(requestId);
+      expireClassRequest({
+        requestId,
+        reason: 'Request expired because no tutor accepted within 3 minutes.',
+      }).finally(() => {
+        expiringRequestIdsRef.current.delete(requestId);
       });
-      setShareFeedback('Link shared.');
-    } catch (_error) {
-      setShareFeedback('Unable to share link.');
-    }
-  };
-
-  const handleCopyReferral = () => {
-    if (!referralLink) return;
-    try {
-      Clipboard.setString(referralLink);
-      setShareFeedback('Link copied.');
-    } catch (_error) {
-      setShareFeedback('Unable to copy link.');
-    }
-  };
+    });
+  }, [requests]);
 
   return (
-    <View style={styles.page}>
-      <View style={styles.pageGlowTop} />
-      <View style={styles.pageGlowBottom} />
-      <View style={styles.wrap}>
-        <View style={styles.heroSection}>
-          <View style={styles.heroGlowTopLeft} />
-          <View style={styles.heroGlowBottomRight} />
-          <View style={styles.heroContent}>
-            <View>
-              <Text style={styles.kicker}>Student request</Text>
-              <Text style={styles.title}>Hi {firstName}</Text>
+    <View style={styles.screen}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f0fdf4" />
+      <Image
+        source={require('../../../assets/student-home-tutoring.png')}
+        style={styles.backgroundArt}
+        resizeMode={width > height ? 'contain' : 'cover'}
+        accessible={false}
+        pointerEvents="none"
+      />
+
+      <SafeAreaView style={styles.safeContainer}>
+        {/* Top Header Bar */}
+        <View style={styles.topHeader}>
+          {/* User Avatar + Greeting */}
+          <View style={styles.userInfoLeft}>
+            {photoURL ? (
+              <Image source={{ uri: photoURL }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Text style={styles.avatarInitial}>{initial}</Text>
+              </View>
+            )}
+            <View style={styles.greetingWrap}>
+              <Text style={styles.greetingText}>{greeting}</Text>
+              <Text style={styles.userNameText} numberOfLines={1}>
+                {displayName}
+              </Text>
             </View>
-            <StudentRequestComposer navigate={navigate} requests={requests} sessions={sessions} user={user} onStageChange={setComposerStage} />
           </View>
+
+          {/* Notifications stay accessible above the home artwork. */}
+          <NotificationsButton
+            navigate={navigate}
+            unreadCount={unreadCount}
+          />
         </View>
-        {referralLink && composerStage !== 'review' ? (
-          <Card style={styles.referralCard}>
-            <Text style={styles.referralIntro}>
-              Get free 15 minutes when a student joins and completes their profile using your link.
-            </Text>
-            <View style={styles.referralLinkCard}>
-              <Text style={styles.referralLabel}>Referral link</Text>
-              <Text style={styles.referralPreview} numberOfLines={2}>{referralPreview}</Text>
-              <Text selectable style={styles.referralLink}>{referralLink}</Text>
-            </View>
-            <View style={styles.referralActions}>
-              <Pressable accessibilityRole="button" onPress={handleCopyReferral} style={styles.referralGhostButton}>
-                <Text style={styles.referralGhostButtonText}>Copy</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={handleShareReferral} style={styles.referralShareButton}>
-                <Text style={styles.referralShareButtonText}>Share</Text>
-              </Pressable>
-            </View>
-            {shareFeedback ? <Text style={styles.referralFeedback}>{shareFeedback}</Text> : null}
-            <Text style={styles.meta}><Text style={styles.metaStrong}>Free minutes remaining:</Text> {Number(user?.freeMinutesRemaining || 0).toFixed(2)} min</Text>
-          </Card>
-        ) : null}
-        {!onboardingStatus.complete ? (
-          <Card>
-            <Text style={styles.copy}>{onboardingStatus.message}</Text>
-          </Card>
-        ) : null}
-      </View>
+
+        {/* Keep ongoing lessons reachable above the background artwork. */}
+        <ScrollView
+          style={styles.centerScroll}
+          contentContainerStyle={styles.centerScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Active Lesson In-Progress Banner */}
+          {activeSession ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                navigate?.({
+                  key: 'ActiveSession',
+                  params: {
+                    sessionId: activeSession.id,
+                    session: activeSession,
+                    parentTab: 'Dashboard',
+                  },
+                });
+              }}
+              style={styles.activeSessionBanner}
+            >
+              <View style={styles.activeSessionBannerLeft}>
+                <View style={styles.pulseGreenDot} />
+                <View style={styles.activeSessionBannerTextWrap}>
+                  <Text style={styles.activeSessionBannerTitle}>Lesson in Progress • Tutor Arrived</Text>
+                  <Text style={styles.activeSessionBannerSubtitle}>
+                    {activeSession.subject || 'Lesson'} with {activeSession.tutorName || 'Your Tutor'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.activeSessionResumeBtn}>
+                <Text style={styles.activeSessionResumeText}>Resume</Text>
+                <Ionicons name="arrow-forward" size={14} color="#059669" />
+              </View>
+            </Pressable>
+          ) : trackingSession ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const requestId = trackingSession.requestId || trackingSession.id;
+                navigate?.({
+                  key: 'SessionScreen',
+                  params: {
+                    requestId,
+                    activeRequestId: requestId,
+                    request: trackingSession,
+                    subject: trackingSession.subject || 'Lesson',
+                    topic: trackingSession.topic || '',
+                    parentTab: 'Dashboard',
+                  },
+                });
+              }}
+              style={styles.activeSessionBanner}
+            >
+              <View style={styles.activeSessionBannerLeft}>
+                <View style={styles.pulseGreenDot} />
+                <View style={styles.activeSessionBannerTextWrap}>
+                  <Text style={styles.activeSessionBannerTitle}>Tutor Accepted • Live Tracking Active</Text>
+                  <Text style={styles.activeSessionBannerSubtitle}>
+                    {trackingSession.subject || 'Lesson'} with {trackingSession.tutorName || 'Your Tutor'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.activeSessionResumeBtn}>
+                <Text style={styles.activeSessionResumeText}>Resume</Text>
+                <Ionicons name="arrow-forward" size={14} color="#059669" />
+              </View>
+            </Pressable>
+          ) : activeRequest ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                navigate?.({
+                  key: 'SessionScreen',
+                  params: {
+                    requestId: activeRequest.id,
+                    activeRequestId: activeRequest.id,
+                    request: activeRequest,
+                    subject: activeRequest.subject || 'Lesson',
+                    topic: activeRequest.topic || '',
+                    parentTab: 'Dashboard',
+                  },
+                });
+              }}
+              style={styles.activeSessionBanner}
+            >
+              <View style={styles.activeSessionBannerLeft}>
+                <View style={styles.pulseGreenDot} />
+                <View style={styles.activeSessionBannerTextWrap}>
+                  <Text style={styles.activeSessionBannerTitle}>
+                    {['accepted', 'tutor_accepted', 'traveling', 'travelling'].includes(String(activeRequest.status || '').toLowerCase())
+                      ? 'Tutor Travelling • Live Request Active'
+                      : 'Connecting with Tutor • Request Active'}
+                  </Text>
+                  <Text style={styles.activeSessionBannerSubtitle}>
+                    {activeRequest.subject || 'Lesson'} • Tap to view live map & tracking
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.activeSessionResumeBtn}>
+                <Text style={styles.activeSessionResumeText}>Resume</Text>
+                <Ionicons name="arrow-forward" size={14} color="#059669" />
+              </View>
+            </Pressable>
+          ) : null}
+
+        </ScrollView>
+
+      </SafeAreaView>
+
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    backgroundColor: '#f8fafc',
+  screen: {
+    backgroundColor: '#f0fdf4',
     flex: 1,
   },
-  pageGlowTop: {
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    borderRadius: 180,
-    height: 260,
-    position: 'absolute',
-    right: -110,
-    top: 24,
-    width: 260,
+  backgroundArt: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
   },
-  pageGlowBottom: {
-    backgroundColor: 'rgba(59,130,246,0.10)',
-    borderRadius: 220,
-    bottom: 80,
-    height: 300,
-    left: -140,
-    position: 'absolute',
-    width: 300,
+  safeContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 12,
   },
-  wrap: {
-    gap: 16,
-    paddingBottom: 12,
-  },
-  heroSection: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderColor: colors.border,
-    borderRadius: 32,
-    borderWidth: 1,
-    overflow: 'hidden',
-    ...shadows.panel,
-  },
-  heroGlowTopLeft: {
-    backgroundColor: 'rgba(16,185,129,0.18)',
-    borderRadius: 220,
-    height: 220,
-    left: -70,
-    position: 'absolute',
-    top: -40,
-    width: 220,
-  },
-  heroGlowBottomRight: {
-    backgroundColor: 'rgba(59,130,246,0.14)',
-    borderRadius: 200,
-    bottom: -70,
-    height: 220,
-    position: 'absolute',
-    right: -80,
-    width: 220,
-  },
-  heroContent: {
-    gap: 16,
-    padding: 16,
-  },
-  kicker: {
-    color: 'rgba(16,185,129,0.8)',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: '#0f172a',
-    fontSize: 31,
-    fontWeight: '900',
-    letterSpacing: -0.8,
-    lineHeight: 36,
-    marginTop: 8,
-  },
-  copy: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  meta: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  metaStrong: {
-    color: colors.text,
-    fontWeight: '800',
-  },
-  referralCard: {
-    fontSize: 30,
-    backgroundColor: '#ecfdf5',
-    borderColor: '#bbf7d0',
-    gap: 10,
-  },
-  referralIntro: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 22,
-  },
-  referralLinkCard: {
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderColor: '#bbf7d0',
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 5,
-    padding: 12,
-  },
-  referralLabel: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  referralPreview: {
-    color: '#3f3f46',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  referralLink: {
-    color: '#52525b',
-    fontSize: 11,
-  },
-  referralActions: {
+  topHeader: {
+    alignItems: 'center',
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'space-between',
+    overflow: 'visible',
+    paddingHorizontal: 20,
+    zIndex: 1000,
   },
-  referralGhostButton: {
+  userInfoLeft: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
     flex: 1,
-    paddingVertical: 10,
+    minWidth: 0,
+    marginRight: 16,
   },
-  referralGhostButtonText: {
-    color: '#3f3f46',
-    fontSize: 13,
-    fontWeight: '800',
+  avatarImage: {
+    borderColor: '#10b981',
+    borderRadius: 22,
+    borderWidth: 2,
+    height: 44,
+    width: 44,
   },
-  referralShareButton: {
+  avatarPlaceholder: {
     alignItems: 'center',
-    backgroundColor: colors.brand,
-    borderRadius: 14,
-    flex: 1,
-    paddingVertical: 10,
+    backgroundColor: '#059669',
+    borderColor: '#bbf7d0',
+    borderRadius: 22,
+    borderWidth: 2,
+    elevation: 3,
+    height: 44,
+    justifyContent: 'center',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    width: 44,
   },
-  referralShareButtonText: {
+  avatarInitial: {
     color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  greetingWrap: {
+    gap: 1,
+    flex: 1,
+    minWidth: 0,
+  },
+  greetingText: {
+    color: '#059669',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  userNameText: {
+    color: '#0f172a',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0,
+    maxWidth: 200,
+  },
+  centerScroll: {
+    flex: 1,
+    marginVertical: 4,
+  },
+  centerScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 120,
+    gap: 12,
+    alignItems: 'center',
+  },
+  activeSessionBanner: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#ffffff',
+    borderColor: '#86efac',
+    borderRadius: 20,
+    borderWidth: 1.5,
+    elevation: 3,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+  },
+  activeSessionBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  pulseGreenDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#16a34a',
+    marginRight: 10,
+  },
+  activeSessionBannerTextWrap: {
+    flex: 1,
+  },
+  activeSessionBannerTitle: {
     fontSize: 13,
     fontWeight: '800',
+    color: '#065f46',
   },
-  referralFeedback: {
-    color: '#047857',
+  activeSessionBannerSubtitle: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  activeSessionResumeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  activeSessionResumeText: {
     fontSize: 12,
     fontWeight: '700',
+    color: '#059669',
+    marginRight: 4,
   },
 });

@@ -6,15 +6,23 @@ const { logger } = require('firebase-functions');
 const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
-const { createHash, randomUUID } = require('crypto');
+const { createHash, randomUUID, randomInt } = require('crypto');
 const {
+  BILLING_RULES,
   DEFAULT_PRICING_CONFIG,
   LEGACY_SAFE_PRICING_SNAPSHOT,
-  computePricingQuote,
+  computeBookingFee,
+  computeCancellationQuote,
   computeFinalAmountFromSnapshot,
+  computePricingQuote,
+  computeTravelFee,
   loadPricingConfig,
   sanitizePricingSnapshot,
 } = require('./pricingEngine');
+const {
+  LESSON_STATUS,
+  canTransition,
+} = require('./lessonStatus');
 const {
   normalizeSubjectName,
   isAllowedGrade1To12Subject,
@@ -389,7 +397,7 @@ const FAIRNESS_WORKLOAD_CAP = 10;
 const TUTOR_STATS_MAX_EVENTS = 100;
 const TUTOR_STATS_ROLLING_DAYS = 30;
 const TUTOR_STATS_RECENT_ASSIGNMENT_DAYS = 7;
-const DEFAULT_STUDENT_FREE_MINUTES = 30;
+const DEFAULT_STUDENT_FREE_MINUTES = 0;
 const REFERRAL_REWARD_MINUTES = 15;
 const REQUEST_STATUS = {
   PENDING: 'pending',
@@ -431,6 +439,10 @@ function normalizeMillis(value) {
   if (!value) return 0;
   if (typeof value === 'number') return value;
   if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (typeof value?.toDate === 'function') return value.toDate().getTime();
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return (value.seconds * 1000) + Math.floor((value.nanoseconds || 0) / 1000000);
+  }
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -442,9 +454,13 @@ function nextOfferRevision(request = {}) {
 }
 
 function isRequestExpired(request) {
-  const createdAtMs = normalizeMillis(request?.createdAt);
-  if (!createdAtMs) return false;
-  return Date.now() - createdAtMs >= MATCHING_TIMEOUT_MS;
+  const hardExpiresAtMs = normalizeMillis(request?.requestExpiresAt)
+    || normalizeMillis(request?.expiresAt)
+    || normalizeMillis(request?.matchingExpiresAt);
+  if (hardExpiresAtMs) return Date.now() >= hardExpiresAtMs;
+
+  const createdAtMs = normalizeMillis(request?.createdAtMs) || normalizeMillis(request?.createdAt);
+  return Boolean(createdAtMs && Date.now() - createdAtMs >= MATCHING_TIMEOUT_MS);
 }
 
 function getTutorScore(tutor = {}) {
@@ -730,27 +746,43 @@ function hasCompletedStudentProfile(user = {}) {
 
 function getStudentCompletionRequirements(user = {}) {
   const studentProfile = user?.studentProfile || {};
-  const paymentMethods = Array.isArray(user?.paymentMethods) ? user.paymentMethods : [];
   const subjects = Array.isArray(user?.subjects) ? user.subjects : [];
+  const safety = studentProfile.safety || user?.safety || {};
   const hasGrade = Boolean(studentProfile.grade);
   const hasCurriculum = Boolean(String(studentProfile.curriculum || '').trim());
   const hasDiscoverySource = Boolean(String(studentProfile.discoverySource || '').trim());
   const hasSubjects = subjects.length > 0;
-  const hasPaymentMethod = paymentMethods.length > 0;
+  const isMinor = safety.learnerType === 'minor' || Boolean(safety.isMinor);
+  const isAdult = safety.learnerType === 'adult' || (!isMinor && safety.learnerType !== 'minor');
+  const hasGuardianConsent = Boolean(
+    safety.guardian?.name
+      && safety.guardian?.relationship
+      && safety.guardian?.phoneNumber
+      && safety.guardian?.consentAcceptedAt,
+  );
+  const hasSafety = isAdult || (isMinor && hasGuardianConsent);
+  const hasSelfie = Boolean(String(user?.selfieUrl || user?.profilePhoto || user?.photoURL || '').trim());
+  const emailVerified = Boolean(user?.emailVerified || user?.growth?.completionRequirements?.emailVerified);
+  const phoneVerified = Boolean(user?.phoneVerified || user?.growth?.completionRequirements?.phoneVerified);
 
   return {
     hasGrade,
     hasCurriculum,
     hasDiscoverySource,
     hasSubjects,
-    hasPaymentMethod,
-    paymentMethodsCount: paymentMethods.length,
+    hasSafety,
+    hasSelfie,
+    emailVerified,
+    phoneVerified,
     complete: Boolean(
       hasGrade
         && hasCurriculum
         && hasDiscoverySource
         && hasSubjects
-        && hasPaymentMethod,
+        && hasSafety
+        && hasSelfie
+        && emailVerified
+        && phoneVerified,
     ),
   };
 }
@@ -760,6 +792,13 @@ function hasCompletedTutorProfile(user = {}) {
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
   const policeClearance = tutorProfile.policeClearance || {};
+  const idDocument = tutorProfile.idDocument || {};
+  const hasPoliceClearance = Boolean(
+    policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt
+  );
+  const hasRightToWork = Boolean(
+    idDocument.fileUrl || idDocument.documentId || tutorProfile.idVerificationUrl || tutorProfile.idDocumentSubmittedAt
+  );
 
   return Boolean(
     isTutorAgreementCurrent(user)
@@ -768,7 +807,8 @@ function hasCompletedTutorProfile(user = {}) {
       && String(user?.selfieUrl || '').trim()
       && Array.isArray(tutorProfile.gradesToTutor)
       && tutorProfile.gradesToTutor.length > 0
-      && (policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt)
+      && hasPoliceClearance
+      && hasRightToWork
       && activeSubjects.length > 0
       && tutorProfile.payout?.bankName
       && tutorProfile.payout?.accountNumber
@@ -784,6 +824,13 @@ function hasCompletedTutorProfileWithoutAgreement(user = {}) {
   const qualifiedSubjects = Array.isArray(user?.qualifiedSubjects) ? user.qualifiedSubjects : [];
   const activeSubjects = Array.isArray(user?.activeSubjects) ? user.activeSubjects : [];
   const policeClearance = tutorProfile.policeClearance || {};
+  const idDocument = tutorProfile.idDocument || {};
+  const hasPoliceClearance = Boolean(
+    policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt
+  );
+  const hasRightToWork = Boolean(
+    idDocument.fileUrl || idDocument.documentId || tutorProfile.idVerificationUrl || tutorProfile.idDocumentSubmittedAt
+  );
 
   return Boolean(
       qualifiedSubjects.length > 0
@@ -791,7 +838,8 @@ function hasCompletedTutorProfileWithoutAgreement(user = {}) {
       && String(user?.selfieUrl || '').trim()
       && Array.isArray(tutorProfile.gradesToTutor)
       && tutorProfile.gradesToTutor.length > 0
-      && (policeClearance.fileUrl || policeClearance.documentId || tutorProfile.policeClearanceSubmittedAt)
+      && hasPoliceClearance
+      && hasRightToWork
       && activeSubjects.length > 0
       && tutorProfile.payout?.bankName
       && tutorProfile.payout?.accountNumber
@@ -815,7 +863,7 @@ async function applyStudentReferralReward(transaction, {
   const isStudent = (userData.activeRole || userData.role || '').toLowerCase() === 'student';
   if (!isStudent) return { rewarded: false, reason: 'not_student' };
 
-  const alreadyProcessed = Boolean((userData.growth || {}).accountCompletionRewardProcessed);
+  const alreadyProcessed = Boolean((userData.growth || {}).firstPaidLessonReferralRewardProcessed);
   const completionRequirements = getStudentCompletionRequirements(userData);
   const studentProfileComplete = completionRequirements.complete;
   const referralSlug = String(pendingReferralSlug || userData.pendingReferralSlug || userData.pendingReferralCode || '').trim();
@@ -830,7 +878,7 @@ async function applyStudentReferralReward(transaction, {
     completionRequirements,
     referredBy: userData.referredBy || null,
     referralRewardCount: Number(userData.referralRewardCount || 0),
-    growthRewardProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+    growthRewardProcessed: Boolean((userData.growth || {}).firstPaidLessonReferralRewardProcessed),
   });
 
   const nextBaseUpdates = baseUpdates || {
@@ -866,7 +914,7 @@ async function applyStudentReferralReward(transaction, {
       alreadyProcessed,
       completionRequirements,
       pendingReferralSlugPresent: Boolean(referralSlug),
-      growthRewardProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+      growthRewardProcessed: Boolean((userData.growth || {}).firstPaidLessonReferralRewardProcessed),
     });
     return {
       rewarded: false,
@@ -881,8 +929,8 @@ async function applyStudentReferralReward(transaction, {
       pendingReferralCode: null,
       growth: {
         ...(userData.growth || {}),
-        accountCompletionRewardProcessed: true,
-        accountCompletionQualifiedAt: new Date().toISOString(),
+        firstPaidLessonReferralRewardProcessed: true,
+        firstPaidLessonReferralRewardQualifiedAt: new Date().toISOString(),
       },
     }, { merge: true });
     logger.info('student_referral_reward_completed_without_slug', {
@@ -916,8 +964,8 @@ async function applyStudentReferralReward(transaction, {
       pendingReferralCode: null,
       growth: {
         ...(userData.growth || {}),
-        accountCompletionRewardProcessed: true,
-        accountCompletionQualifiedAt: new Date().toISOString(),
+        firstPaidLessonReferralRewardProcessed: true,
+        firstPaidLessonReferralRewardQualifiedAt: new Date().toISOString(),
       },
     }, { merge: true });
     logger.warn('student_referral_reward_invalid_referrer', {
@@ -969,8 +1017,8 @@ async function applyStudentReferralReward(transaction, {
     pendingReferralCode: null,
     growth: {
       ...(userData.growth || {}),
-      accountCompletionRewardProcessed: true,
-      accountCompletionQualifiedAt: new Date().toISOString(),
+      firstPaidLessonReferralRewardProcessed: true,
+      firstPaidLessonReferralRewardQualifiedAt: new Date().toISOString(),
     },
   }, { merge: true });
 
@@ -1210,37 +1258,173 @@ function rankTutorsWithFairness(candidates = []) {
   return ordered;
 }
 
-async function getTutorQueueForSubject(subject) {
+function computeHaversineDistanceKm(coord1, coord2) {
+  const lat1 = Number(coord1?.latitude ?? coord1?.lat);
+  const lon1 = Number(coord1?.longitude ?? coord1?.lng);
+  const lat2 = Number(coord2?.latitude ?? coord2?.lat);
+  const lon2 = Number(coord2?.longitude ?? coord2?.lng);
+  if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) {
+    return null;
+  }
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c).toFixed(3));
+}
+
+function rankTutorsWithProximityAndFairness(candidates = [], studentLocation = null, options = {}) {
+  const preferSameGenderTutor = Boolean(
+    options.preferSameGenderTutor
+    || options.safetySnapshot?.preferSameGenderTutor
+    || options.safety?.preferSameGenderTutor
+  );
+  const studentGender = String(
+    options.studentGender
+    || options.safetySnapshot?.studentGender
+    || options.safety?.studentGender
+    || ''
+  ).trim().toLowerCase();
+
+  const shouldApplyGenderBoost = preferSameGenderTutor && (studentGender === 'female' || studentGender === 'male');
+
+  const rankGroup = (group) => {
+    if (!shouldApplyGenderBoost || group.length <= 1) {
+      return rankTutorsWithFairness(group);
+    }
+    const matchingGenderTutors = [];
+    const otherTutors = [];
+    group.forEach((tutor) => {
+      const tutorGender = String(
+        tutor?.gender
+        || tutor?.tutorProfile?.gender
+        || tutor?.personalDetails?.gender
+        || ''
+      ).trim().toLowerCase();
+      if (tutorGender === studentGender) {
+        matchingGenderTutors.push(tutor);
+      } else {
+        otherTutors.push(tutor);
+      }
+    });
+
+    const rankedMatching = rankTutorsWithFairness(matchingGenderTutors);
+    const rankedOthers = rankTutorsWithFairness(otherTutors);
+    return [...rankedMatching, ...rankedOthers];
+  };
+
+  if (!studentLocation || !Number.isFinite(Number(studentLocation.latitude ?? studentLocation.lat))) {
+    return rankGroup(candidates);
+  }
+
+  const withDistance = candidates.map((tutor) => {
+    const tutorLoc = tutor.liveLocation || tutor.location || tutor?.tutorProfile?.liveLocation || tutor?.tutorProfile?.location || null;
+    const distanceKm = computeHaversineDistanceKm(studentLocation, tutorLoc);
+    return {
+      tutor,
+      distanceKm: distanceKm !== null ? distanceKm : Infinity,
+    };
+  });
+
+  const buckets = [
+    { maxKm: 5, list: [] },
+    { maxKm: 15, list: [] },
+    { maxKm: 30, list: [] },
+    { maxKm: 50, list: [] },
+    { maxKm: Infinity, list: [] },
+  ];
+
+  withDistance.forEach((item) => {
+    const bucket = buckets.find((b) => item.distanceKm <= b.maxKm) || buckets[buckets.length - 1];
+    bucket.list.push(item.tutor);
+  });
+
+  const ordered = [];
+  buckets.forEach((bucket) => {
+    if (bucket.list.length > 0) {
+      const rankedBucket = rankGroup(bucket.list);
+      ordered.push(...rankedBucket);
+    }
+  });
+
+  return ordered;
+}
+
+async function getTutorQueueForSubject(subject, options = {}) {
   const subjectKey = String(subject || 'Mathematics').trim().toLowerCase();
-  const snapshot = await db
+  const studentLocation = options.studentLocation || null;
+  const excludeUserId = options.excludeUserId || null;
+
+  let snapshot = await db
     .collection('users')
     .where('activeRole', '==', 'tutor')
     .where('onlineStatus', '==', 'online')
-    .get();
+    .get()
+    .catch(() => ({ docs: [] }));
 
-  const eligibleTutors = snapshot.docs
-    .map((item) => ({ uid: item.id, ...item.data() }))
-    .filter((tutor) => isTutorDispatchEligible(tutor, subjectKey));
-
-  return rankTutorsWithFairness(eligibleTutors);
-}
-
-exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}', async (event) => {
-  const afterData = event.data.after.exists ? event.data.after.data() : null;
-  if (!afterData) return;
-
-  if (!ACTIVE_REQUEST_STATUSES.has(afterData.status) || afterData.tutorId) {
-    return;
+  if (!snapshot.docs.length) {
+    snapshot = await db
+      .collection('users')
+      .where('role', '==', 'tutor')
+      .where('onlineStatus', '==', 'online')
+      .get()
+      .catch(() => ({ docs: [] }));
   }
 
-  const requestId = event.params.requestId;
+  let allOnlineTutors = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
+  if (excludeUserId) {
+    allOnlineTutors = allOnlineTutors.filter((tutor) => tutor.uid !== excludeUserId);
+  }
+
+  const eligibleTutors = allOnlineTutors.filter((tutor) => isTutorDispatchEligible(tutor, subjectKey));
+
+  if (eligibleTutors.length > 0) {
+    return rankTutorsWithProximityAndFairness(eligibleTutors, studentLocation, options);
+  }
+
+  // Resilient fallback: Any online tutor who is not suspended or blocked
+  const fallbackTutors = allOnlineTutors.filter((tutor) => {
+    const isSuspendedOrBlocked = isTruthyFlag(
+      tutor.suspended ?? tutor.isSuspended ?? tutor.blocked ?? tutor.isBlocked ?? tutor?.tutorProfile?.suspended ?? tutor?.tutorProfile?.blocked,
+    );
+    return !isSuspendedOrBlocked && !tutor.activeSessionId;
+  });
+
+  return rankTutorsWithProximityAndFairness(fallbackTutors, studentLocation, options);
+}
+
+async function findEligibleOnlineTutor(subject, options = {}) {
+  const queue = await getTutorQueueForSubject(subject, options);
+  if (!queue.length) return null;
+  const topTutorId = queue[0];
+  const snap = await db.collection('users').doc(topTutorId).get().catch(() => null);
+  return snap && snap.exists ? { uid: snap.id, ...snap.data() } : null;
+}
+
+async function advanceClassRequestLifecycle(requestId, sourceRequest = null) {
+  if (!requestId) return;
+
   const requestRef = db.collection('classRequests').doc(requestId);
-  const candidateQueue = await getTutorQueueForSubject(afterData.subject);
+  const baseRequest = sourceRequest || {};
+  const studentLocation = baseRequest.studentLocation || baseRequest.location || baseRequest.destination || null;
+  const candidateQueue = await getTutorQueueForSubject(baseRequest.subject, {
+    studentLocation,
+    mode: baseRequest.mode || 'in_person',
+    excludeUserId: baseRequest.studentId || null,
+    safetySnapshot: baseRequest.safetySnapshot || null,
+    preferSameGenderTutor: baseRequest.preferSameGenderTutor ?? baseRequest.safetySnapshot?.preferSameGenderTutor,
+    studentGender: baseRequest.studentGender ?? baseRequest.safetySnapshot?.studentGender,
+  });
 
   await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(requestRef);
     if (!snap.exists) return;
-    const request = snap.data();
+    const request = snap.data() || {};
 
     if (!ACTIVE_REQUEST_STATUSES.has(request.status) || request.tutorId) {
       return;
@@ -1249,7 +1433,7 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
     if (isRequestExpired(request)) {
       transaction.update(requestRef, {
         status: REQUEST_STATUS.EXPIRED,
-        statusDetail: 'Request expired because no tutor accepted in time.',
+        statusDetail: 'Request expired because no tutor accepted within 3 minutes.',
         tutorQueue: [],
         currentOfferTutorId: null,
         offerExpiresAt: null,
@@ -1267,16 +1451,21 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
       return;
     }
 
-    let queue = Array.isArray(candidateQueue) ? [...candidateQueue] : [];
-
-    if (request.status === REQUEST_STATUS.OFFERED && request.currentOfferTutorId) {
-      queue = queue.filter((id) => id !== request.currentOfferTutorId);
-    }
+    const activeTutorId = request.status === REQUEST_STATUS.OFFERED ? request.currentOfferTutorId : null;
+    const remainingExistingQueue = Array.isArray(request.tutorQueue)
+      ? request.tutorQueue.filter((id) => id && id !== activeTutorId)
+      : [];
+    const freshQueue = Array.isArray(candidateQueue)
+      ? candidateQueue.filter((id) => id && id !== activeTutorId && !remainingExistingQueue.includes(id))
+      : [];
+    const queue = request.status === REQUEST_STATUS.OFFERED
+      ? [...remainingExistingQueue, ...freshQueue]
+      : freshQueue;
 
     if (!queue.length) {
       transaction.update(requestRef, {
         status: REQUEST_STATUS.NO_TUTOR_AVAILABLE,
-        statusDetail: 'No tutor accepted. Looking for another tutor.',
+        statusDetail: 'No tutors found. We will keep listening for tutors until the request expires.',
         tutorQueue: [],
         currentOfferTutorId: null,
         offerExpiresAt: null,
@@ -1309,6 +1498,44 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   });
+}
+
+exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}', async (event) => {
+  const afterData = event.data.after.exists ? event.data.after.data() : null;
+  if (!afterData) return;
+
+  if (!ACTIVE_REQUEST_STATUSES.has(afterData.status) || afterData.tutorId) {
+    return;
+  }
+
+  await advanceClassRequestLifecycle(event.params.requestId, afterData);
+});
+
+exports.sweepClassRequestLifecycle = onSchedule('every 1 minutes', async () => {
+  const now = Date.now();
+  const snapshot = await db.collection('classRequests')
+    .where('status', 'in', Array.from(ACTIVE_REQUEST_STATUSES))
+    .limit(100)
+    .get();
+
+  await Promise.all(snapshot.docs.map(async (docSnap) => {
+    const request = docSnap.data() || {};
+    if (request.tutorId) return;
+    const offerExpiresAt = normalizeMillis(request.offerExpiresAt);
+    const needsAdvance = isRequestExpired(request)
+      || request.status === REQUEST_STATUS.PENDING
+      || request.status === REQUEST_STATUS.MATCHING
+      || request.status === REQUEST_STATUS.NO_TUTOR_AVAILABLE
+      || (request.status === REQUEST_STATUS.OFFERED && offerExpiresAt > 0 && offerExpiresAt <= now);
+
+    if (!needsAdvance) return;
+    await advanceClassRequestLifecycle(docSnap.id, request).catch((error) => {
+      logger.warn('sweepClassRequestLifecycle advance failed', {
+        requestId: docSnap.id,
+        error: error?.message,
+      });
+    });
+  }));
 });
 
 exports.trackTutorRequestStats = onDocumentWritten('classRequests/{requestId}', async (event) => {
@@ -2077,46 +2304,35 @@ exports.syncStudentReferralRewardsOnUserWrite = onDocumentWritten('users/{uid}',
 
   const completionRequirements = getStudentCompletionRequirements(after);
   const studentProfileComplete = completionRequirements.complete;
-  const alreadyProcessed = Boolean((after.growth || {}).accountCompletionRewardProcessed);
+  const existingRequirements = (after.growth || {}).completionRequirements || {};
   logger.info('student_referral_user_write_seen', {
     uid: event.params.uid,
     studentProfileComplete,
-    alreadyProcessed,
+    alreadyProcessed: Boolean((after.growth || {}).firstPaidLessonReferralRewardProcessed),
     completionRequirements,
     pendingReferralSlugPresent: Boolean(String(after.pendingReferralSlug || after.pendingReferralCode || '').trim()),
   });
-  if (!studentProfileComplete || alreadyProcessed) return;
+  const changed = JSON.stringify(existingRequirements) !== JSON.stringify({
+    ...existingRequirements,
+    ...completionRequirements,
+    studentProfileComplete,
+  });
+  if (!changed) return;
 
   const userRef = db.collection('users').doc(event.params.uid);
-  await db.runTransaction(async (transaction) => {
-    const userSnap = await transaction.get(userRef);
-    if (!userSnap.exists) return;
-    const userData = userSnap.data() || {};
-    if ((userData.activeRole || userData.role || '').toLowerCase() !== 'student') return;
-    if (!hasCompletedStudentProfile(userData)) return;
-    if (Boolean((userData.growth || {}).accountCompletionRewardProcessed)) return;
-
-    await applyStudentReferralReward(transaction, {
-      userRef,
-      userData,
-      uid: event.params.uid,
-      pendingReferralSlug: String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim(),
-      source: 'userWriteTrigger',
-      baseUpdates: {
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        referralSlug: userData.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
-        growth: {
-          ...(userData.growth || {}),
-          completionRequirements: {
-            ...((userData.growth || {}).completionRequirements || {}),
-            ...completionRequirements,
-            studentProfileComplete: true,
-          },
-          lastGrowthSyncedAt: new Date().toISOString(),
-        },
+  await userRef.set({
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    referralSlug: after.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+    growth: {
+      ...(after.growth || {}),
+      completionRequirements: {
+        ...existingRequirements,
+        ...completionRequirements,
+        studentProfileComplete,
       },
-    });
-  });
+      lastGrowthSyncedAt: new Date().toISOString(),
+    },
+  }, { merge: true });
 });
 
 exports.notifyTutorProfileCompletion = onDocumentWritten('users/{uid}', async (event) => {
@@ -2489,15 +2705,6 @@ function getRequestMetadata(req = {}) {
   return { ipAddress, userAgent };
 }
 
-function escapeHtml(value = '') {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function normalizeExtractedText(rawText) {
   return String(rawText || '').replace(/\s+/g, ' ').trim();
 }
@@ -2564,24 +2771,45 @@ function getEstimatedBookingFeeFromBoardPreparationSource(source = {}) {
 }
 
 function getPayableSessionEstimate(pricingSnapshot = {}, boardPreparationSource = {}) {
-  const serviceAmount = toRand(
-    pricingSnapshot?.finalPrice
-      || pricingSnapshot?.finalPayablePrice
-      || pricingSnapshot?.totalAmount
-      || 0,
+  const isFree = Boolean(
+    pricingSnapshot?.isFree
+      || pricingSnapshot?.freeMinutesApplied
+      || pricingSnapshot?.isPromotional
+      || pricingSnapshot?.pricingTier === 'free'
+      || pricingSnapshot?.finalPrice === 0
+      || pricingSnapshot?.finalPayablePrice === 0
   );
-  const bookingFeePricing = getEstimatedBookingFeeFromBoardPreparationSource(boardPreparationSource);
-  const bookingFeeAmount = toRand(
-    bookingFeePricing?.totalZar
-      || pricingSnapshot?.bookingFeeAmount
-      || 0,
-  );
+
+  let serviceAmount = 0;
+  if (!isFree) {
+    if (typeof pricingSnapshot?.finalPrice === 'number') {
+      serviceAmount = pricingSnapshot.finalPrice;
+    } else if (typeof pricingSnapshot?.finalPayablePrice === 'number') {
+      serviceAmount = pricingSnapshot.finalPayablePrice;
+    } else if (typeof pricingSnapshot?.totalAmount === 'number') {
+      serviceAmount = pricingSnapshot.totalAmount;
+    } else {
+      const parsed = Number(pricingSnapshot?.finalPrice ?? pricingSnapshot?.finalPayablePrice ?? pricingSnapshot?.totalAmount ?? 0);
+      serviceAmount = Number.isFinite(parsed) ? parsed : 0;
+    }
+  }
+  serviceAmount = Math.max(0, toRand(serviceAmount));
+
+  let bookingFeeAmount = 0;
+  if (!isFree && serviceAmount > 0) {
+    const bookingFeePricing = getEstimatedBookingFeeFromBoardPreparationSource(boardPreparationSource);
+    bookingFeeAmount = toRand(
+      bookingFeePricing?.totalZar
+        || pricingSnapshot?.bookingFeeAmount
+        || 0,
+    );
+  }
 
   return {
     serviceAmount,
     bookingFeeAmount,
     totalAmount: toRand(serviceAmount + bookingFeeAmount),
-    bookingFeePricing,
+    bookingFeePricing: bookingFeeAmount > 0 ? getEstimatedBookingFeeFromBoardPreparationSource(boardPreparationSource) : null,
   };
 }
 
@@ -3494,7 +3722,7 @@ exports.publishTutorAgreementVersion = onRequest({ cors: true }, async (req, res
   }
 });
 
-exports.getPricingQuote = onRequest({ cors: true }, async (req, res) => {
+exports.getPricingQuote = onRequest({ cors: true, cpu: 0.5 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed' });
     return;
@@ -4602,6 +4830,10 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
     const userData = userSnap.data() || {};
     const isStudent = (userData.activeRole || userData.role || '').toLowerCase() === 'student';
     const completionRequirements = isStudent ? getStudentCompletionRequirements(userData) : null;
+    const phoneVerified = Boolean(
+      userData.phoneVerified
+        || ((userData.growth || {}).completionRequirements || {}).phoneVerified
+    );
 
     const baseUpdates = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -4613,11 +4845,12 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
           emailVerified,
           ...(completionRequirements || {}),
           studentProfileComplete: isStudent ? completionRequirements.complete : false,
-          phoneVerified: Boolean(((userData.growth || {}).completionRequirements || {}).phoneVerified || false),
+          phoneVerified,
         },
         lastGrowthSyncedAt: new Date().toISOString(),
       },
       emailVerified,
+      phoneVerified,
       emailVerifiedAt: emailVerified
         ? (userData.emailVerifiedAt || admin.firestore.FieldValue.serverTimestamp())
         : null,
@@ -4633,17 +4866,10 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
       emailVerified,
       completionRequirements,
       pendingReferralSlugPresent: Boolean(String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim()),
-      alreadyProcessed: Boolean((userData.growth || {}).accountCompletionRewardProcessed),
+      alreadyProcessed: Boolean((userData.growth || {}).firstPaidLessonReferralRewardProcessed),
     });
 
-    await applyStudentReferralReward(transaction, {
-      userRef,
-      userData,
-      uid: decoded.uid,
-      pendingReferralSlug: String(userData.pendingReferralSlug || userData.pendingReferralCode || '').trim(),
-      source: 'syncStudentGrowth',
-      baseUpdates,
-    });
+    transaction.set(userRef, baseUpdates, { merge: true });
   });
 
   const profileSnap = await userRef.get();
@@ -4654,7 +4880,7 @@ exports.syncStudentGrowth = onRequest({ cors: true }, async (req, res) => {
     diagnostics: {
       completionRequirements: getStudentCompletionRequirements(profile),
       pendingReferralSlugPresent: Boolean(String(profile.pendingReferralSlug || profile.pendingReferralCode || '').trim()),
-      alreadyProcessed: Boolean((profile.growth || {}).accountCompletionRewardProcessed),
+      alreadyProcessed: Boolean((profile.growth || {}).firstPaidLessonReferralRewardProcessed),
       referredBy: profile.referredBy || null,
       referralRewardCount: Number(profile.referralRewardCount || 0),
     },
@@ -5397,11 +5623,6 @@ exports.listTutorPayoutBanks = onRequest({ cors: true, secrets: [PARAKLEO_PAYMEN
   }
 });
 
-const BILLING_RULES = {
-  PLATFORM_FEE_RATE: 0.27,
-  TUTOR_PAYOUT_RATE: 0.73,
-};
-
 async function chargeAuthorizationWithPaystack({ paystackSecretKey, email, amount, authorizationCode }) {
   if (!authorizationCode) {
     return { ok: false, reason: 'missing_authorization' };
@@ -5790,6 +6011,8 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
   }
 
   const selectedCardId = String(body.selectedCardId || '').trim();
+  const requestedPaymentMethod = String(body.paymentMethodType || body.paymentMethod || '').trim().toLowerCase();
+  const isCashPayment = selectedCardId === 'cash' || requestedPaymentMethod === 'cash';
   const subject = String(body.subject || 'Mathematics').trim() || 'Mathematics';
   const topic = String(body.topic || subject).trim() || subject;
   const pricingSnapshot = body.pricingSnapshot || null;
@@ -5800,6 +6023,21 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
     ? body.attachments
     : (body.attachment ? [body.attachment] : []);
 
+  const studentLocation = body.studentLocation || body.location || body.destination || null;
+  const candidateQueue = await getTutorQueueForSubject(subject, {
+    studentLocation,
+    mode: body.mode || 'in_person',
+    excludeUserId: studentId,
+    safetySnapshot: body.safetySnapshot || null,
+    preferSameGenderTutor: body.preferSameGenderTutor ?? body.safetySnapshot?.preferSameGenderTutor,
+    studentGender: body.studentGender ?? body.safetySnapshot?.studentGender,
+  }).catch(() => []);
+  const initialTutorId = candidateQueue[0] || null;
+  const initialStatus = initialTutorId ? 'offered' : 'pending';
+  const initialDetail = initialTutorId
+    ? 'Tutor notified. Waiting for acceptance.'
+    : 'Request submitted. Initializing tutor matching.';
+
   const requestBody = {
     ...body,
     subject,
@@ -5808,20 +6046,22 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
     pricingSnapshot,
     pricingQuoteId: pricingSnapshot?.quoteId || null,
     boardPreparationSource,
-    selectedCardId,
-    mode: 'online',
+    selectedCardId: isCashPayment ? 'cash' : selectedCardId,
+    paymentMethod: isCashPayment ? 'cash' : 'card',
+    paymentMethodType: isCashPayment ? 'cash' : 'card',
+    mode: body.mode || 'online',
     meetingProviderPreference,
-    status: 'pending',
+    status: initialStatus,
     tutorId: null,
     tutorName: null,
     tutorEmail: null,
-    tutorQueue: [],
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
+    tutorQueue: candidateQueue,
+    currentOfferTutorId: initialTutorId,
+    offerExpiresAt: initialTutorId ? Date.now() + OFFER_TIMEOUT_MS : null,
     attachment: body.attachment || null,
     attachments,
     imageAttachment: body.imageAttachment || '',
-    statusDetail: 'Request submitted. Initializing tutor matching.',
+    statusDetail: initialDetail,
     ratings: {
       student: null,
       tutor: null,
@@ -5849,7 +6089,7 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
   const payableEstimate = getPayableSessionEstimate(pricingSnapshot || {}, boardPreparationSource || {});
   let paymentHold = null;
 
-  if (payableEstimate.totalAmount > 0) {
+  if (payableEstimate.totalAmount > 0 && !isCashPayment) {
     if (!selectedCard?.paystackAuthorizationCode) {
       res.status(400).json({
         success: false,
@@ -5857,7 +6097,21 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
       });
       return;
     }
+  } else if (isCashPayment) {
+    paymentHold = {
+      reference: null,
+      status: 'cash_on_site',
+      amountAuthorized: 0,
+      estimatedServiceAmount: payableEstimate.serviceAmount,
+      estimatedBookingFeeAmount: payableEstimate.bookingFeeAmount,
+      estimatedTotalAmount: payableEstimate.totalAmount,
+      createdAt: new Date().toISOString(),
+      selectedCardId: 'cash',
+      paymentMethod: 'cash',
+    };
+  }
 
+  if (payableEstimate.totalAmount > 0 && !isCashPayment) {
     let paymentsSecrets;
     try {
       paymentsSecrets = getPaymentsSecrets();
@@ -5942,6 +6196,17 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
         paymentHoldAmount: paymentHold?.amountAuthorized || 0,
       },
     });
+
+    if (initialTutorId) {
+      await createUserNotification({
+        userId: initialTutorId,
+        title: 'New tutoring request',
+        message: `New request: ${topic || subject}. Review and accept to begin.`,
+        type: 'tutor_offer',
+        requestId: requestRef.id,
+        targetPath: '/app/tutor',
+      }).catch(() => null);
+    }
   } catch (error) {
     if (paymentHold?.reference) {
       try {
@@ -6135,12 +6400,29 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
   const studentRef = db.collection('users').doc(session.studentId);
   const studentSnap = await studentRef.get();
   const studentData = studentSnap.data() || {};
-  const bookingFeeCharged = toRand(
-    settlement.bookingFeeApplied
-      ? settlement.bookingFeeAmount
-      : (closureType === 'completed' ? bookingFee : 0),
+  const isOnline = session.mode === 'online' || requestData.mode === 'online';
+  const distanceKm = Number(
+    session.travelDistanceKm
+    ?? session.distanceKm
+    ?? requestData.travelDistanceKm
+    ?? requestData.distanceKm
+    ?? session.pricingSnapshot?.estimatedDistanceKm
+    ?? requestData.pricingSnapshot?.estimatedDistanceKm
+    ?? session.pricingSnapshot?.totalRouteKm
+    ?? requestData.pricingSnapshot?.totalRouteKm
+    ?? 0,
   );
-  const serviceAmountBeforeDiscount = toRand(Math.max(0, originalPrice - bookingFeeCharged));
+  const calculatedTravelFee = isOnline ? 0 : computeTravelFee(distanceKm);
+  const travelFee = isOnline ? 0 : toRand(
+    session.travelFee
+    ?? requestData.travelFee
+    ?? session.pricingSnapshot?.travelFee
+    ?? requestData.pricingSnapshot?.travelFee
+    ?? calculatedTravelFee,
+  );
+
+  const rawLessonTuition = Number(settlement.baseAmount || 0) + Number(settlement.durationDiscountedMinuteAmount || settlement.undiscountedMinuteAmount || 0);
+  const serviceAmountBeforeDiscount = toRand(rawLessonTuition > 0 ? rawLessonTuition : Math.max(0, originalPrice - settlement.bookingFeeAmount));
   const freeMinuteDiscount = closureType === 'completed'
     ? applyFreeMinuteDiscount({
       originalPrice: serviceAmountBeforeDiscount,
@@ -6155,15 +6437,64 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       finalPrice: serviceAmountBeforeDiscount,
       discountSource: null,
     };
-  const calculatedTotalAmount = toRand(freeMinuteDiscount.finalPrice + bookingFeeCharged);
-  const totalAmount = settlement.billingRule === 'booking_fee_only'
-    ? ensureMinimumCancellationCharge(calculatedTotalAmount)
-    : calculatedTotalAmount;
-  const tutorPayoutBase = settlement.bookingFeeApplied ? 0 : serviceAmountBeforeDiscount;
-  const tutorAmount = Number((tutorPayoutBase * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
-  const platformAmount = Number((bookingFeeCharged + (tutorPayoutBase * BILLING_RULES.PLATFORM_FEE_RATE)).toFixed(2));
+  const discountedTuition = toRand(freeMinuteDiscount.finalPrice);
+
+  const bookingFeeCharged = toRand(
+    settlement.bookingFeeApplied && settlement.billingRule === 'booking_fee_only'
+      ? settlement.bookingFeeAmount
+      : (closureType === 'completed' ? computeBookingFee(discountedTuition) : settlement.bookingFeeAmount),
+  );
+  const travelFeeCharged = (closureType === 'completed' && !isOnline) ? travelFee : (
+    closureType === 'canceled_during' && canceledBy !== 'tutor' && !isOnline ? travelFee : 0
+  );
+
+  let totalAmount = 0;
+  let tutorAmount = 0;
+  let platformAmount = 0;
+  let tutorTuitionShare = 0;
+  let platformTuitionShare = 0;
+
+  if (closureType === 'canceled_during') {
+    if (canceledBy === 'tutor') {
+      totalAmount = 0;
+      tutorAmount = 0;
+      platformAmount = 0;
+      tutorTuitionShare = 0;
+      platformTuitionShare = 0;
+    } else {
+      const ratePerMinute = Number(snapshot.adjustedRatePerMinute || snapshot.ratePerMinute || 3.0);
+      const cancelQuote = computeCancellationQuote({
+        status: 'in_session',
+        mode: isOnline ? 'online' : 'in_person',
+        canceledBy: 'student',
+        totalRouteKm: distanceKm || 10,
+        elapsedMinutes: Math.max(30, billedMinutes),
+        agreedRatePerMinute: ratePerMinute,
+      });
+      totalAmount = cancelQuote.finalAmount;
+      tutorAmount = cancelQuote.tutorPayout;
+      platformAmount = cancelQuote.platformFee;
+      tutorTuitionShare = roundCurrency(cancelQuote.lessonFee * BILLING_RULES.TUTOR_PAYOUT_RATE);
+      platformTuitionShare = roundCurrency(cancelQuote.lessonFee * BILLING_RULES.PLATFORM_FEE_RATE);
+    }
+  } else {
+    tutorTuitionShare = Number((discountedTuition * BILLING_RULES.TUTOR_PAYOUT_RATE).toFixed(2));
+    platformTuitionShare = Number((discountedTuition - tutorTuitionShare).toFixed(2));
+    tutorAmount = Number((tutorTuitionShare + travelFeeCharged).toFixed(2));
+    platformAmount = Number((platformTuitionShare + bookingFeeCharged).toFixed(2));
+    totalAmount = Number((discountedTuition + travelFeeCharged + bookingFeeCharged).toFixed(2));
+  }
+
   const paymentMethods = studentData.paymentMethods || [];
   const selectedCardId = session.selectedCardId || requestData.selectedCardId || null;
+  const paymentMethodType = String(
+    session.paymentMethodType
+      || session.paymentMethod
+      || requestData.paymentMethodType
+      || requestData.paymentMethod
+      || ''
+  ).trim().toLowerCase();
+  const isCashPayment = selectedCardId === 'cash' || paymentMethodType === 'cash';
   const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
     || paymentMethods.find((card) => card.isDefault)
     || paymentMethods[0]
@@ -6178,33 +6509,72 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     unpaidAmount: 0,
     paymentHold,
   };
-  if (totalAmount > 0 || (paymentHold?.reference && String(paymentHold?.status || '').toLowerCase() === 'authorized')) {
-    let paymentsSecrets;
+  if (isCashPayment && totalAmount > 0) {
+    charge = {
+      ok: true,
+      reason: null,
+      transactionId: 'cash-on-site',
+      paidAmount: 0,
+      unpaidAmount: 0,
+      cashAmountDue: totalAmount,
+      paymentHold,
+    };
+  } else if (totalAmount > 0 || (paymentHold?.reference && String(paymentHold?.status || '').toLowerCase() === 'authorized')) {
+    let paymentsSecrets = null;
     try {
       paymentsSecrets = getPaymentsSecrets();
     } catch (error) {
-      logger.error('Payment configuration is unavailable during session billing.', {
+      logger.warn('Payment configuration is unavailable during session billing; recording as wallet debt.', {
         sessionId,
         error: error.message,
       });
-      res.status(500).json({ success: false, message: 'Payment configuration is unavailable.' });
-      return;
+      paymentsSecrets = null;
     }
 
-    charge = await settlePaystackAuthorization({
-      paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
-      email: studentData.email || session.studentEmail || '',
-      totalAmount,
-      authorizationCode: selectedCard?.paystackAuthorizationCode || '',
-      paymentHold,
-    });
+    if (paymentsSecrets?.PAYSTACK_SECRET_KEY) {
+      try {
+        charge = await settlePaystackAuthorization({
+          paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+          email: studentData.email || session.studentEmail || '',
+          totalAmount,
+          authorizationCode: selectedCard?.paystackAuthorizationCode || '',
+          paymentHold,
+        });
+      } catch (err) {
+        logger.error('Paystack charge execution error; recording as wallet debt.', {
+          sessionId,
+          error: err.message,
+        });
+        charge = {
+          ok: false,
+          reason: err.message || 'Paystack debit failed',
+          transactionId: null,
+          paidAmount: 0,
+          unpaidAmount: totalAmount,
+          paymentHold,
+        };
+      }
+    } else {
+      charge = {
+        ok: false,
+        reason: 'Payment configuration unavailable in environment; amount recorded as wallet debt.',
+        transactionId: null,
+        paidAmount: 0,
+        unpaidAmount: totalAmount,
+        paymentHold,
+      };
+    }
   }
 
-  const paymentStatus = charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid';
+  const paymentStatus = isCashPayment && totalAmount > 0
+    ? 'cash_pending'
+    : (charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid');
   const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
   const nextWalletBalance = charge.unpaidAmount <= 0
     ? Number(wallet.balance || 0)
     : Number((Number(wallet.balance || 0) - charge.unpaidAmount).toFixed(2));
+
+  const finalGrossPrice = toRand(serviceAmountBeforeDiscount + travelFeeCharged + bookingFeeCharged);
 
   const batch = db.batch();
   batch.set(sessionRef, {
@@ -6213,23 +6583,31 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     billedSeconds,
     billedMinutes,
     totalAmount,
-    originalPrice,
+    originalPrice: finalGrossPrice,
     discountApplied: freeMinuteDiscount.discountApplied,
     finalPrice: totalAmount,
     discountSource: freeMinuteDiscount.discountSource,
     freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
+    tuitionAmount: discountedTuition,
+    travelFee: travelFeeCharged,
+    bookingFee: bookingFeeCharged,
     bookingFeeAmount: bookingFeeCharged,
     bookingFeeCharged,
     paymentHold: charge.paymentHold || paymentHold || null,
     requestedDurationMinutes: Number(selectedDurationMinutes || snapshot.durationMinutes || 0),
     selectedCardId,
+    paymentMethod: isCashPayment ? 'cash' : 'card',
+    paymentMethodType: isCashPayment ? 'cash' : 'card',
+    cashAmountDue: isCashPayment ? totalAmount : 0,
     canceledBy: closureType === 'canceled_during' ? canceledBy : null,
     canceledReason: closureType === 'canceled_during' ? canceledReason : null,
     pricingSnapshot: {
       ...snapshot,
       billedMinutes,
-      originalPrice,
+      originalPrice: finalGrossPrice,
       serviceAmountBeforeDiscount,
+      tuitionAmount: discountedTuition,
+      travelFee: travelFeeCharged,
       bookingFeeAmount: bookingFeeCharged,
       bookingFeeApplied: settlement.bookingFeeApplied || closureType === 'completed',
       bookingFeeOnly: settlement.billingRule === 'booking_fee_only',
@@ -6238,6 +6616,8 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       discountApplied: freeMinuteDiscount.discountApplied,
       finalAmount: totalAmount,
       finalPayablePrice: totalAmount,
+      paymentMethod: isCashPayment ? 'cash' : 'card',
+      cashAmountDue: isCashPayment ? totalAmount : 0,
       discountSource: freeMinuteDiscount.discountSource,
       freeMinutesApplied: freeMinuteDiscount.freeMinutesApplied,
       finalizedAt: new Date(endedAt).toISOString(),
@@ -6245,13 +6625,19 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       closureType,
       earlyCancellation: settlement.isEarlyCancellation,
       earlyCancelThresholdMinutes: settlement.earlyCancelThresholdMinutes,
-      minimumCancellationSurchargeApplied: settlement.billingRule === 'booking_fee_only' && totalAmount > calculatedTotalAmount,
+      minimumCancellationSurchargeApplied: settlement.billingRule === 'booking_fee_only' && totalAmount > finalGrossPrice,
     },
     payoutBreakdown: {
       platformFeeRate: BILLING_RULES.PLATFORM_FEE_RATE,
       tutorRate: BILLING_RULES.TUTOR_PAYOUT_RATE,
+      tuitionAmount: discountedTuition,
+      tutorTuitionShare,
+      platformTuitionShare,
+      travelFee: travelFeeCharged,
+      bookingFee: bookingFeeCharged,
       tutorAmount,
       platformAmount,
+      grossAmount: totalAmount,
     },
     paymentStatus,
     paymentTransactionId: charge.transactionId || null,
@@ -6266,7 +6652,21 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
         ? 'Session canceled. Billing completed.'
         : 'Session ended. Billing completed.',
       endedAt,
+      totalAmount,
+      travelFee: travelFeeCharged,
+      bookingFee: bookingFeeCharged,
+      payoutBreakdown: {
+        tutorAmount,
+        platformAmount,
+        travelFee: travelFeeCharged,
+        bookingFee: bookingFeeCharged,
+        tuitionAmount: discountedTuition,
+      },
+      paymentStatus,
       paymentHold: charge.paymentHold || paymentHold || null,
+      paymentMethod: isCashPayment ? 'cash' : 'card',
+      paymentMethodType: isCashPayment ? 'cash' : 'card',
+      cashAmountDue: isCashPayment ? totalAmount : 0,
       canceledBy: closureType === 'canceled_during' ? canceledBy : null,
       canceledReason: closureType === 'canceled_during' ? canceledReason : null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -6294,6 +6694,40 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
   }
 
   await batch.commit();
+
+  if (closureType === 'completed' && Number(totalAmount || 0) > 0) {
+    await db.runTransaction(async (transaction) => {
+      const freshStudentSnap = await transaction.get(studentRef);
+      if (!freshStudentSnap.exists) return;
+      const freshStudentData = freshStudentSnap.data() || {};
+      await applyStudentReferralReward(transaction, {
+        userRef: studentRef,
+        userData: freshStudentData,
+        uid: studentId,
+        pendingReferralSlug: String(freshStudentData.pendingReferralSlug || freshStudentData.pendingReferralCode || '').trim(),
+        source: 'firstPaidLessonCompleted',
+        baseUpdates: {
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          referralSlug: freshStudentData.referralSlug || `clx-${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+          growth: {
+            ...(freshStudentData.growth || {}),
+            completionRequirements: {
+              ...((freshStudentData.growth || {}).completionRequirements || {}),
+              ...getStudentCompletionRequirements(freshStudentData),
+              studentProfileComplete: hasCompletedStudentProfile(freshStudentData),
+            },
+            lastGrowthSyncedAt: new Date().toISOString(),
+          },
+        },
+      });
+    }).catch((error) => {
+      logger.warn('first_paid_lesson_referral_reward_failed', {
+        sessionId,
+        studentId,
+        error: error.message,
+      });
+    });
+  }
 
   const updatedSnap = await sessionRef.get();
   const updatedSession = { id: updatedSnap.id, ...updatedSnap.data() };
@@ -7163,3 +7597,999 @@ exports.sendEmailFromQueue = onDocumentCreated(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// IN-PERSON POST-ACCEPTANCE LIFECYCLE CLOUD FUNCTIONS (PHASES 1, 3, 9-18)
+// ---------------------------------------------------------------------------
+
+exports.acceptClassRequest = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const tutorId = req.body?.tutorId?.toString().trim() || decoded.uid;
+  const tutorName = req.body?.tutorName?.toString().trim() || decoded.name || 'Tutor';
+  const tutorEmail = req.body?.tutorEmail?.toString().trim() || decoded.email || '';
+  const tutorLocation = req.body?.tutorLocation || null;
+
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+  if (tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this tutor account' });
+  }
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+  const tutorRef = db.collection('users').doc(tutorId);
+  const sessionRef = db.collection('sessions').doc(requestId);
+  const now = Date.now();
+
+  try {
+    const result = await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(reqRef);
+      if (!snap.exists) {
+        throw new Error('Class request not found.');
+      }
+      const data = snap.data() || {};
+      if (data.status !== REQUEST_STATUS.OFFERED && data.status !== REQUEST_STATUS.MATCHING) {
+        throw new Error('Class request is no longer available.');
+      }
+
+      transaction.update(reqRef, {
+        status: LESSON_STATUS.ACCEPTED,
+        statusDetail: 'Tutor accepted and is preparing for class.',
+        tutorId,
+        tutorName,
+        tutorEmail,
+        currentOfferTutorId: null,
+        offerExpiresAt: null,
+        sessionId: requestId,
+        acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      transaction.set(tutorRef, {
+        activeClassRequestId: requestId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      transaction.set(sessionRef, {
+        id: requestId,
+        requestId,
+        tutorId,
+        tutorName,
+        studentId: data.studentId || '',
+        studentName: data.studentName || '',
+        mode: data.mode || 'in_person',
+        subject: data.subject || 'Mathematics',
+        topic: data.topic || '',
+        grade: data.grade || '',
+        curriculum: data.curriculum || '',
+        status: LESSON_STATUS.ACCEPTED,
+        statusDetail: 'Tutor accepted and is preparing for class.',
+        meetingAddress: data.meetingAddress || data.studentAddress || data.locationAddress || '',
+        studentLocation: data.studentLocation || data.location || null,
+        pricingSnapshot: data.pricingSnapshot || null,
+        durationMinutes: Number(data.durationMinutes || data.pricingSnapshot?.durationMinutes || 10),
+        createdAtMs: now,
+        acceptedAtMs: now,
+        acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return { success: true, requestId, sessionId: requestId, status: LESSON_STATUS.ACCEPTED };
+    });
+
+    await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+      tutorId,
+      tutorName,
+      sessionId: requestId,
+      tutorLocation: tutorLocation || undefined,
+      status: LESSON_STATUS.ACCEPTED,
+      statusDetail: 'Tutor accepted and is preparing for class.',
+      acceptedAtMs: now,
+      updatedAtMs: now,
+    }).catch(() => null);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    logger.warn('acceptClassRequest error:', { error: error?.message, requestId, tutorId });
+    return res.status(400).json({ success: false, message: error?.message || 'Failed to accept request.' });
+  }
+});
+
+exports.declineClassRequest = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const tutorId = req.body?.tutorId?.toString().trim() || decoded.uid;
+
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+  if (tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this tutor account' });
+  }
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(reqRef);
+      if (!snap.exists) return;
+      const data = snap.data() || {};
+
+      const nextQueue = Array.isArray(data.tutorQueue)
+        ? data.tutorQueue.filter((id) => id !== tutorId)
+        : [];
+      const nextDeclined = Array.from(new Set([
+        ...(Array.isArray(data.declinedTutorIds) ? data.declinedTutorIds : []),
+        tutorId,
+      ]));
+      const nextExcluded = Array.from(new Set([
+        ...(Array.isArray(data.offerCycleExcludedTutorIds) ? data.offerCycleExcludedTutorIds : []),
+        tutorId,
+      ]));
+
+      transaction.update(reqRef, {
+        status: REQUEST_STATUS.MATCHING,
+        statusDetail: 'Tutor declined. Matching next tutor.',
+        currentOfferTutorId: null,
+        offerExpiresAt: null,
+        tutorQueue: nextQueue,
+        declinedTutorIds: nextDeclined,
+        offerCycleExcludedTutorIds: nextExcluded,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+      status: REQUEST_STATUS.MATCHING,
+      statusDetail: 'Tutor declined. Matching next tutor.',
+      currentOfferTutorId: null,
+      updatedAtMs: Date.now(),
+    }).catch(() => null);
+
+    return res.status(200).json({ success: true, requestId, status: REQUEST_STATUS.MATCHING });
+  } catch (error) {
+    logger.warn('declineClassRequest error:', { error: error?.message, requestId, tutorId });
+    return res.status(400).json({ success: false, message: error?.message || 'Failed to decline request.' });
+  }
+});
+
+exports.startTutorTravel = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+  const snap = await reqRef.get();
+  if (!snap.exists) return res.status(404).json({ success: false, message: 'Request not found' });
+  const data = snap.data() || {};
+  if (data.tutorId && data.tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const now = Date.now();
+  await reqRef.set({
+    status: LESSON_STATUS.TRAVELLING,
+    statusDetail: 'Tutor is travelling to your location.',
+    startedTravellingAt: now,
+    travelStartedAt: now,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const sessionId = data.sessionId || requestId;
+  await db.collection('sessions').doc(sessionId).set({
+    status: LESSON_STATUS.TRAVELLING,
+    startedTravellingAt: now,
+    travelStartedAt: now,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true }).catch(() => null);
+
+  await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+    status: LESSON_STATUS.TRAVELLING,
+    travelStartedAtMs: now,
+    startedTravellingAtMs: now,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return res.status(200).json({ success: true, status: LESSON_STATUS.TRAVELLING, startedTravellingAt: now, travelStartedAt: now });
+});
+
+exports.markTutorArrived = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+  const snap = await reqRef.get();
+  if (!snap.exists) return res.status(404).json({ success: false, message: 'Request not found' });
+  const data = snap.data() || {};
+  if (data.tutorId && data.tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const now = Date.now();
+  const gracePeriodMs = 5 * 60 * 1000;
+  const pin = String(data.verificationPin || randomInt(0, 10000)).padStart(4, '0');
+  const pinExpiresAt = now + (30 * 60 * 1000); // 30-minute PIN validity
+
+  await reqRef.set({
+    status: LESSON_STATUS.ARRIVED,
+    statusDetail: 'Tutor has arrived at the student destination.',
+    arrivedAt: now,
+    arrivalGraceStartedAt: now,
+    arrivalGraceEndsAt: now + gracePeriodMs,
+    verificationPin: pin,
+    verificationPinGeneratedAt: now,
+    verificationPinExpiresAt: pinExpiresAt,
+    verificationPinAttempts: data.verificationPinAttempts || 0,
+    maxVerificationPinAttempts: 3,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const sessionId = data.sessionId || requestId;
+  await db.collection('sessions').doc(sessionId).set({
+    status: LESSON_STATUS.ARRIVED,
+    arrivedAt: now,
+    arrivalGraceStartedAt: now,
+    arrivalGraceEndsAt: now + gracePeriodMs,
+    verificationPin: pin,
+    verificationPinGeneratedAt: now,
+    verificationPinExpiresAt: pinExpiresAt,
+    verificationPinAttempts: data.verificationPinAttempts || 0,
+    maxVerificationPinAttempts: 3,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true }).catch(() => null);
+
+  await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+    status: LESSON_STATUS.ARRIVED,
+    arrivedAtMs: now,
+    arrivalGraceStartedAtMs: now,
+    arrivalGraceEndsAt: now + gracePeriodMs,
+    arrivalGraceEndsAtMs: now + gracePeriodMs,
+    verificationPin: pin,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return res.status(200).json({
+    success: true,
+    status: LESSON_STATUS.ARRIVED,
+    arrivedAt: now,
+    arrivalGraceEndsAt: now + gracePeriodMs,
+    verificationPin: pin,
+    pin,
+  });
+});
+
+exports.markPreparingForLesson = onRequest({ cors: true, cpu: 0.5 }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+  const snap = await reqRef.get();
+  if (!snap.exists) return res.status(404).json({ success: false, message: 'Request not found' });
+  const data = snap.data() || {};
+  if (data.tutorId && data.tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const now = Date.now();
+  const prepGracePeriodMs = 5 * 60 * 1000;
+  await reqRef.set({
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    statusDetail: 'Tutor has met student and is preparing for the lesson.',
+    preparingStartedAt: now,
+    preparationGraceStartedAt: now,
+    preparationGraceEndsAt: now + prepGracePeriodMs,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const sessionId = data.sessionId || requestId;
+  await db.collection('sessions').doc(sessionId).set({
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparingStartedAt: now,
+    preparationGraceStartedAt: now,
+    preparationGraceEndsAt: now + prepGracePeriodMs,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true }).catch(() => null);
+
+  await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparingStartedAtMs: now,
+    preparationGraceStartedAtMs: now,
+    preparationGraceEndsAt: now + prepGracePeriodMs,
+    preparationGraceEndsAtMs: now + prepGracePeriodMs,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return res.status(200).json({
+    success: true,
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparingStartedAt: now,
+    preparationGraceEndsAt: now + prepGracePeriodMs,
+  });
+});
+
+exports.verifyInPersonMeetingPin = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const sessionId = req.body?.sessionId?.toString().trim() || requestId;
+  const enteredPin = req.body?.enteredPin?.toString().trim() || req.body?.pin?.toString().trim();
+
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+  if (!enteredPin) return res.status(400).json({ success: false, message: 'Missing enteredPin' });
+
+  const reqRef = db.collection('classRequests').doc(requestId);
+  const snap = await reqRef.get();
+  if (!snap.exists) return res.status(404).json({ success: false, message: 'Request not found' });
+  const data = snap.data() || {};
+
+  // Verify caller is the student for this request
+  if (data.studentId && data.studentId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized: only the student can verify the meeting PIN' });
+  }
+
+  // Check eligible statuses
+  const currentStatus = String(data.status || '').toLowerCase();
+  const ELIGIBLE_STATUSES = [
+    LESSON_STATUS.ARRIVED,
+    LESSON_STATUS.WAITING_STUDENT,
+    LESSON_STATUS.PREPARING_FOR_LESSON,
+  ];
+  if (!ELIGIBLE_STATUSES.includes(currentStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: `Cannot verify PIN in current status '${currentStatus}'. Tutor must have arrived.`,
+    });
+  }
+
+  const now = Date.now();
+  const maxAttempts = Number(data.maxVerificationPinAttempts || 3);
+  const currentAttempts = Number(data.verificationPinAttempts || 0);
+
+  // Check if locked out
+  if (currentAttempts >= maxAttempts) {
+    return res.status(403).json({
+      success: false,
+      code: 'MAX_ATTEMPTS_EXCEEDED',
+      message: 'Maximum PIN verification attempts exceeded. Please contact support.',
+      attemptsRemaining: 0,
+    });
+  }
+
+  // Check if expired
+  if (data.verificationPinExpiresAt && now > Number(data.verificationPinExpiresAt)) {
+    return res.status(410).json({
+      success: false,
+      code: 'PIN_EXPIRED',
+      message: 'The meeting PIN has expired. Ask tutor to re-confirm arrival.',
+    });
+  }
+
+  const expectedPin = String(data.verificationPin || '').trim();
+  const normalizedEnteredPin = enteredPin.padStart(4, '0');
+
+  // Mismatch
+  if (normalizedEnteredPin !== expectedPin) {
+    const nextAttempts = currentAttempts + 1;
+    const attemptsRemaining = Math.max(0, maxAttempts - nextAttempts);
+
+    await reqRef.set({
+      verificationPinAttempts: nextAttempts,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    if (data.sessionId) {
+      await db.collection('sessions').doc(data.sessionId).set({
+        verificationPinAttempts: nextAttempts,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => null);
+    }
+
+    return res.status(400).json({
+      success: false,
+      code: 'PIN_MISMATCH',
+      message: attemptsRemaining > 0
+        ? `Incorrect PIN. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
+        : 'Maximum PIN verification attempts exceeded. Please contact support.',
+      attemptsRemaining,
+    });
+  }
+
+  // Match success: confirm physical meeting and advance to preparing_for_lesson
+  const prepGracePeriodMs = 5 * 60 * 1000;
+  const prepGraceEndsAt = (data.preparationGraceEndsAt && data.preparationGraceEndsAt > now)
+    ? data.preparationGraceEndsAt
+    : now + prepGracePeriodMs;
+
+  await reqRef.set({
+    pinVerified: true,
+    pinVerifiedAt: now,
+    meetingConfirmed: true,
+    meetingConfirmedAt: now,
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    statusDetail: 'Physical meeting verified. 5-minute preparation grace active.',
+    preparationGraceStartedAt: data.preparationGraceStartedAt || now,
+    preparationGraceEndsAt: prepGraceEndsAt,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const effSessionId = data.sessionId || requestId;
+  await db.collection('sessions').doc(effSessionId).set({
+    pinVerified: true,
+    pinVerifiedAt: now,
+    meetingConfirmed: true,
+    meetingConfirmedAt: now,
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparationGraceStartedAt: data.preparationGraceStartedAt || now,
+    preparationGraceEndsAt: prepGraceEndsAt,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true }).catch(() => null);
+
+  await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+    pinVerified: true,
+    pinVerifiedAtMs: now,
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparationGraceEndsAt: prepGraceEndsAt,
+    preparationGraceEndsAtMs: prepGraceEndsAt,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return res.status(200).json({
+    success: true,
+    pinVerified: true,
+    pinVerifiedAt: now,
+    status: LESSON_STATUS.PREPARING_FOR_LESSON,
+    preparationGraceEndsAt: prepGraceEndsAt,
+    message: 'PIN verified successfully. Physical meeting confirmed.',
+  });
+});
+
+exports.startInPersonLesson = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const sessionId = req.body?.sessionId?.toString().trim() || requestId;
+  if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
+
+  const now = Date.now();
+  const reqRef = db.collection('classRequests').doc(requestId);
+  await reqRef.set({
+    status: LESSON_STATUS.IN_SESSION,
+    statusDetail: 'Lesson in progress.',
+    lessonStartedAt: now,
+    startedAt: now,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  await db.collection('sessions').doc(sessionId).set({
+    status: LESSON_STATUS.IN_SESSION,
+    lessonStartedAt: now,
+    startedAt: now,
+    billingStartedAt: now,
+    mode: 'in_person',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+    status: LESSON_STATUS.IN_SESSION,
+    startedAtMs: now,
+    updatedAtMs: now,
+  }).catch(() => null);
+
+  return res.status(200).json({ success: true, status: LESSON_STATUS.IN_SESSION, startedAt: now });
+});
+
+exports.requestEndInPersonLesson = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const sessionId = req.body?.sessionId?.toString().trim();
+  const requestId = req.body?.requestId?.toString().trim() || sessionId;
+  if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
+  const now = Date.now();
+  await db.collection('sessions').doc(sessionId).set({
+    status: LESSON_STATUS.ENDING_REQUESTED,
+    endRequestedBy: decoded.uid,
+    endRequestedAt: now,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  if (requestId) {
+    await db.collection('classRequests').doc(requestId).set({
+      status: LESSON_STATUS.ENDING_REQUESTED,
+      endRequestedBy: decoded.uid,
+      endRequestedAt: now,
+      statusDetail: 'Lesson completion requested.',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true }).catch(() => null);
+
+    await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+      status: LESSON_STATUS.ENDING_REQUESTED,
+      endRequestedBy: decoded.uid,
+      endRequestedAtMs: now,
+      updatedAtMs: now,
+    }).catch(() => null);
+  }
+
+  return res.status(200).json({ success: true, status: LESSON_STATUS.ENDING_REQUESTED, endRequestedAt: now });
+});
+
+exports.confirmEndInPersonLesson = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const sessionId = req.body?.sessionId?.toString().trim();
+  const requestId = req.body?.requestId?.toString().trim() || sessionId;
+  if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
+  const now = Date.now();
+  await db.collection('sessions').doc(sessionId).set({
+    endConfirmedBy: decoded.uid,
+    endConfirmedAt: now,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  // Delegate to finalizeSessionBilling
+  req.body.closureType = 'completed';
+  return exports.finalizeSessionBilling(req, res);
+});
+
+exports.getCancellationQuote = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const sessionId = req.body?.sessionId?.toString().trim() || requestId;
+  const canceledBy = req.body?.canceledBy === 'tutor' ? 'tutor' : 'student';
+
+  let requestData = {};
+  let sessionData = {};
+
+  if (requestId) {
+    const rSnap = await db.collection('classRequests').doc(requestId).get();
+    if (rSnap.exists) requestData = rSnap.data() || {};
+  }
+  if (sessionId) {
+    const sSnap = await db.collection('sessions').doc(sessionId).get();
+    if (sSnap.exists) sessionData = sSnap.data() || {};
+  }
+
+  const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
+  const ratePerMinute = Number(sessionData.pricingSnapshot?.ratePerMinute || requestData.pricingSnapshot?.ratePerMinute || 3.0);
+  const estimatedAmount = Number(sessionData.pricingSnapshot?.totalAmount || requestData.pricingSnapshot?.totalAmount || 100);
+
+  let elapsedMinutes = 0;
+  const lessonStartMs = Number(sessionData.billingStartedAt || sessionData.lessonStartedAt || 0);
+  if (lessonStartMs) {
+    elapsedMinutes = Math.max(1, Math.ceil((Date.now() - lessonStartMs) / 60000));
+  }
+
+  const acceptedAtMs = Number(sessionData.acceptedAt || requestData.acceptedAt || 0);
+  let acceptedElapsedMinutes = 0;
+  if (acceptedAtMs) {
+    acceptedElapsedMinutes = Math.max(0, (Date.now() - acceptedAtMs) / 60000);
+  }
+
+  const quote = computeCancellationQuote({
+    status: currentStatus,
+    mode: 'in_person',
+    canceledBy,
+    distanceTravelledKm: Number(req.body?.distanceTravelledKm || 0),
+    totalRouteKm: Number(req.body?.totalRouteKm || requestData?.distanceKm || sessionData?.distanceKm || 10),
+    estimatedAmount,
+    elapsedMinutes,
+    agreedRatePerMinute: ratePerMinute,
+    acceptedElapsedMinutes: Number(req.body?.acceptedElapsedMinutes ?? acceptedElapsedMinutes),
+    isPastAcceptedGrace: Boolean(req.body?.isPastAcceptedGrace),
+  });
+
+  return res.status(200).json({ success: true, quote });
+});
+
+exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 0.5, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  const requestId = req.body?.requestId?.toString().trim();
+  const sessionId = req.body?.sessionId?.toString().trim() || requestId;
+  const canceledBy = req.body?.canceledBy === 'tutor' ? 'tutor' : 'student';
+  const reason = req.body?.reason ? String(req.body.reason).trim() : 'Canceled by user request';
+
+  const now = Date.now();
+  const terminalStatus = canceledBy === 'tutor' ? LESSON_STATUS.CANCELED_BY_TUTOR : LESSON_STATUS.CANCELED_BY_STUDENT;
+
+  let requestData = {};
+  let sessionData = {};
+
+  if (requestId) {
+    const rSnap = await db.collection('classRequests').doc(requestId).get().catch(() => null);
+    if (rSnap?.exists) requestData = rSnap.data() || {};
+  }
+  if (sessionId) {
+    const sSnap = await db.collection('sessions').doc(sessionId).get().catch(() => null);
+    if (sSnap?.exists) sessionData = sSnap.data() || {};
+  }
+
+  const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
+  const ratePerMinute = Number(sessionData.pricingSnapshot?.ratePerMinute || requestData.pricingSnapshot?.ratePerMinute || 3.0);
+  const estimatedAmount = Number(sessionData.pricingSnapshot?.totalAmount || requestData.pricingSnapshot?.totalAmount || 100);
+
+  let elapsedMinutes = 0;
+  const lessonStartMs = Number(sessionData.billingStartedAt || sessionData.lessonStartedAt || 0);
+  if (lessonStartMs) {
+    elapsedMinutes = Math.max(1, Math.ceil((now - lessonStartMs) / 60000));
+  }
+
+  const acceptedAtMs = Number(sessionData.acceptedAt || requestData.acceptedAt || 0);
+  let acceptedElapsedMinutes = 0;
+  if (acceptedAtMs) {
+    acceptedElapsedMinutes = Math.max(0, (now - acceptedAtMs) / 60000);
+  }
+
+  const quote = computeCancellationQuote({
+    status: currentStatus,
+    mode: 'in_person',
+    canceledBy,
+    distanceTravelledKm: Number(req.body?.distanceTravelledKm || 0),
+    totalRouteKm: Number(req.body?.totalRouteKm || requestData?.distanceKm || sessionData?.distanceKm || 10),
+    estimatedAmount,
+    elapsedMinutes,
+    agreedRatePerMinute: ratePerMinute,
+    acceptedElapsedMinutes: Number(req.body?.acceptedElapsedMinutes ?? acceptedElapsedMinutes),
+    isPastAcceptedGrace: Boolean(req.body?.isPastAcceptedGrace),
+  });
+
+  const cancelFee = Number(quote.finalAmount || 0);
+  let paymentStatus = cancelFee > 0 ? 'wallet_debt_recorded' : 'not_applicable';
+  let charge = {
+    ok: cancelFee === 0,
+    paidAmount: 0,
+    unpaidAmount: cancelFee,
+    transactionId: null,
+  };
+
+  if (cancelFee > 0) {
+    const studentId = sessionData.studentId || requestData.studentId;
+    const studentRef = studentId ? db.collection('users').doc(studentId) : null;
+    const studentSnap = studentRef ? await studentRef.get().catch(() => null) : null;
+    const studentData = studentSnap?.exists ? (studentSnap.data() || {}) : {};
+    const paymentMethods = studentData.paymentMethods || [];
+    const selectedCardId = sessionData.selectedCardId || requestData.selectedCardId || null;
+    const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
+      || paymentMethods.find((card) => card.isDefault)
+      || paymentMethods[0]
+      || null;
+
+    let paymentsSecrets = null;
+    try {
+      paymentsSecrets = getPaymentsSecrets();
+    } catch (e) {
+      paymentsSecrets = null;
+    }
+
+    if (paymentsSecrets?.PAYSTACK_SECRET_KEY && selectedCard?.paystackAuthorizationCode) {
+      try {
+        charge = await settlePaystackAuthorization({
+          paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+          email: studentData.email || sessionData.studentEmail || '',
+          totalAmount: cancelFee,
+          authorizationCode: selectedCard.paystackAuthorizationCode,
+          paymentHold: sessionData.paymentHold || requestData.paymentHold || null,
+        });
+      } catch (err) {
+        charge = { ok: false, paidAmount: 0, unpaidAmount: cancelFee, transactionId: null };
+      }
+    }
+
+    paymentStatus = charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid';
+
+    if (charge.unpaidAmount > 0 && studentRef) {
+      const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
+      const nextBalance = Number((Number(wallet.balance || 0) - charge.unpaidAmount).toFixed(2));
+      await studentRef.set({
+        wallet: {
+          ...wallet,
+          balance: nextBalance,
+          currency: wallet.currency || 'ZAR',
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+
+  const cancellationPayload = {
+    status: terminalStatus,
+    canceledBy,
+    canceledReason: reason,
+    canceledAt: now,
+    endedAt: now,
+    totalAmount: cancelFee,
+    cancellationFee: cancelFee,
+    travelFee: quote.travelFee || 0,
+    bookingFee: quote.bookingFee || 0,
+    lessonFee: quote.lessonFee || 0,
+    payoutBreakdown: {
+      tutorAmount: quote.tutorPayout || 0,
+      platformAmount: quote.platformFee || 0,
+      travelFee: quote.travelFee || 0,
+      bookingFee: quote.bookingFee || 0,
+      lessonFee: quote.lessonFee || 0,
+      grossAmount: cancelFee,
+    },
+    paymentStatus,
+    paymentTransactionId: charge.transactionId || null,
+    statusDetail: `Lesson canceled by ${canceledBy}.`,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (requestId) {
+    await db.collection('classRequests').doc(requestId).set(cancellationPayload, { merge: true });
+
+    await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+      status: terminalStatus,
+      closedAtMs: now,
+      closedReason: reason,
+      updatedAtMs: now,
+    }).catch(() => null);
+  }
+
+  if (sessionId) {
+    await db.collection('sessions').doc(sessionId).set(cancellationPayload, { merge: true });
+  }
+
+  return res.status(200).json({ success: true, status: terminalStatus, canceledAt: now, quote, paymentStatus });
+});
+
+function decodePolylineString(encoded) {
+  if (!encoded || typeof encoded !== 'string') return [];
+  const points = [];
+  let index = 0;
+  const len = encoded.length;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < len) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+
+    points.push({
+      latitude: Number((lat / 1e5).toFixed(6)),
+      longitude: Number((lng / 1e5).toFixed(6)),
+    });
+  }
+  return points;
+}
+
+exports.getDirectionsRoute = onRequest({ cors: true, cpu: 0.5 }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed.' });
+    return;
+  }
+
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) {
+    res.status(401).json({ success: false, message: 'Unauthorized request.' });
+    return;
+  }
+
+  const body = req.body || {};
+  const origin = body.origin || {};
+  const destination = body.destination || {};
+  const requestId = String(body.requestId || '').trim();
+
+  const originLat = Number(origin.latitude ?? origin.lat);
+  const originLng = Number(origin.longitude ?? origin.lng);
+  const destLat = Number(destination.latitude ?? destination.lat);
+  const destLng = Number(destination.longitude ?? destination.lng);
+
+  if (!Number.isFinite(originLat) || !Number.isFinite(originLng) || !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+    res.status(400).json({ success: false, message: 'Valid origin and destination coordinates are required.' });
+    return;
+  }
+
+  let routeResult = null;
+
+  // 1. Try Google Routes API v2
+  try {
+    const googleApiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.MAPS_API_KEY || 'AIzaSyAslw-u2w4HMDLZAo-dLZlMWMoIfCNllcs';
+    const googleResp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': googleApiKey,
+        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
+        destination: { location: { latLng: { latitude: destLat, longitude: destLng } } },
+        travelMode: 'DRIVE',
+      }),
+    });
+    const googleData = await googleResp.json().catch(() => ({}));
+    if (googleResp.ok && Array.isArray(googleData?.routes) && googleData.routes[0]?.polyline?.encodedPolyline) {
+      const gRoute = googleData.routes[0];
+      const encoded = gRoute.polyline.encodedPolyline;
+      const durationSec = parseInt(gRoute.duration || '0', 10);
+      const decodedCoords = decodePolylineString(encoded);
+      routeResult = {
+        distanceMeters: Number(gRoute.distanceMeters || 0),
+        durationSeconds: durationSec,
+        encodedPolyline: encoded,
+        overviewPolyline: encoded,
+        routeCoordinates: decodedCoords,
+        routeProvider: 'google_routes',
+      };
+    }
+  } catch (gErr) {
+    logger.warn('Google Routes API call failed:', gErr?.message);
+  }
+
+  // 2. OSRM Road Geometry Fallback
+  if (!routeResult) {
+    try {
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=polyline`;
+      const osrmResp = await fetch(osrmUrl, {
+        headers: { Accept: 'application/json', 'User-Agent': 'Parakleo/1.0' },
+      });
+      const osrmData = await osrmResp.json().catch(() => ({}));
+      if (osrmData?.code === 'Ok' && Array.isArray(osrmData?.routes) && osrmData.routes.length > 0) {
+        const primary = osrmData.routes[0];
+        const encoded = primary.geometry || '';
+        const decodedCoords = decodePolylineString(encoded);
+        routeResult = {
+          distanceMeters: Math.round(Number(primary.distance || 0)),
+          durationSeconds: Math.round(Number(primary.duration || 0)),
+          encodedPolyline: encoded,
+          overviewPolyline: encoded,
+          routeCoordinates: decodedCoords,
+          routeProvider: 'osrm',
+        };
+      }
+    } catch (osrmErr) {
+      logger.warn('OSRM routing fallback failed:', osrmErr?.message);
+    }
+  }
+
+  if (!routeResult) {
+    res.status(500).json({ success: false, message: 'Unable to calculate road route.' });
+    return;
+  }
+
+  // If requestId was provided, persist to RTDB
+  if (requestId) {
+    admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+      routeSnapshot: {
+        encodedPolyline: routeResult.encodedPolyline,
+        overviewEncodedPolyline: routeResult.encodedPolyline,
+        distanceMeters: routeResult.distanceMeters,
+        durationSeconds: routeResult.durationSeconds,
+        routeProvider: routeResult.routeProvider,
+        lastSuccessfulRouteFetchAtMs: Date.now(),
+      },
+      distanceRemainingMeters: routeResult.distanceMeters,
+      etaSeconds: routeResult.durationSeconds,
+      updatedAtMs: Date.now(),
+    }).catch(() => null);
+  }
+
+  res.status(200).json({
+    success: true,
+    route: routeResult,
+  });
+});
+
+exports.findEligibleOnlineTutor = onRequest({ cors: true, cpu: 0.5 }, async (req, res) => {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.status(405).json({ success: false, message: 'Method not allowed.' });
+    return;
+  }
+
+  const payload = req.method === 'POST' ? (req.body || {}) : (req.query || {});
+  const subject = String(payload.subject || 'Mathematics').trim();
+  const studentLocation = payload.studentLocation || (
+    Number.isFinite(Number(payload.latitude || payload.lat)) && Number.isFinite(Number(payload.longitude || payload.lng))
+      ? { latitude: Number(payload.latitude || payload.lat), longitude: Number(payload.longitude || payload.lng) }
+      : null
+  );
+  const excludeUserId = String(payload.excludeUserId || '').trim() || null;
+
+  try {
+    const tutor = await findEligibleOnlineTutor(subject, {
+      studentLocation,
+      excludeUserId,
+      mode: payload.mode || 'in_person',
+    });
+
+    res.status(200).json({
+      success: true,
+      tutor: tutor ? {
+        uid: tutor.uid,
+        name: tutor.fullName || tutor.displayName || tutor.name || 'Tutor',
+        email: tutor.email || null,
+        overallRating: tutor.tutorProfile?.overallRating || null,
+        activeSubjects: tutor.activeSubjects || tutor.subjects || [],
+        location: tutor.liveLocation || tutor.location || tutor?.tutorProfile?.location || null,
+      } : null,
+    });
+  } catch (error) {
+    logger.warn('findEligibleOnlineTutor endpoint error', { error: error?.message });
+    res.status(500).json({ success: false, message: error?.message || 'Failed to query eligible tutors.' });
+  }
+});
+
+exports.computeHaversineDistanceKm = computeHaversineDistanceKm;
+exports.rankTutorsWithProximityAndFairness = rankTutorsWithProximityAndFairness;
+exports.getTutorQueueForSubject = getTutorQueueForSubject;
+exports.findEligibleOnlineTutorHelper = findEligibleOnlineTutor;
+
+
+

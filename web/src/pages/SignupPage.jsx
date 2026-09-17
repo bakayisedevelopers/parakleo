@@ -4,7 +4,14 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Mail, Lock, User } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { LegalLinksInline } from '../components/legal/LegalLinks';
-import { clearPendingSignupPortalRole, getPortalRoutes, resolvePostAuthPath, setPendingSignupPortalRole } from '../constants/portal';
+import {
+  clearPendingSignupPortalRole,
+  getPortalRoutes,
+  resolvePostAuthPath,
+  setPendingSignupPortalRole,
+  STUDENT_APP_DOWNLOAD_URL,
+  TUTOR_APP_DOWNLOAD_URL,
+} from '../constants/portal';
 import { usePortal } from '../hooks/usePortal';
 
 function Button({ type = 'button', children, className = '', ...props }) {
@@ -97,6 +104,32 @@ export default function SignupPage() {
             </>
           )}
         </p>
+        {portal.canSignUp ? (
+          <div className="mt-4 rounded-2xl border border-brand/20 bg-brand/5 p-4 text-center text-sm text-zinc-700">
+            <p className="font-semibold text-zinc-900 mb-1">Recommended: Use the Mobile App</p>
+            <p className="text-xs text-zinc-600 mb-3">
+              In-person tutoring and requests are managed on our mobile applications.
+            </p>
+            <div className="flex justify-center gap-2">
+              <a
+                href={STUDENT_APP_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-dark"
+              >
+                Download Student App
+              </a>
+              <a
+                href={TUTOR_APP_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl border border-brand/30 bg-white px-3 py-1.5 text-xs font-bold text-brand transition hover:bg-brand/10"
+              >
+                Download Tutor App
+              </a>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <motion.div

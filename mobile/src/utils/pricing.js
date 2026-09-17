@@ -2,15 +2,33 @@ export const LESSON_DURATION_OPTIONS = [10, 15, 20, 25, 30, 40, 50, 60, 75, 90];
 
 export const DEFAULT_LESSON_DURATION = 10;
 
+export const BASE_TRAVEL_FEE = 40.00;
+export const TRAVEL_FEE_PER_KM_AFTER_10 = 4.00;
+
+export function computeTravelFee(distanceKm = 0) {
+  const km = Math.max(0, Number(distanceKm || 0));
+  const baseFee = 40.00;
+  const extraKm = Math.max(0, km - 10);
+  const extraFee = extraKm * 4.00;
+  return Number((Math.round(((baseFee + extraFee) + Number.EPSILON) * 100) / 100).toFixed(2));
+}
+
+export function computeBookingFee(lessonTuitionAmount = 0) {
+  const tuition = Number(lessonTuitionAmount || 0);
+  if (tuition <= 0) return 0;
+  const rawFee = Number((Math.round(((tuition * 0.01) + Number.EPSILON) * 100) / 100).toFixed(2));
+  return Number((Math.min(2.00, Math.max(1.00, rawFee))).toFixed(2));
+}
+
 export const LEGACY_SAFE_PRICING_SNAPSHOT = {
   pricingBand: 'normal',
-  baseAmount: 12,
-  ratePerMinute: 1.8,
-  adjustedBaseAmount: 12,
-  adjustedRatePerMinute: 1.8,
+  baseAmount: 7,
+  ratePerMinute: 3.6,
+  adjustedBaseAmount: 7,
+  adjustedRatePerMinute: 3.6,
   durationMinutes: DEFAULT_LESSON_DURATION,
-  totalAmount: 30,
-  configVersion: 'pricing-v2.0.0-legacy-safe',
+  totalAmount: 43,
+  configVersion: 'pricing-v2.1.0-legacy-safe',
   explanationLabel: 'Standard pricing',
   currency: 'ZAR',
 };
@@ -25,8 +43,8 @@ export function normalizePricingSnapshot(snapshot) {
   }
 
   const durationMinutes = Math.max(1, Number(snapshot.durationMinutes || DEFAULT_LESSON_DURATION));
-  const adjustedBaseAmount = Number(snapshot.adjustedBaseAmount ?? snapshot.baseAmount ?? 12);
-  const adjustedRatePerMinute = Number(snapshot.adjustedRatePerMinute ?? snapshot.ratePerMinute ?? 1.8);
+  const adjustedBaseAmount = Number(snapshot.adjustedBaseAmount ?? snapshot.baseAmount ?? LEGACY_SAFE_PRICING_SNAPSHOT.adjustedBaseAmount);
+  const adjustedRatePerMinute = Number(snapshot.adjustedRatePerMinute ?? snapshot.ratePerMinute ?? LEGACY_SAFE_PRICING_SNAPSHOT.adjustedRatePerMinute);
   const totalAmount = Number(snapshot.totalAmount ?? (adjustedBaseAmount + (adjustedRatePerMinute * durationMinutes)));
 
   return {

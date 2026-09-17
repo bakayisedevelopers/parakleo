@@ -11,13 +11,13 @@ export default function AdminTutorAgreementsPage() {
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
-    version: '1.0.1',
+    version: '1.1.0',
     effectiveDate: new Date().toISOString().slice(0, 10),
     reviewedAt: new Date().toISOString().slice(0, 10),
     nextReviewAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().slice(0, 10),
     reviewedBy: 'Parakleo',
     stampLabel: 'PARAKLEO AGREEMENT RECORD',
-    changeSummary: 'Improved signed PDF formatting, added Parakleo agreement stamp, and added email delivery of signed agreement PDFs.',
+    changeSummary: 'Disclosed first-time-user promotional lesson 75% payout structure, right-to-work review requirements, and updated compliance terms.',
     contentMarkdown: '',
     title: 'Tutor Agreement',
     status: 'active',
@@ -102,7 +102,7 @@ export default function AdminTutorAgreementsPage() {
 
             <form onSubmit={publish} className="mt-6 space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField label="Version" name="version" value={form.version} onChange={(event) => setForm((prev) => ({ ...prev, version: event.target.value }))} placeholder="1.0.1" required />
+                <FormField label="Version" name="version" value={form.version} onChange={(event) => setForm((prev) => ({ ...prev, version: event.target.value }))} placeholder="1.1.0" required />
                 <FormField label="Effective date" name="effectiveDate" type="date" value={form.effectiveDate} onChange={(event) => setForm((prev) => ({ ...prev, effectiveDate: event.target.value }))} required />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -145,8 +145,8 @@ export default function AdminTutorAgreementsPage() {
 
           <SectionCard title="Version history" subtitle="Old versions remain immutable and downloadable through tutor acceptances.">
             <div className="space-y-3">
-              {versionHistory.length ? versionHistory.map((version) => (
-                <div key={version.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              {versionHistory.length ? versionHistory.map((version, index) => (
+                <div key={version.id || version.version || `version_${index}`} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-sm font-semibold text-zinc-900">Version {version.version}</p>
                   <p className="mt-1 text-xs text-zinc-500">{version.status || 'active'} • {version.effectiveDate || 'No effective date'}</p>
                   <p className="mt-2 text-sm text-zinc-700">{version.changeSummary || 'No change summary provided.'}</p>

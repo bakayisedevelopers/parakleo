@@ -2,10 +2,46 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Local emulator development only. Replace with least-privilege rules
-    // before deploying rules to a real Firebase project.
-    match /{allPaths=**} {
-      allow read, write: if true;
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          request.auth.token.email == 'jabuobed1@gmail.com'
+          || request.auth.token.role == 'admin'
+          || request.auth.token.isAdmin == true
+          || ('roles' in request.auth.token && 'admin' in request.auth.token.roles)
+        );
+    }
+
+    match /tutorDocuments/{uid}/{documentId}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    match /tutorSelfies/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    match /tutorPoliceClearance/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    match /tutor_documents/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    match /tutor-agreements/{uid}/{version}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
     }
   }
 }

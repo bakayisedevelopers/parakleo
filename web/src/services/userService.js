@@ -2,7 +2,7 @@ import { getFirebaseClients } from '../firebase/config';
 import { hasCompletedTutorProfile, isTutorAgreementCurrent } from '../utils/onboarding';
 
 const DEFAULT_STUDENT_FREE_MINUTES = 30;
-const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.0.1';
+const TUTOR_AGREEMENT_DEFAULT_VERSION = '1.1.0';
 const MOCK_USER_KEY = 'parakleo_mock_user';
 
 function buildReferralSlug() {
@@ -321,22 +321,56 @@ export async function getStudentsForAdmin() {
   return snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
 }
 
-export async function setTutorVerificationStatus(uid, verificationStatus) {
+export async function setTutorVerificationStatus(uid, verificationStatus, rejectionReason = '') {
   const existing = await getUserProfile(uid);
   const normalizedStatus = String(verificationStatus || '').toLowerCase();
+  const trimmedReason = String(rejectionReason || '').trim();
+
   if (normalizedStatus === 'verified') {
     if (!hasCurrentTutorAgreement(existing || {})) {
       throw new Error('Tutor must accept the current Tutor Agreement before being marked verified.');
     }
     if (!hasCompletedTutorProfile(existing || {})) {
-      throw new Error('Tutor must complete their profile, upload results, police clearance, payout details, and active subjects before verification.');
+      throw new Error('Tutor must complete their profile, upload results, safety verification documents, payout details, and active subjects before verification.');
+    }
+    const tutorProfile = existing?.tutorProfile || {};
+    const hasPolice = Boolean(
+      tutorProfile.policeClearance?.fileUrl
+        || tutorProfile.policeClearance?.documentId
+        || tutorProfile.policeClearanceSubmittedAt,
+    );
+    const hasRightToWork = Boolean(
+      tutorProfile.idDocument?.fileUrl
+        || tutorProfile.idDocument?.documentId
+        || tutorProfile.idVerificationUrl
+        || tutorProfile.idDocumentSubmittedAt,
+    );
+    if (!hasPolice || !hasRightToWork) {
+      throw new Error('Tutor verification requires both an uploaded police clearance certificate and an official South African ID or passport with valid work visa.');
     }
   }
+
+  const tutorProfilePatch = {
+    ...(existing?.tutorProfile || {}),
+    verificationStatus: normalizedStatus || verificationStatus,
+  };
+
+  if (normalizedStatus === 'verified') {
+    tutorProfilePatch.verifiedAt = new Date().toISOString();
+    tutorProfilePatch.rejectionReason = null;
+    tutorProfilePatch.rejectionFeedback = null;
+  } else if (normalizedStatus === 'rejected') {
+    tutorProfilePatch.rejectedAt = new Date().toISOString();
+    tutorProfilePatch.rejectionReason = trimmedReason || 'Please review and re-upload your verification documents.';
+    tutorProfilePatch.rejectionFeedback = trimmedReason || 'Please review and re-upload your verification documents.';
+  } else {
+    tutorProfilePatch.rejectionReason = null;
+    tutorProfilePatch.rejectionFeedback = null;
+  }
+
   return updateUserProfile(uid, {
-    tutorProfile: {
-      ...(existing?.tutorProfile || {}),
-      verificationStatus: normalizedStatus || verificationStatus,
-    },
+    verificationStatus: normalizedStatus || verificationStatus,
+    tutorProfile: tutorProfilePatch,
   });
 }
 
