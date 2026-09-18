@@ -14,14 +14,19 @@ const ACTION_OPTIONS = [
   { id: 'describe', label: 'Describe Problem', icon: 'create-outline', x: 68, y: -68 },
 ];
 
-export function RadialActionMenu({ onCapture, onUpload, onDescribe, docked = false }) {
+export function RadialActionMenu({ onCapture, onUpload, onDescribe, docked = false, onOpenChange }) {
   const [isOpen, setIsOpen] = useState(false);
   const animValue = useRef(new Animated.Value(0)).current;
+
+  function updateOpen(nextOpen) {
+    setIsOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }
 
   useEffect(() => {
     if (!isOpen) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setIsOpen(false);
+      updateOpen(false);
       return true;
     });
     return () => subscription.remove();
@@ -37,11 +42,11 @@ export function RadialActionMenu({ onCapture, onUpload, onDescribe, docked = fal
   }, [isOpen, animValue]);
 
   function handleToggle() {
-    setIsOpen((curr) => !curr);
+    updateOpen(!isOpen);
   }
 
   function handleSelect(actionId) {
-    setIsOpen(false);
+    updateOpen(false);
     if (actionId === 'capture') onCapture?.();
     else if (actionId === 'upload') onUpload?.();
     else if (actionId === 'describe') onDescribe?.();
@@ -53,7 +58,7 @@ export function RadialActionMenu({ onCapture, onUpload, onDescribe, docked = fal
   });
 
   return (
-    <View pointerEvents="box-none" style={[styles.container, docked && styles.dockedContainer]}>
+    <View pointerEvents="box-none" style={[styles.container, docked && (isOpen ? styles.dockedContainer : styles.dockedClosedContainer)]}>
       {/* Standalone animated orbital action buttons (No overlay / No modal) */}
       {isOpen ? (
         <View pointerEvents="box-none" style={styles.optionsLayer}>
@@ -129,6 +134,12 @@ const styles = StyleSheet.create({
   dockedContainer: {
     height: 190,
     width: 220,
+    marginTop: 0,
+    justifyContent: 'flex-end',
+  },
+  dockedClosedContainer: {
+    height: 74,
+    width: 74,
     marginTop: 0,
     justifyContent: 'flex-end',
   },

@@ -25,6 +25,7 @@ import { SessionRoomScreen } from '../screens/session/SessionRoomScreen';
 import { TutorActiveSessionScreen } from '../screens/session/TutorActiveSessionScreen';
 import { TutorSessionSummaryScreen } from '../screens/session/TutorSessionSummaryScreen';
 import { TutorNavigationScreen } from '../screens/navigation/TutorNavigationScreen';
+import { TutorRequestDetailsScreen } from '../screens/requests/TutorRequestDetailsScreen';
 import { getTutorOnboardingStatus } from '../constants/onboarding';
 import { TutorOfferOverlay } from '../components/offers/TutorOfferOverlay';
 import { colors } from '../theme/colors';
@@ -78,6 +79,8 @@ const modalScreens = {
   TutorSessionSummary: TutorSessionSummaryScreen,
   SessionSummary: TutorSessionSummaryScreen,
   TutorNavigation: TutorNavigationScreen,
+  TutorRequestDetails: TutorRequestDetailsScreen,
+  RequestDetails: TutorRequestDetailsScreen,
   AvailableRequests: AvailableRequestsScreen,
   MyClasses: MyClassesScreen,
   TutorAccount: TutorAccountScreen,
@@ -313,7 +316,6 @@ export function RootNavigator() {
         <View style={styles.screenContainer}>
           <ModalComponent route={{ params: modalParams }} navigate={navigate} goBack={goBack} />
         </View>
-        <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />
       </SafeAreaView>
     );
   }
@@ -359,8 +361,8 @@ export function RootNavigator() {
         })}
       </View>
 
-      {/* Global incoming class offer overlay matching Uncedo HelperOfferOverlay */}
-      <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />
+      {/* Global incoming class offer overlay */}
+      {!activeModal && <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />}
     </SafeAreaView>
   );
 }

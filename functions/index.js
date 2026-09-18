@@ -3,9 +3,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const { logger } = require('firebase-functions');
-const vision = require('@google-cloud/vision');
 const admin = require('firebase-admin');
-const { Resend } = require('resend');
 const { createHash, randomUUID, randomInt } = require('crypto');
 const {
   BILLING_RULES,
@@ -430,9 +428,18 @@ const GEMINI_FLASH_EXTRACTION_SOURCE = 'gemini_2_5_flash_after_tutor_accept';
 
 function getVisionClient() {
   if (!visionClient) {
+    const vision = require('@google-cloud/vision');
     visionClient = new vision.ImageAnnotatorClient();
   }
   return visionClient;
+}
+
+let ResendClass = null;
+function getResendClient(apiKey) {
+  if (!ResendClass) {
+    ResendClass = require('resend').Resend;
+  }
+  return new ResendClass(apiKey);
 }
 
 function normalizeMillis(value) {
@@ -3281,7 +3288,7 @@ async function sendTutorAgreementEmailWithAttachment({
   destinationEmail,
 }) {
   const emailSecrets = getEmailSecrets();
-  const resend = new Resend(emailSecrets.RESEND_API_KEY);
+  const resend = getResendClient(emailSecrets.RESEND_API_KEY);
   const subject = 'Welcome to Parakleo — Your Tutor Agreement';
   const destination = String(destinationEmail || '').trim();
   if (!isValidEmailAddress(destination)) {
@@ -5985,7 +5992,7 @@ async function initiatePaystackTransfer({ paystackSecretKey, amount, recipientCo
   return payload?.data || {};
 }
 
-exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.submitClassRequest = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ success: false, message: 'Method not allowed.' });
     return;
@@ -6207,6 +6214,23 @@ exports.submitClassRequest = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS
         targetPath: '/app/tutor',
       }).catch(() => null);
     }
+
+    await admin.database().ref(`liveTracking/classRequests/${requestRef.id}`).update({
+      requestId: requestRef.id,
+      studentId,
+      tutorId: initialTutorId || null,
+      studentLocation: requestBody.studentLocation || null,
+      destination: requestBody.destination || requestBody.meetingCoordinates || requestBody.studentLocation || null,
+      meetingCoordinates: requestBody.meetingCoordinates || requestBody.destination || requestBody.studentLocation || null,
+      studentAddress: requestBody.studentAddress || requestBody.meetingAddress || requestBody.locationAddress || '',
+      meetingAddress: requestBody.meetingAddress || requestBody.studentAddress || requestBody.locationAddress || '',
+      status: initialStatus,
+      statusDetail: initialDetail,
+      mode: requestBody.mode || 'in_person',
+      createdAtMs: Date.now(),
+      requestExpiresAt: requestBody.requestExpiresAt || requestBody.expiresAt || null,
+      updatedAtMs: Date.now(),
+    }).catch(() => null);
   } catch (error) {
     if (paymentHold?.reference) {
       try {
@@ -7501,7 +7525,7 @@ exports.sendEmailFromQueue = onDocumentCreated(
     const resendApiKey = emailSecrets.RESEND_API_KEY;
     const emailFrom = emailSecrets.EMAIL_FROM;
 
-    const resend = new Resend(resendApiKey);
+    const resend = getResendClient(resendApiKey);
     const emailPayload = buildEmailPayload(data.eventType, data.payload);
 
     if (!emailPayload) {
@@ -7602,7 +7626,7 @@ exports.sendEmailFromQueue = onDocumentCreated(
 // IN-PERSON POST-ACCEPTANCE LIFECYCLE CLOUD FUNCTIONS (PHASES 1, 3, 9-18)
 // ---------------------------------------------------------------------------
 
-exports.acceptClassRequest = onRequest({ cors: true }, async (req, res) => {
+exports.acceptClassRequest = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -7632,7 +7656,11 @@ exports.acceptClassRequest = onRequest({ cors: true }, async (req, res) => {
         throw new Error('Class request not found.');
       }
       const data = snap.data() || {};
-      if (data.status !== REQUEST_STATUS.OFFERED && data.status !== REQUEST_STATUS.MATCHING) {
+      const currentStatus = String(data.status || '').toLowerCase();
+      if (currentStatus === LESSON_STATUS.ACCEPTED && data.tutorId === tutorId) {
+        return { success: true, requestId, sessionId: data.sessionId || requestId, status: LESSON_STATUS.ACCEPTED, idempotent: true };
+      }
+      if (currentStatus !== REQUEST_STATUS.OFFERED || data.currentOfferTutorId !== tutorId) {
         throw new Error('Class request is no longer available.');
       }
 
@@ -7670,6 +7698,8 @@ exports.acceptClassRequest = onRequest({ cors: true }, async (req, res) => {
         statusDetail: 'Tutor accepted and is preparing for class.',
         meetingAddress: data.meetingAddress || data.studentAddress || data.locationAddress || '',
         studentLocation: data.studentLocation || data.location || null,
+        destination: data.destination || data.meetingCoordinates || data.studentLocation || data.location || null,
+        meetingCoordinates: data.meetingCoordinates || data.destination || data.studentLocation || data.location || null,
         pricingSnapshot: data.pricingSnapshot || null,
         durationMinutes: Number(data.durationMinutes || data.pricingSnapshot?.durationMinutes || 10),
         createdAtMs: now,
@@ -7760,7 +7790,7 @@ exports.declineClassRequest = onRequest({ cors: true }, async (req, res) => {
   }
 });
 
-exports.startTutorTravel = onRequest({ cors: true }, async (req, res) => {
+exports.startTutorTravel = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -7776,6 +7806,14 @@ exports.startTutorTravel = onRequest({ cors: true }, async (req, res) => {
   const data = snap.data() || {};
   if (data.tutorId && data.tutorId !== decoded.uid) {
     return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const currentStatus = String(data.status || '').toLowerCase();
+  if (['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'completed', 'settled', 'expired', 'closed'].includes(currentStatus)) {
+    return res.status(400).json({ success: false, message: 'Cannot start travel: request is already closed or canceled.' });
+  }
+  if (!canTransition(currentStatus, LESSON_STATUS.TRAVELLING)) {
+    return res.status(409).json({ success: false, message: `Cannot start travel from status '${currentStatus}'.` });
   }
 
   const now = Date.now();
@@ -7805,7 +7843,7 @@ exports.startTutorTravel = onRequest({ cors: true }, async (req, res) => {
   return res.status(200).json({ success: true, status: LESSON_STATUS.TRAVELLING, startedTravellingAt: now, travelStartedAt: now });
 });
 
-exports.markTutorArrived = onRequest({ cors: true }, async (req, res) => {
+exports.markTutorArrived = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -7821,6 +7859,14 @@ exports.markTutorArrived = onRequest({ cors: true }, async (req, res) => {
   const data = snap.data() || {};
   if (data.tutorId && data.tutorId !== decoded.uid) {
     return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const currentStatus = String(data.status || '').toLowerCase();
+  if (['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'completed', 'settled', 'expired', 'closed'].includes(currentStatus)) {
+    return res.status(400).json({ success: false, message: 'Cannot mark arrived: request is already closed or canceled.' });
+  }
+  if (!canTransition(currentStatus, LESSON_STATUS.ARRIVED)) {
+    return res.status(409).json({ success: false, message: `Cannot mark arrived from status '${currentStatus}'.` });
   }
 
   const now = Date.now();
@@ -7876,7 +7922,7 @@ exports.markTutorArrived = onRequest({ cors: true }, async (req, res) => {
   });
 });
 
-exports.markPreparingForLesson = onRequest({ cors: true, cpu: 0.5 }, async (req, res) => {
+exports.markPreparingForLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -7892,6 +7938,14 @@ exports.markPreparingForLesson = onRequest({ cors: true, cpu: 0.5 }, async (req,
   const data = snap.data() || {};
   if (data.tutorId && data.tutorId !== decoded.uid) {
     return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const currentStatus = String(data.status || '').toLowerCase();
+  if (['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'completed', 'settled', 'expired', 'closed'].includes(currentStatus)) {
+    return res.status(400).json({ success: false, message: 'Cannot mark preparing: request is already closed or canceled.' });
+  }
+  if (!canTransition(currentStatus, LESSON_STATUS.PREPARING_FOR_LESSON)) {
+    return res.status(409).json({ success: false, message: `Cannot mark preparing from status '${currentStatus}'.` });
   }
 
   const now = Date.now();
@@ -8071,7 +8125,7 @@ exports.verifyInPersonMeetingPin = onRequest({ cors: true }, async (req, res) =>
   });
 });
 
-exports.startInPersonLesson = onRequest({ cors: true }, async (req, res) => {
+exports.startInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -8082,8 +8136,27 @@ exports.startInPersonLesson = onRequest({ cors: true }, async (req, res) => {
   const sessionId = req.body?.sessionId?.toString().trim() || requestId;
   if (!requestId) return res.status(400).json({ success: false, message: 'Missing requestId' });
 
-  const now = Date.now();
   const reqRef = db.collection('classRequests').doc(requestId);
+  const snap = await reqRef.get();
+  if (!snap.exists) return res.status(404).json({ success: false, message: 'Request not found' });
+  const data = snap.data() || {};
+  if (data.tutorId && data.tutorId !== decoded.uid) {
+    return res.status(403).json({ success: false, message: 'Not authorized for this class' });
+  }
+
+  const currentStatus = String(data.status || '').toLowerCase();
+  if (['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'completed', 'settled', 'expired', 'closed'].includes(currentStatus)) {
+    return res.status(400).json({ success: false, message: 'Cannot start lesson: request is already closed or canceled.' });
+  }
+  if (!canTransition(currentStatus, LESSON_STATUS.IN_SESSION)) {
+    return res.status(409).json({ success: false, message: `Cannot start lesson from status '${currentStatus}'.` });
+  }
+
+  if (!data.pinVerified && !data.meetingConfirmed) {
+    return res.status(400).json({ success: false, message: 'Cannot start lesson: Student must enter the 4-digit PIN first.' });
+  }
+
+  const now = Date.now();
   await reqRef.set({
     status: LESSON_STATUS.IN_SESSION,
     statusDetail: 'Lesson in progress.',
@@ -8110,7 +8183,7 @@ exports.startInPersonLesson = onRequest({ cors: true }, async (req, res) => {
   return res.status(200).json({ success: true, status: LESSON_STATUS.IN_SESSION, startedAt: now });
 });
 
-exports.requestEndInPersonLesson = onRequest({ cors: true }, async (req, res) => {
+exports.requestEndInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -8120,6 +8193,13 @@ exports.requestEndInPersonLesson = onRequest({ cors: true }, async (req, res) =>
   const sessionId = req.body?.sessionId?.toString().trim();
   const requestId = req.body?.requestId?.toString().trim() || sessionId;
   if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
+  const sessionSnap = await db.collection('sessions').doc(sessionId).get().catch(() => null);
+  const requestSnap = requestId ? await db.collection('classRequests').doc(requestId).get().catch(() => null) : null;
+  const currentStatus = String(sessionSnap?.data()?.status || requestSnap?.data()?.status || '').toLowerCase();
+  if (!canTransition(currentStatus, LESSON_STATUS.ENDING_REQUESTED)) {
+    return res.status(409).json({ success: false, message: `Cannot request lesson end from status '${currentStatus}'.` });
+  }
 
   const now = Date.now();
   await db.collection('sessions').doc(sessionId).set({
@@ -8149,7 +8229,7 @@ exports.requestEndInPersonLesson = onRequest({ cors: true }, async (req, res) =>
   return res.status(200).json({ success: true, status: LESSON_STATUS.ENDING_REQUESTED, endRequestedAt: now });
 });
 
-exports.confirmEndInPersonLesson = onRequest({ cors: true, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.confirmEndInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -8159,6 +8239,13 @@ exports.confirmEndInPersonLesson = onRequest({ cors: true, secrets: [PARAKLEO_PA
   const sessionId = req.body?.sessionId?.toString().trim();
   const requestId = req.body?.requestId?.toString().trim() || sessionId;
   if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
+  const sessionSnap = await db.collection('sessions').doc(sessionId).get().catch(() => null);
+  const requestSnap = requestId ? await db.collection('classRequests').doc(requestId).get().catch(() => null) : null;
+  const currentStatus = String(sessionSnap?.data()?.status || requestSnap?.data()?.status || '').toLowerCase();
+  if (!canTransition(currentStatus, LESSON_STATUS.COMPLETED)) {
+    return res.status(409).json({ success: false, message: `Cannot complete lesson from status '${currentStatus}'.` });
+  }
 
   const now = Date.now();
   await db.collection('sessions').doc(sessionId).set({
@@ -8227,7 +8314,7 @@ exports.getCancellationQuote = onRequest({ cors: true }, async (req, res) => {
   return res.status(200).json({ success: true, quote });
 });
 
-exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 0.5, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
+exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1, secrets: [PARAKLEO_PAYMENTS_SECRETS] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
   const token = getBearerToken(req);
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -8255,6 +8342,9 @@ exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 0.5, secrets: [PARAK
   }
 
   const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
+  if (['completed', 'settled', 'expired', 'closed', 'canceled', 'canceled_during', 'canceled_by_student', 'canceled_by_tutor'].includes(currentStatus)) {
+    return res.status(409).json({ success: false, message: `Cannot cancel lesson from terminal status '${currentStatus}'.` });
+  }
   const ratePerMinute = Number(sessionData.pricingSnapshot?.ratePerMinute || requestData.pricingSnapshot?.ratePerMinute || 3.0);
   const estimatedAmount = Number(sessionData.pricingSnapshot?.totalAmount || requestData.pricingSnapshot?.totalAmount || 100);
 

@@ -261,311 +261,129 @@ export async function submitSessionRating(session, role, payload) {
 
 export async function startTutorTravel({ requestId, tutorId }) {
   if (!requestId) return;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('startTutorTravel');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, tutorId }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('startTutorTravel endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to start travel while offline. Please try again.');
   }
 
-  // Fallback direct write
-  const now = Date.now();
-  const reqRef = doc(db, 'classRequests', requestId);
-  await updateDoc(reqRef, {
-    status: 'travelling',
-    statusDetail: 'Tutor has started travelling to your location.',
-    travelStartedAt: now,
-    startedTravellingAt: now,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  await updateLiveTracking(requestId, {
-    status: 'travelling',
-    travelStartedAtMs: now,
-    startedTravellingAtMs: now,
-    updatedAtMs: now,
-  }).catch(() => null);
-
-  return { success: true, status: 'travelling', travelStartedAt: now, startedTravellingAt: now };
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, tutorId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to start travel right now.');
+  }
+  return payload;
 }
 
 export async function markTutorArrived({ requestId, sessionId, tutorId, distanceMeters = 0 }) {
   if (!requestId) return;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('markTutorArrived');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId, tutorId, distanceMeters }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('markTutorArrived endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to mark arrival while offline. Please try again.');
   }
 
-  // Fallback direct write
-  const now = Date.now();
-  const gracePeriodMs = 5 * 60 * 1000;
-  const pin = Math.floor(1000 + Math.random() * 9000).toString();
-  const pinExpiresAt = now + (30 * 60 * 1000);
-  const reqRef = doc(db, 'classRequests', requestId);
-  await updateDoc(reqRef, {
-    status: 'arrived',
-    statusDetail: 'Tutor has arrived at the student location.',
-    arrivedAt: now,
-    arrivalGraceStartedAt: now,
-    arrivalGraceEndsAt: now + gracePeriodMs,
-    verificationPin: pin,
-    verificationPinGeneratedAt: now,
-    verificationPinExpiresAt: pinExpiresAt,
-    verificationPinAttempts: 0,
-    maxVerificationPinAttempts: 3,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  const effSessionId = sessionId || requestId;
-  if (effSessionId) {
-    const sRef = doc(db, 'sessions', effSessionId);
-    await updateDoc(sRef, {
-      status: 'arrived',
-      arrivedAt: now,
-      arrivalGraceStartedAt: now,
-      arrivalGraceEndsAt: now + gracePeriodMs,
-      verificationPin: pin,
-      verificationPinGeneratedAt: now,
-      verificationPinExpiresAt: pinExpiresAt,
-      verificationPinAttempts: 0,
-      maxVerificationPinAttempts: 3,
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId, tutorId, distanceMeters }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to mark arrival right now.');
   }
-
-  await updateLiveTracking(requestId, {
-    status: 'arrived',
-    arrivedAtMs: now,
-    arrivalGraceStartedAtMs: now,
-    arrivalGraceEndsAt: now + gracePeriodMs,
-    arrivalGraceEndsAtMs: now + gracePeriodMs,
-    verificationPin: pin,
-    updatedAtMs: now,
-  }).catch(() => null);
-
-  return {
-    success: true,
-    status: 'arrived',
-    arrivedAt: now,
-    arrivalGraceEndsAt: now + gracePeriodMs,
-    verificationPin: pin,
-  };
+  return payload;
 }
 
 export async function markPreparingForLesson({ requestId, sessionId, tutorId }) {
   if (!requestId) return;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('markPreparingForLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId, tutorId }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('markPreparingForLesson endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to mark preparation while offline. Please try again.');
   }
 
-  // Fallback direct write
-  const now = Date.now();
-  const prepGraceMs = 5 * 60 * 1000;
-  const reqRef = doc(db, 'classRequests', requestId);
-  await updateDoc(reqRef, {
-    status: 'preparing_for_lesson',
-    statusDetail: 'Tutor and student are preparing for the lesson.',
-    preparingStartedAt: now,
-    preparationGraceStartedAt: now,
-    preparationGraceEndsAt: now + prepGraceMs,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  const effSessionId = sessionId || requestId;
-  if (effSessionId) {
-    const sRef = doc(db, 'sessions', effSessionId);
-    await updateDoc(sRef, {
-      status: 'preparing_for_lesson',
-      preparingStartedAt: now,
-      preparationGraceStartedAt: now,
-      preparationGraceEndsAt: now + prepGraceMs,
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId, tutorId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to mark preparation right now.');
   }
-
-  await updateLiveTracking(requestId, {
-    status: 'preparing_for_lesson',
-    preparingStartedAtMs: now,
-    preparationGraceStartedAtMs: now,
-    preparationGraceEndsAt: now + prepGraceMs,
-    preparationGraceEndsAtMs: now + prepGraceMs,
-    updatedAtMs: now,
-  }).catch(() => null);
-
-  return {
-    success: true,
-    status: 'preparing_for_lesson',
-    preparingStartedAt: now,
-    preparationGraceEndsAt: now + prepGraceMs,
-  };
+  return payload;
 }
 
 export async function startInPersonLesson({ requestId, sessionId }) {
   const effSessionId = sessionId || requestId;
   if (!effSessionId) return null;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('startInPersonLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId: effSessionId }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('startInPersonLesson endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to start lesson while offline. Please try again.');
   }
 
-  // Fallback direct write
-  const now = Date.now();
-  if (requestId) {
-    const reqRef = doc(db, 'classRequests', requestId);
-    await updateDoc(reqRef, {
-      status: 'in_session',
-      statusDetail: 'Lesson in progress.',
-      lessonStartedAt: now,
-      startedAt: now,
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
-
-    await updateLiveTracking(requestId, {
-      status: 'in_session',
-      startedAtMs: now,
-      updatedAtMs: now,
-    }).catch(() => null);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId: effSessionId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to start lesson right now.');
   }
-
-  const sRef = doc(db, 'sessions', effSessionId);
-  await updateDoc(sRef, {
-    status: 'in_session',
-    lessonStartedAt: now,
-    startedAt: now,
-    billingStartedAt: now,
-    mode: 'in_person',
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  return { success: true, status: 'in_session', startedAt: now };
+  return payload;
 }
 
 export async function requestEndLesson({ requestId, sessionId }) {
   const effSessionId = sessionId || requestId;
   if (!effSessionId) return;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('requestEndInPersonLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId: effSessionId }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('requestEndLesson endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to request lesson end while offline. Please try again.');
   }
 
-  const now = Date.now();
-  const uid = auth.currentUser?.uid || '';
-  const sRef = doc(db, 'sessions', effSessionId);
-  await updateDoc(sRef, {
-    status: 'ending_requested',
-    endRequestedBy: uid,
-    endRequestedAt: now,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  if (requestId) {
-    const reqRef = doc(db, 'classRequests', requestId);
-    await updateDoc(reqRef, {
-      status: 'ending_requested',
-      endRequestedBy: uid,
-      endRequestedAt: now,
-      statusDetail: 'Lesson completion requested.',
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
-
-    await updateLiveTracking(requestId, {
-      status: 'ending_requested',
-      endRequestedBy: uid,
-      endRequestedAtMs: now,
-      updatedAtMs: now,
-    }).catch(() => null);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId: effSessionId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to request lesson end.');
   }
-
-  return { success: true, status: 'ending_requested', endRequestedAt: now };
+  return payload;
 }
 
 export async function confirmEndLesson({ requestId, sessionId, session }) {
@@ -590,12 +408,11 @@ export async function confirmEndLesson({ requestId, sessionId, session }) {
         if (payload?.success) return payload;
       }
     } catch (err) {
-      console.warn('confirmEndLesson endpoint failed, falling back to finalizeSessionClosure:', err);
+      throw new Error(err?.message || 'Unable to finalize lesson completion.');
     }
   }
 
-  const currentSession = session || { id: effSessionId, requestId };
-  return finalizeSessionClosure(currentSession, { closureType: 'completed' });
+  throw new Error('Unable to finalize lesson while offline. Please try again.');
 }
 
 export async function toggleSessionPause({ sessionId, requestId, isPaused, pausedIntervals = [], currentTotalSeconds = 0 }) {
@@ -747,101 +564,33 @@ export async function cancelInPersonSession({
   distanceTravelledKm = 0,
   totalRouteKm = 10,
 }) {
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
+  const effSessionId = sessionId || requestId || session?.id;
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('cancelInPersonLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requestId,
-          sessionId,
-          canceledBy,
-          reason,
-          distanceTravelledKm,
-          totalRouteKm,
-        }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('cancelInPersonLesson endpoint error, falling back to local closure:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to cancel while offline. Please try again.');
   }
 
-  const effSessionId = sessionId || requestId || session?.id;
-  const canceledAt = Date.now();
-  const closureType = canceledBy === 'tutor' ? 'canceled_by_tutor' : 'canceled_by_student';
-
-  // 1. Unconditionally update classRequests doc in Firestore
-  if (requestId) {
-    try {
-      const reqRef = doc(db, 'classRequests', requestId);
-      await updateDoc(reqRef, {
-        status: 'canceled',
-        statusDetail: canceledBy === 'tutor' ? 'Request canceled by tutor.' : 'Request canceled by student.',
-        canceledAt,
-        canceledBy,
-        canceledReason: reason || '',
-        currentOfferTutorId: null,
-        offerExpiresAt: null,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (reqErr) {
-      console.warn('cancelInPersonSession Firestore classRequests update warning:', reqErr);
-    }
-
-    // 2. Unconditionally update RTDB liveTracking
-    try {
-      await updateLiveTracking(requestId, {
-        status: 'canceled',
-        canceledBy,
-        closedAtMs: canceledAt,
-        closedReason: reason || '',
-        updatedAtMs: canceledAt,
-      });
-    } catch (rtdbErr) {
-      console.warn('cancelInPersonSession RTDB liveTracking update warning:', rtdbErr);
-    }
-  }
-
-  // 3. Update sessions doc in Firestore if effSessionId exists
-  if (effSessionId) {
-    try {
-      const sRef = doc(db, 'sessions', effSessionId);
-      await updateDoc(sRef, {
-        status: 'canceled',
-        endedAt: canceledAt,
-        canceledAt,
-        canceledBy,
-        canceledReason: reason || '',
-        updatedAt: serverTimestamp(),
-      });
-    } catch (_sErr) {
-      // Session document may not exist if request was canceled prior to acceptance
-    }
-  }
-
-  // 4. Attempt billing closure, but NEVER let errors crash or revert the cancellation
-  const currentSession = session || { id: effSessionId, requestId };
-  try {
-    const finalSession = await finalizeSessionClosure(currentSession, {
-      closureType,
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requestId,
+      sessionId: effSessionId,
       canceledBy,
-      canceledReason: reason,
-    });
-    return { success: true, status: 'canceled', session: finalSession };
-  } catch (closureErr) {
-    console.warn('cancelInPersonSession finalizeSessionClosure warning (local cancel succeeded):', closureErr?.message);
-    return { success: true, status: 'canceled', requestId, sessionId: effSessionId };
+      reason,
+      distanceTravelledKm,
+      totalRouteKm,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to cancel right now.');
   }
+  return payload;
 }
-

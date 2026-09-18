@@ -101,7 +101,25 @@ export function subscribeToStudentSessions(studentId, callback, onError) {
   return onSnapshot(
     sessionsQuery,
     (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
-    onError,
+    (err) => {
+      if (err?.code === 'failed-precondition' || String(err?.message || '').toLowerCase().includes('index')) {
+        const fallbackQuery = query(collection(db, 'sessions'), where('studentId', '==', studentId));
+        return onSnapshot(
+          fallbackQuery,
+          (snapshot) => {
+            const items = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+            items.sort((a, b) => {
+              const aTime = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : (a.updatedAt || 0);
+              const bTime = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : (b.updatedAt || 0);
+              return bTime - aTime;
+            });
+            callback(items);
+          },
+          onError,
+        );
+      }
+      if (typeof onError === 'function') onError(err);
+    },
   );
 }
 
@@ -241,58 +259,27 @@ export async function submitSessionRating(session, role, payload) {
 export async function requestEndLesson({ requestId, sessionId }) {
   const effSessionId = sessionId || requestId;
   if (!effSessionId) return;
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('requestEndInPersonLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId: effSessionId }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('requestEndLesson endpoint failed, falling back to direct write:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to request lesson end while offline. Please try again.');
   }
 
-  const now = Date.now();
-  const uid = auth.currentUser?.uid || '';
-  const sRef = doc(db, 'sessions', effSessionId);
-  await updateDoc(sRef, {
-    status: 'ending_requested',
-    endRequestedBy: uid,
-    endRequestedAt: now,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  if (requestId) {
-    const reqRef = doc(db, 'classRequests', requestId);
-    await updateDoc(reqRef, {
-      status: 'ending_requested',
-      endRequestedBy: uid,
-      endRequestedAt: now,
-      statusDetail: 'Lesson completion requested.',
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
-
-    await updateLiveTracking(requestId, {
-      status: 'ending_requested',
-      endRequestedBy: uid,
-      endRequestedAtMs: now,
-      updatedAtMs: now,
-    }).catch(() => null);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId: effSessionId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to request lesson end.');
   }
-
-  return { success: true, status: 'ending_requested', endRequestedAt: now };
+  return payload;
 }
 
 export async function confirmEndLesson({ requestId, sessionId, session }) {
@@ -317,12 +304,11 @@ export async function confirmEndLesson({ requestId, sessionId, session }) {
         if (payload?.success) return payload;
       }
     } catch (err) {
-      console.warn('confirmEndLesson endpoint failed, falling back to finalizeSessionClosure:', err);
+      throw new Error(err?.message || 'Unable to finalize lesson completion.');
     }
   }
 
-  const currentSession = session || { id: effSessionId, requestId };
-  return finalizeSessionClosure(currentSession, { closureType: 'completed' });
+  throw new Error('Unable to finalize lesson while offline. Please try again.');
 }
 
 export async function toggleSessionPause({ sessionId, requestId, isPaused, pausedIntervals = [], currentTotalSeconds = 0 }) {
@@ -474,102 +460,34 @@ export async function cancelInPersonSession({
   distanceTravelledKm = 0,
   totalRouteKm = 10,
 }) {
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('cancelInPersonLesson');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requestId,
-          sessionId,
-          canceledBy,
-          reason,
-          distanceTravelledKm,
-          totalRouteKm,
-        }),
-      });
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.success) return payload;
-      }
-    } catch (err) {
-      console.warn('cancelInPersonLesson endpoint error, falling back to local closure:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to cancel while offline. Please try again.');
   }
 
-  const effSessionId = sessionId || requestId || session?.id;
-  const canceledAt = Date.now();
-  const closureType = canceledBy === 'tutor' ? 'canceled_by_tutor' : 'canceled_by_student';
-
-  // 1. Unconditionally update classRequests doc in Firestore
-  if (requestId) {
-    try {
-      const reqRef = doc(db, 'classRequests', requestId);
-      await updateDoc(reqRef, {
-        status: 'canceled',
-        statusDetail: canceledBy === 'tutor' ? 'Request canceled by tutor.' : 'Request canceled by student.',
-        canceledAt,
-        canceledBy,
-        canceledReason: reason || '',
-        currentOfferTutorId: null,
-        offerExpiresAt: null,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (reqErr) {
-      console.warn('cancelInPersonSession Firestore classRequests update warning:', reqErr);
-    }
-
-    // 2. Unconditionally update RTDB liveTracking
-    try {
-      await updateLiveTracking(requestId, {
-        status: 'canceled',
-        canceledBy,
-        closedAtMs: canceledAt,
-        closedReason: reason || '',
-        updatedAtMs: canceledAt,
-      });
-    } catch (rtdbErr) {
-      console.warn('cancelInPersonSession RTDB liveTracking update warning:', rtdbErr);
-    }
-  }
-
-  // 3. Update sessions doc in Firestore if effSessionId exists
-  if (effSessionId) {
-    try {
-      const sRef = doc(db, 'sessions', effSessionId);
-      await updateDoc(sRef, {
-        status: 'canceled',
-        endedAt: canceledAt,
-        canceledAt,
-        canceledBy,
-        canceledReason: reason || '',
-        updatedAt: serverTimestamp(),
-      });
-    } catch (_sErr) {
-      // Session document may not exist if request was canceled prior to acceptance
-    }
-  }
-
-  // 4. Attempt billing closure, but NEVER let errors crash or revert the cancellation
-  const currentSession = session || { id: effSessionId, requestId };
-  try {
-    const finalSession = await finalizeSessionClosure(currentSession, {
-      closureType,
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requestId,
+      sessionId: sessionId || requestId || session?.id,
       canceledBy,
-      canceledReason: reason,
-    });
-    return { success: true, status: 'canceled', session: finalSession };
-  } catch (closureErr) {
-    console.warn('cancelInPersonSession finalizeSessionClosure warning (local cancel succeeded):', closureErr?.message);
-    return { success: true, status: 'canceled', requestId, sessionId: effSessionId };
+      reason,
+      distanceTravelledKm,
+      totalRouteKm,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to cancel right now.');
   }
+  return payload;
 }
 
 export async function verifyMeetingPin({ requestId, sessionId, enteredPin }) {
@@ -577,124 +495,28 @@ export async function verifyMeetingPin({ requestId, sessionId, enteredPin }) {
   const normalizedPin = String(enteredPin || '').trim();
   if (!normalizedPin) throw new Error('Please enter the 4-digit PIN');
 
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('verifyInPersonMeetingPin');
 
-  if (idToken && endpoint) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ requestId, sessionId, enteredPin: normalizedPin }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data.success) {
-        return data;
-      }
-      if (!response.ok) {
-        const error = new Error(data.message || 'Invalid meeting PIN');
-        error.code = data.code || 'PIN_MISMATCH';
-        error.attemptsRemaining = data.attemptsRemaining;
-        throw error;
-      }
-    } catch (err) {
-      if (err.code === 'PIN_MISMATCH' || err.code === 'MAX_ATTEMPTS_EXCEEDED' || err.code === 'PIN_EXPIRED') {
-        throw err;
-      }
-      console.warn('verifyInPersonMeetingPin endpoint network error, attempting direct check:', err);
-    }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to verify PIN while offline. Please try again.');
   }
 
-  // Fallback direct Firestore validation
-  const reqRef = doc(db, 'classRequests', requestId);
-  const snap = await getDoc(reqRef);
-  if (!snap.exists()) throw new Error('Request not found');
-  const reqData = snap.data() || {};
-
-  const maxAttempts = Number(reqData.maxVerificationPinAttempts || 3);
-  const currentAttempts = Number(reqData.verificationPinAttempts || 0);
-
-  if (currentAttempts >= maxAttempts) {
-    const err = new Error('Maximum PIN verification attempts exceeded. Please contact support.');
-    err.code = 'MAX_ATTEMPTS_EXCEEDED';
-    err.attemptsRemaining = 0;
-    throw err;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requestId, sessionId, enteredPin: normalizedPin }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.ok && data.success) {
+    return data;
   }
-
-  const expectedPin = String(reqData.verificationPin || '').trim();
-  const paddedEntered = normalizedPin.padStart(4, '0');
-
-  if (paddedEntered !== expectedPin) {
-    const nextAttempts = currentAttempts + 1;
-    const attemptsRemaining = Math.max(0, maxAttempts - nextAttempts);
-    await updateDoc(reqRef, {
-      verificationPinAttempts: nextAttempts,
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
-
-    const err = new Error(
-      attemptsRemaining > 0
-        ? `Incorrect PIN. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
-        : 'Maximum PIN verification attempts exceeded. Please contact support.'
-    );
-    err.code = 'PIN_MISMATCH';
-    err.attemptsRemaining = attemptsRemaining;
-    throw err;
-  }
-
-  // Direct success
-  const now = Date.now();
-  const prepGraceMs = 5 * 60 * 1000;
-  const prepGraceEndsAt = (reqData.preparationGraceEndsAt && reqData.preparationGraceEndsAt > now)
-    ? reqData.preparationGraceEndsAt
-    : now + prepGraceMs;
-
-  await updateDoc(reqRef, {
-    pinVerified: true,
-    pinVerifiedAt: now,
-    meetingConfirmed: true,
-    meetingConfirmedAt: now,
-    status: 'preparing_for_lesson',
-    statusDetail: 'Physical meeting verified. 5-minute preparation grace active.',
-    preparationGraceStartedAt: reqData.preparationGraceStartedAt || now,
-    preparationGraceEndsAt: prepGraceEndsAt,
-    updatedAt: serverTimestamp(),
-  }).catch(() => null);
-
-  const effSessionId = sessionId || reqData.sessionId || requestId;
-  if (effSessionId) {
-    await updateDoc(doc(db, 'sessions', effSessionId), {
-      pinVerified: true,
-      pinVerifiedAt: now,
-      meetingConfirmed: true,
-      meetingConfirmedAt: now,
-      status: 'preparing_for_lesson',
-      preparationGraceStartedAt: reqData.preparationGraceStartedAt || now,
-      preparationGraceEndsAt: prepGraceEndsAt,
-      updatedAt: serverTimestamp(),
-    }).catch(() => null);
-  }
-
-  await updateLiveTracking(requestId, {
-    pinVerified: true,
-    pinVerifiedAtMs: now,
-    status: 'preparing_for_lesson',
-    preparationGraceEndsAt: prepGraceEndsAt,
-    preparationGraceEndsAtMs: prepGraceEndsAt,
-    updatedAtMs: now,
-  }).catch(() => null);
-
-  return {
-    success: true,
-    pinVerified: true,
-    pinVerifiedAt: now,
-    status: 'preparing_for_lesson',
-    preparationGraceEndsAt: prepGraceEndsAt,
-  };
+  const error = new Error(data.message || 'Invalid meeting PIN');
+  error.code = data.code || 'PIN_MISMATCH';
+  error.attemptsRemaining = data.attemptsRemaining;
+  throw error;
 }
-
-

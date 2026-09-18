@@ -99,10 +99,31 @@ function normalizeLiveTrackingSnapshot(snapshot = {}) {
     startedTravellingAtMs: rawStartedTrav != null && Number.isFinite(Number(rawStartedTrav)) ? Number(rawStartedTrav) : 0,
     arrivalGraceEndsAt: snapshot.arrivalGraceEndsAt != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAt))
       ? Number(snapshot.arrivalGraceEndsAt)
+      : (snapshot.arrivalGraceEndsAtMs != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAtMs)) ? Number(snapshot.arrivalGraceEndsAtMs) : null),
+    arrivalGraceEndsAtMs: snapshot.arrivalGraceEndsAtMs != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAtMs))
+      ? Number(snapshot.arrivalGraceEndsAtMs)
+      : (snapshot.arrivalGraceEndsAt != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAt)) ? Number(snapshot.arrivalGraceEndsAt) : null),
+    arrivalGraceStartedAtMs: snapshot.arrivalGraceStartedAtMs != null && Number.isFinite(Number(snapshot.arrivalGraceStartedAtMs))
+      ? Number(snapshot.arrivalGraceStartedAtMs)
+      : null,
+    arrivedAtMs: snapshot.arrivedAtMs != null && Number.isFinite(Number(snapshot.arrivedAtMs))
+      ? Number(snapshot.arrivedAtMs)
       : null,
     preparationGraceEndsAt: snapshot.preparationGraceEndsAt != null && Number.isFinite(Number(snapshot.preparationGraceEndsAt))
       ? Number(snapshot.preparationGraceEndsAt)
+      : (snapshot.preparationGraceEndsAtMs != null && Number.isFinite(Number(snapshot.preparationGraceEndsAtMs)) ? Number(snapshot.preparationGraceEndsAtMs) : null),
+    preparationGraceEndsAtMs: snapshot.preparationGraceEndsAtMs != null && Number.isFinite(Number(snapshot.preparationGraceEndsAtMs))
+      ? Number(snapshot.preparationGraceEndsAtMs)
+      : (snapshot.preparationGraceEndsAt != null && Number.isFinite(Number(snapshot.preparationGraceEndsAt)) ? Number(snapshot.preparationGraceEndsAt) : null),
+    preparationGraceStartedAtMs: snapshot.preparationGraceStartedAtMs != null && Number.isFinite(Number(snapshot.preparationGraceStartedAtMs))
+      ? Number(snapshot.preparationGraceStartedAtMs)
       : null,
+    verificationPin: String(snapshot.verificationPin || '').trim(),
+    pinVerified: Boolean(snapshot.pinVerified),
+    meetingConfirmed: Boolean(snapshot.meetingConfirmed),
+    studentAddress: String(snapshot.studentAddress || '').trim(),
+    meetingAddress: String(snapshot.meetingAddress || snapshot.studentAddress || '').trim(),
+    locationOption: String(snapshot.locationOption || 'My Location').trim(),
     startedAtMs: snapshot.startedAtMs != null && Number.isFinite(Number(snapshot.startedAtMs)) ? Number(snapshot.startedAtMs) : 0,
     closedAtMs: snapshot.closedAtMs != null && Number.isFinite(Number(snapshot.closedAtMs)) ? Number(snapshot.closedAtMs) : 0,
     closedReason: String(snapshot.closedReason || '').trim(),
@@ -114,13 +135,62 @@ function sanitizePatch(patch = {}) {
   const nextPatch = {};
 
   if (patch.requestId !== undefined) nextPatch.requestId = String(patch.requestId || '').trim();
+  if (patch.sessionId !== undefined) nextPatch.sessionId = String(patch.sessionId || '').trim();
   if (patch.tutorId !== undefined) nextPatch.tutorId = String(patch.tutorId || '').trim();
+  if (patch.tutorName !== undefined) nextPatch.tutorName = String(patch.tutorName || '').trim();
   if (patch.studentId !== undefined) nextPatch.studentId = String(patch.studentId || '').trim();
+  if (patch.studentName !== undefined) nextPatch.studentName = String(patch.studentName || '').trim();
   if (patch.status !== undefined) nextPatch.status = String(patch.status || '').trim();
-  if (patch.mode !== undefined) nextPatch.mode = String(patch.mode || 'online').trim();
+  if (patch.statusDetail !== undefined) nextPatch.statusDetail = String(patch.statusDetail || '').trim();
+  if (patch.mode !== undefined) nextPatch.mode = String(patch.mode || 'in_person').trim();
 
   if (patch.acceptedAtMs !== undefined) {
     nextPatch.acceptedAtMs = Number.isFinite(Number(patch.acceptedAtMs)) ? Number(patch.acceptedAtMs) : Date.now();
+  }
+  if (patch.travelStartedAtMs !== undefined) {
+    nextPatch.travelStartedAtMs = Number.isFinite(Number(patch.travelStartedAtMs)) ? Number(patch.travelStartedAtMs) : Date.now();
+  }
+  if (patch.startedTravellingAtMs !== undefined) {
+    nextPatch.startedTravellingAtMs = Number.isFinite(Number(patch.startedTravellingAtMs)) ? Number(patch.startedTravellingAtMs) : Date.now();
+  }
+  if (patch.arrivedAtMs !== undefined) {
+    nextPatch.arrivedAtMs = Number.isFinite(Number(patch.arrivedAtMs)) ? Number(patch.arrivedAtMs) : Date.now();
+  }
+  if (patch.arrivalGraceStartedAtMs !== undefined) {
+    nextPatch.arrivalGraceStartedAtMs = Number.isFinite(Number(patch.arrivalGraceStartedAtMs)) ? Number(patch.arrivalGraceStartedAtMs) : null;
+  }
+  if (patch.arrivalGraceEndsAt !== undefined) {
+    nextPatch.arrivalGraceEndsAt = Number.isFinite(Number(patch.arrivalGraceEndsAt)) ? Number(patch.arrivalGraceEndsAt) : null;
+  }
+  if (patch.arrivalGraceEndsAtMs !== undefined) {
+    nextPatch.arrivalGraceEndsAtMs = Number.isFinite(Number(patch.arrivalGraceEndsAtMs)) ? Number(patch.arrivalGraceEndsAtMs) : null;
+  }
+  if (patch.preparationGraceStartedAtMs !== undefined) {
+    nextPatch.preparationGraceStartedAtMs = Number.isFinite(Number(patch.preparationGraceStartedAtMs)) ? Number(patch.preparationGraceStartedAtMs) : null;
+  }
+  if (patch.preparationGraceEndsAt !== undefined) {
+    nextPatch.preparationGraceEndsAt = Number.isFinite(Number(patch.preparationGraceEndsAt)) ? Number(patch.preparationGraceEndsAt) : null;
+  }
+  if (patch.preparationGraceEndsAtMs !== undefined) {
+    nextPatch.preparationGraceEndsAtMs = Number.isFinite(Number(patch.preparationGraceEndsAtMs)) ? Number(patch.preparationGraceEndsAtMs) : null;
+  }
+  if (patch.verificationPin !== undefined) {
+    nextPatch.verificationPin = String(patch.verificationPin || '').trim();
+  }
+  if (patch.pinVerified !== undefined) {
+    nextPatch.pinVerified = Boolean(patch.pinVerified);
+  }
+  if (patch.meetingConfirmed !== undefined) {
+    nextPatch.meetingConfirmed = Boolean(patch.meetingConfirmed);
+  }
+  if (patch.studentAddress !== undefined) {
+    nextPatch.studentAddress = String(patch.studentAddress || '').trim();
+  }
+  if (patch.meetingAddress !== undefined) {
+    nextPatch.meetingAddress = String(patch.meetingAddress || '').trim();
+  }
+  if (patch.locationOption !== undefined) {
+    nextPatch.locationOption = String(patch.locationOption || 'My Location').trim();
   }
   if (patch.startedAtMs !== undefined) {
     nextPatch.startedAtMs = Number.isFinite(Number(patch.startedAtMs)) ? Number(patch.startedAtMs) : Date.now();
@@ -143,6 +213,9 @@ function sanitizePatch(patch = {}) {
   }
   if (patch.destination !== undefined) {
     nextPatch.destination = normalizeCoordinate(patch.destination);
+  }
+  if (patch.meetingCoordinates !== undefined) {
+    nextPatch.meetingCoordinates = normalizeCoordinate(patch.meetingCoordinates);
   }
   if (patch.routeSnapshot !== undefined) {
     nextPatch.routeSnapshot = normalizeRouteSnapshot(patch.routeSnapshot);

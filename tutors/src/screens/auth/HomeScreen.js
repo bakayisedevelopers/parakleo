@@ -7,6 +7,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -72,82 +73,67 @@ export function HomeScreen({ initialMode = 'signin' }) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Background Decorative Ambient Glows */}
-      <View style={styles.ambientContainer} pointerEvents="none">
-        <View style={styles.ambientTopLeft} />
-        <View style={styles.ambientBottomRight} />
-      </View>
-
+    <View style={styles.mainContainer}>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
       <KeyboardAvoidingView
-        style={styles.keyboardView}
+        style={styles.flexOne}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          {/* Hero Welcome Header */}
-          <View style={styles.heroSection}>
-            <View style={styles.logoBadgeContainer}>
-              <Image
-                source={require('../../../assets/Logo.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-            </View>
-
-            <View style={styles.badgePill}>
-              <View style={styles.pulsingDot} />
-              <Text style={styles.badgePillText}>PARAKLEO TUTORS</Text>
-            </View>
-          </View>
-
-          {/* Segmented Mode Switcher */}
-          <View style={styles.segmentedContainer}>
-            <Pressable
-              onPress={() => switchMode('signin')}
-              style={[styles.segmentBtn, mode === 'signin' && styles.segmentBtnActive]}
-            >
-              <Text style={[styles.segmentText, mode === 'signin' && styles.segmentTextActive]}>
-                Sign In
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => switchMode('signup')}
-              style={[styles.segmentBtn, mode === 'signup' && styles.segmentBtnActive]}
-            >
-              <Text style={[styles.segmentText, mode === 'signup' && styles.segmentTextActive]}>
-                Apply as Tutor
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Unified Auth Card */}
-          <View style={styles.authCard}>
-            <Text style={styles.cardHeading}>
-              {mode === 'signin' ? 'Sign in to your dashboard' : 'Create your tutor account'}
-            </Text>
-            <Text style={styles.cardSubheading}>
-              {mode === 'signin'
-                ? 'Welcome back! Enter your credentials to continue.'
-                : 'Join our verified tutor network and start receiving student requests.'}
-            </Text>
-
-            {mode === 'signup' && (
-              <View style={styles.noticeBanner}>
-                <Ionicons name="sparkles" size={16} color={colors.brandDark} />
-                <Text style={styles.noticeBannerText}>
-                  Receive weekly direct deposits at <Text style={styles.bold}>73% payout rate</Text>.
-                </Text>
+          {/* Top Hero Banner with Home Tutoring Image */}
+          <View style={styles.imageHeroContainer}>
+            <Image
+              source={require('../../../assets/student-home-tutoring.png')}
+              style={styles.heroImage}
+              resizeMode="cover"
+            />
+            <View style={styles.imageGradientOverlay} />
+            <View style={styles.heroTextOverlay}>
+              <View style={styles.pillBadge}>
+                <Text style={styles.pillBadgeText}>PARAKLEO TUTORS</Text>
               </View>
-            )}
+              <Text style={styles.heroTitle}>
+                {mode === 'signin' ? 'Welcome Back' : 'Join Our Tutor Network'}
+              </Text>
+              <Text style={styles.heroSubtitle}>
+                {mode === 'signin'
+                  ? 'Sign in to access your tutoring dashboard & sessions'
+                  : 'Start accepting student requests and earning weekly'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Bottom Card containing redesigned Auth Fields */}
+          <View style={styles.authCard}>
+            {/* Segmented Mode Switcher */}
+            <View style={styles.segmentedContainer}>
+              <Pressable
+                onPress={() => switchMode('signin')}
+                style={[styles.segmentBtn, mode === 'signin' && styles.segmentBtnActive]}
+              >
+                <Text style={[styles.segmentText, mode === 'signin' && styles.segmentTextActive]}>
+                  Sign In
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => switchMode('signup')}
+                style={[styles.segmentBtn, mode === 'signup' && styles.segmentBtnActive]}
+              >
+                <Text style={[styles.segmentText, mode === 'signup' && styles.segmentTextActive]}>
+                  Apply as Tutor
+                </Text>
+              </Pressable>
+            </View>
 
             {error ? (
               <View style={styles.errorBanner}>
-                <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+                <Ionicons name="alert-circle-outline" size={18} color="#dc2626" />
                 <Text style={styles.errorBannerText}>{error}</Text>
               </View>
             ) : null}
@@ -157,11 +143,11 @@ export function HomeScreen({ initialMode = 'signin' }) {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Full Name</Text>
                 <View style={styles.inputWrapper}>
-                  <Ionicons name="person-outline" size={19} color={colors.textMuted} style={styles.inputIcon} />
+                  <Ionicons name="person-outline" size={19} color="#64748b" style={styles.inputIcon} />
                   <TextInput
                     style={styles.textInput}
-                    placeholder="e.g. John Doe"
-                    placeholderTextColor="#a1a1aa"
+                    placeholder="Enter your full name"
+                    placeholderTextColor="#94a3b8"
                     value={fullName}
                     onChangeText={setFullName}
                     autoCapitalize="words"
@@ -175,11 +161,11 @@ export function HomeScreen({ initialMode = 'signin' }) {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email Address</Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="mail-outline" size={19} color={colors.textMuted} style={styles.inputIcon} />
+                <Ionicons name="mail-outline" size={19} color="#64748b" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="tutor@example.com"
-                  placeholderTextColor="#a1a1aa"
+                  placeholderTextColor="#94a3b8"
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
@@ -194,11 +180,11 @@ export function HomeScreen({ initialMode = 'signin' }) {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Password</Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="lock-closed-outline" size={19} color={colors.textMuted} style={styles.inputIcon} />
+                <Ionicons name="lock-closed-outline" size={19} color="#64748b" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
-                  placeholderTextColor="#a1a1aa"
+                  placeholder={mode === 'signup' ? 'At least 6 characters' : 'Enter your password'}
+                  placeholderTextColor="#94a3b8"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -214,13 +200,13 @@ export function HomeScreen({ initialMode = 'signin' }) {
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={19}
-                    color={colors.textMuted}
+                    color="#64748b"
                   />
                 </Pressable>
               </View>
             </View>
 
-            {/* Action Submit Button */}
+            {/* Submit Button */}
             <Pressable
               onPress={handleAuthSubmit}
               disabled={loading}
@@ -239,7 +225,7 @@ export function HomeScreen({ initialMode = 'signin' }) {
               )}
             </Pressable>
 
-            {/* Quick Switch Footer */}
+            {/* Footer Prompt */}
             <View style={styles.footerRow}>
               <Text style={styles.footerPrompt}>
                 {mode === 'signin' ? "Don't have an account? " : 'Already registered? '}
@@ -251,301 +237,202 @@ export function HomeScreen({ initialMode = 'signin' }) {
               </Pressable>
             </View>
           </View>
-
-          {/* Value Props & Perks Highlight */}
-          <View style={styles.perksRow}>
-            <View style={styles.perkItem}>
-              <Ionicons name="cash-outline" size={15} color={colors.brandDark} />
-              <Text style={styles.perkText}>73% Tutor Split</Text>
-            </View>
-            <View style={styles.perkItem}>
-              <Ionicons name="card-outline" size={15} color={colors.brandDark} />
-              <Text style={styles.perkText}>Weekly Direct Bank</Text>
-            </View>
-            <View style={styles.perkItem}>
-              <Ionicons name="time-outline" size={15} color={colors.brandDark} />
-              <Text style={styles.perkText}>Flexible Hours</Text>
-            </View>
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  mainContainer: {
     flex: 1,
-    backgroundColor: '#f4f4f5', // zinc-100 matching web
+    backgroundColor: '#0f172a',
   },
-  keyboardView: {
+  flexOne: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 24,
+    backgroundColor: '#f8fafc',
   },
-  ambientContainer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  ambientTopLeft: {
-    position: 'absolute',
-    top: -60,
-    left: -60,
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: 'rgba(16, 185, 129, 0.14)',
-  },
-  ambientBottomRight: {
-    position: 'absolute',
-    bottom: -80,
-    right: -80,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(5, 150, 105, 0.10)',
-  },
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: 16,
+  imageHeroContainer: {
+    height: 280,
     width: '100%',
+    position: 'relative',
+    backgroundColor: '#0f172a',
   },
-  logoBadgeContainer: {
-    width: 68,
-    height: 68,
-    borderRadius: 22,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.2)',
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.82,
   },
-  logo: {
-    width: 44,
-    height: 44,
+  imageGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
-  badgePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#ecfdf5',
-    borderWidth: 1,
-    borderColor: '#a7f3d0',
-    gap: 6,
+  heroTextOverlay: {
+    position: 'absolute',
+    bottom: 32,
+    left: 20,
+    right: 20,
   },
-  pulsingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.brand,
+  pillBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(5, 150, 105, 0.9)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 8,
   },
-  badgePillText: {
+  pillBadgeText: {
+    color: '#ffffff',
     fontSize: 11,
     fontWeight: '800',
-    color: colors.brandDark,
-    textTransform: 'uppercase',
     letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  heroSubtitle: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  authCard: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -20,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 36,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
   },
   segmentedContainer: {
     flexDirection: 'row',
-    backgroundColor: '#ecfdf5', // soft emerald background
-    borderRadius: 9999, // fully rounded pill
-    borderWidth: 1.5,
-    borderColor: '#10b981', // green border
+    backgroundColor: '#f1f5f9',
+    borderRadius: 16,
     padding: 4,
-    width: '100%',
-    maxWidth: 380,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   segmentBtn: {
     flex: 1,
-    paddingVertical: 12, // slightly bigger height
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9999, // fully rounded inner button
+    borderRadius: 12,
   },
   segmentBtnActive: {
-    backgroundColor: '#10b981', // green selected tab indicator
-    shadowColor: '#10b981',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 3,
+    backgroundColor: '#ffffff',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   segmentText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#065f46', // dark emerald for unselected
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
   },
   segmentTextActive: {
-    fontWeight: '800',
-    color: '#ffffff', // crisp white on green
-  },
-  authCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#ffffff',
-    borderRadius: 32,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.18)',
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
-    elevation: 6,
-  },
-  cardHeading: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: colors.text,
-    letterSpacing: -0.4,
-    marginBottom: 4,
-  },
-  cardSubheading: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 18,
-    marginBottom: 16,
-  },
-  noticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.2)',
-    borderRadius: 14,
-    padding: 10,
-    gap: 8,
-    marginBottom: 16,
-  },
-  noticeBannerText: {
-    fontSize: 12,
-    color: colors.brandDark,
-    flex: 1,
-    lineHeight: 16,
-  },
-  bold: {
-    fontWeight: '800',
+    color: '#059669',
+    fontWeight: '700',
   },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff1f2',
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
     borderWidth: 1,
-    borderColor: '#fecdd3',
-    borderRadius: 14,
-    padding: 10,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 18,
     gap: 8,
-    marginBottom: 16,
   },
   errorBannerText: {
-    fontSize: 12,
-    color: colors.danger,
-    flex: 1,
-    lineHeight: 16,
+    color: '#dc2626',
+    fontSize: 13,
     fontWeight: '600',
+    flex: 1,
   },
   inputGroup: {
-    marginBottom: 14,
+    marginBottom: 18,
   },
   inputLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
+    color: '#334155',
     marginBottom: 6,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f8fafc',
-    borderWidth: 1,
     borderColor: '#e2e8f0',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    height: 48,
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 52,
   },
   inputIcon: {
-    marginRight: 8,
+    marginRight: 10,
   },
   textInput: {
     flex: 1,
-    fontSize: 14,
-    color: colors.text,
-    paddingVertical: 0,
+    fontSize: 15,
+    color: '#0f172a',
+    fontWeight: '500',
   },
   eyeBtn: {
-    padding: 4,
+    padding: 6,
   },
   submitBtn: {
-    backgroundColor: colors.brand,
-    borderRadius: 18,
-    paddingVertical: 14,
+    backgroundColor: '#059669',
+    borderRadius: 14,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
-    shadowColor: colors.brand,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
     elevation: 4,
   },
   submitBtnPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.99 }],
+    opacity: 0.88,
   },
   submitBtnDisabled: {
-    opacity: 0.65,
+    opacity: 0.6,
   },
   submitBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
     color: '#ffffff',
-    letterSpacing: 0.2,
+    fontSize: 16,
+    fontWeight: '700',
   },
   footerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 18,
+    alignItems: 'center',
+    marginTop: 22,
   },
   footerPrompt: {
-    fontSize: 13,
-    color: colors.textMuted,
+    fontSize: 14,
+    color: '#64748b',
   },
   footerAction: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.brandDark,
-  },
-  perksRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    marginTop: 20,
-  },
-  perkItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  perkText: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#52525b',
+    color: '#059669',
   },
 });

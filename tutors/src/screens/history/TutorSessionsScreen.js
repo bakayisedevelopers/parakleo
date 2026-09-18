@@ -56,9 +56,18 @@ export function TutorSessionsScreen({ navigate, goBack }) {
     return sessions.filter((s) => s.status === 'completed').length;
   }, [sessions]);
 
-  const handleOpenSession = (sessionId) => {
-    if (sessionId) {
-      navigate('SessionRoom', { sessionId });
+  const handleOpenSession = (session) => {
+    if (!session) return;
+    const sessionId = typeof session === 'string' ? session : session?.id;
+    const requestId = typeof session === 'object' ? (session?.requestId || session?.id) : sessionId;
+    const requestData = typeof session === 'object' ? session : null;
+
+    if (typeof navigate === 'function') {
+      navigate('RequestDetails', {
+        requestId,
+        sessionId,
+        request: requestData,
+      });
     }
   };
 

@@ -1,20 +1,31 @@
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/ui/Button';
-import { FormField } from '../../components/ui/FormField';
 import { ErrorState } from '../../components/ui/States';
 import { LEGAL_URLS } from '../../constants/legal';
 import { useAuth } from '../../context/AuthContext';
 import { TUTOR_LOGIN_BLOCKED_CODE } from '../../services/authService';
 import { colors } from '../../theme/colors';
 
-const authHighlights = ['Verified tutors only', 'Secure card authorization', 'Flexible live sessions'];
-
 export function LoginScreen({ navigate }) {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -38,272 +49,326 @@ export function LoginScreen({ navigate }) {
     }
   }
 
-  function handleSocialPlaceholder(provider) {
-    setError('');
-    setNotice(`${provider} login is coming soon.`);
-  }
-
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <Pressable accessibilityRole="button" onPress={() => navigate('Signup')} style={styles.switchLink}>
-        <Text style={styles.switchText}>Sign up</Text>
-      </Pressable>
+    <View style={styles.mainContainer}>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      <KeyboardAvoidingView
+        style={styles.flexOne}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          {/* Top Hero Banner with Home Tutoring Image */}
+          <View style={styles.imageHeroContainer}>
+            <Image
+              source={require('../../../assets/student-home-tutoring.png')}
+              style={styles.heroImage}
+              resizeMode="cover"
+            />
+            <View style={styles.imageGradientOverlay} />
+            <View style={styles.heroTextOverlay}>
+              <View style={styles.pillBadge}>
+                <Text style={styles.pillBadgeText}>STUDENT APP</Text>
+              </View>
+              <Text style={styles.heroTitle}>Welcome to Parakleo</Text>
+              <Text style={styles.heroSubtitle}>Sign in to request verified in-person tutoring</Text>
+            </View>
+          </View>
 
-      <View style={styles.brandStage}>
-        <View style={styles.brandShadow} />
-        <View style={styles.brandMark}>
-          <Text style={styles.brandLetter}>P</Text>
-        </View>
-      </View>
+          {/* Bottom Card containing redesigned Auth Fields */}
+          <View style={styles.authCard}>
+            <Text style={styles.cardHeading}>Sign In</Text>
 
-      <View style={styles.panel}>
-        <Text style={styles.title}>Sign in Parakleo</Text>
+            {tutorBlocked ? (
+              <>
+                <ErrorState title="Tutor Login Not Allowed" message={error || 'Tutors are not allowed to log in on this app.'} />
+                <Button variant="secondary" onPress={() => navigate('Login')}>
+                  Go Back
+                </Button>
+              </>
+            ) : (
+              <>
+                {error ? <ErrorState title="Sign in failed" message={error} /> : null}
+                {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
 
-        {tutorBlocked ? (
-          <>
-            <ErrorState title="Tutor Login Not Allowed" message={error || 'Tutors are not allowed to log in on this app.'} />
-            <Button variant="secondary" onPress={() => navigate('Login')}>
-              Go Back
-            </Button>
-          </>
-        ) : (
-          <>
-            {error ? <ErrorState title="Sign in failed" message={error} /> : null}
-            {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-
-            <Text style={styles.authCopy}>
-              Request a class in minutes, learn with verified tutors, and keep your sessions simple from the student app.
-            </Text>
-            <View style={styles.trustList}>
-              {authHighlights.map((item) => (
-                <View key={item} style={styles.trustItem}>
-                  <Ionicons name="checkmark-circle" size={16} color={colors.brand} />
-                  <Text style={styles.trustText}>{item}</Text>
+                {/* Input: Email Address */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Email Address</Text>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="mail-outline" size={19} color="#64748b" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="student@example.com"
+                      placeholderTextColor="#94a3b8"
+                      value={email}
+                      onChangeText={setEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                    />
+                  </View>
                 </View>
-              ))}
-            </View>
 
-            <FormField
-              autoCapitalize="none"
-              inputStyle={styles.input}
-              keyboardType="email-address"
-              label="Email address"
-              onChangeText={setEmail}
-              placeholder="Enter your email"
-              value={email}
-            />
-            <FormField
-              inputStyle={styles.input}
-              label="Password"
-              onChangeText={setPassword}
-              placeholder="Enter your password"
-              secureTextEntry
-              value={password}
-            />
+                {/* Input: Password */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Password</Text>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="lock-closed-outline" size={19} color="#64748b" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="Enter your password"
+                      placeholderTextColor="#94a3b8"
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                    />
+                    <Pressable
+                      onPress={() => setShowPassword((prev) => !prev)}
+                      style={styles.eyeBtn}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={19}
+                        color="#64748b"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
 
-            <Pressable accessibilityRole="button" onPress={() => navigate('ForgotPassword')} style={styles.forgotLink}>
-              <Text style={styles.link}>Forgot Password?</Text>
-            </Pressable>
+                <Pressable accessibilityRole="button" onPress={() => navigate('ForgotPassword')} style={styles.forgotLink}>
+                  <Text style={styles.forgotText}>Forgot Password?</Text>
+                </Pressable>
 
-            <Text style={styles.policy}>
-              By signing in, you agree to Parakleo's{' '}
-              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.terms)}>Terms of Service</Text>,{' '}
-              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.privacy)}>Privacy Policy</Text>,{' '}
-              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.payment)}>Payment Policy</Text>,{' '}
-              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.refund)}>Refund Policy</Text>, and{' '}
-              <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.dataVoice)}>Data and Voice Policy</Text>.
-            </Text>
+                {/* Submit Button */}
+                <Pressable
+                  onPress={submit}
+                  disabled={busy || !email || !password}
+                  style={({ pressed }) => [
+                    styles.submitBtn,
+                    pressed && styles.submitBtnPressed,
+                    (busy || !email || !password) && styles.submitBtnDisabled,
+                  ]}
+                >
+                  {busy ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={styles.submitBtnText}>Sign In</Text>
+                  )}
+                </Pressable>
 
-            <Button disabled={busy || !email || !password} onPress={submit} style={styles.primaryButton} textStyle={styles.primaryButtonText}>
-              {busy ? 'Signing in...' : 'Login'}
-            </Button>
+                {/* Legal Policy Footer */}
+                <Text style={styles.policyText}>
+                  By signing in, you agree to Parakleo's{' '}
+                  <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.terms)}>Terms of Service</Text>,{' '}
+                  <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.privacy)}>Privacy Policy</Text>, and{' '}
+                  <Text style={styles.policyLink} onPress={() => openLegalUrl(LEGAL_URLS.payment)}>Payment Policy</Text>.
+                </Text>
 
-            <View style={styles.socialRow}>
-              <Pressable accessibilityRole="button" onPress={() => handleSocialPlaceholder('Apple')} style={styles.socialButton}>
-                <Ionicons name="logo-apple" size={18} color={colors.text} />
-                <Text style={styles.socialText}>Apple</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={() => handleSocialPlaceholder('Google')} style={styles.socialButton}>
-                <Text style={styles.googleMark}>G</Text>
-                <Text style={styles.socialText}>Google</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
-      </View>
-    </ScrollView>
+                {/* Footer Link to Signup */}
+                <View style={styles.footerRow}>
+                  <Text style={styles.footerPrompt}>Don't have an account? </Text>
+                  <Pressable onPress={() => navigate('Signup')}>
+                    <Text style={styles.footerAction}>Sign up for free</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 20,
-    paddingBottom: 32,
-    paddingTop: 24,
-  },
-  switchLink: {
-    alignSelf: 'flex-end',
-    borderBottomColor: colors.brandDark,
-    borderBottomWidth: 1,
-    marginBottom: 24,
-  },
-  switchText: {
-    color: colors.brandDark,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  brandStage: {
-    alignItems: 'center',
-    height: 188,
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  brandShadow: {
-    backgroundColor: 'rgba(4,120,87,0.10)',
-    borderColor: 'rgba(16,185,129,0.14)',
-    borderRadius: 34,
-    borderWidth: 1,
-    bottom: 28,
-    height: 92,
-    position: 'absolute',
-    transform: [{ rotate: '-10deg' }],
-    width: 132,
-  },
-  brandMark: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(16,185,129,0.24)',
-    borderRadius: 34,
-    borderWidth: 1,
-    height: 112,
-    justifyContent: 'center',
-    shadowColor: colors.brandDark,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    transform: [{ rotate: '45deg' }],
-    width: 112,
-  },
-  brandLetter: {
-    color: colors.brand,
-    fontSize: 54,
-    fontWeight: '900',
-    transform: [{ rotate: '-45deg' }],
-  },
-  panel: {
-    gap: 14,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 31,
-    fontWeight: '900',
-    letterSpacing: 0,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  authCopy: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  trustList: {
-    gap: 8,
-  },
-  trustItem: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.08)',
-    borderColor: 'rgba(16,185,129,0.18)',
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  trustText: {
-    color: '#3f3f46',
+  mainContainer: {
     flex: 1,
+    backgroundColor: '#0f172a',
+  },
+  flexOne: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    backgroundColor: '#f8fafc',
+  },
+  imageHeroContainer: {
+    height: 280,
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#0f172a',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.82,
+  },
+  imageGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  heroTextOverlay: {
+    position: 'absolute',
+    bottom: 32,
+    left: 20,
+    right: 20,
+  },
+  pillBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(5, 150, 105, 0.9)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  pillBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  heroSubtitle: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  authCard: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -20,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 36,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  cardHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 20,
+  },
+  noticeText: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+    borderWidth: 1,
+    borderRadius: 12,
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '600',
+    padding: 12,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 18,
+  },
+  inputLabel: {
     fontSize: 13,
     fontWeight: '700',
+    color: '#334155',
+    marginBottom: 6,
   },
-  input: {
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(16,185,129,0.24)',
-    borderRadius: 18,
-    minHeight: 58,
-    paddingHorizontal: 18,
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 52,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#0f172a',
+    fontWeight: '500',
+  },
+  eyeBtn: {
+    padding: 6,
   },
   forgotLink: {
     alignSelf: 'flex-end',
-    paddingVertical: 2,
+    marginBottom: 20,
+    marginTop: -4,
   },
-  link: {
-    color: colors.brandDark,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  notice: {
-    backgroundColor: 'rgba(16,185,129,0.10)',
-    borderColor: 'rgba(16,185,129,0.20)',
-    borderRadius: 16,
-    borderWidth: 1,
-    color: colors.brandDark,
+  forgotText: {
+    color: '#059669',
     fontSize: 13,
     fontWeight: '700',
-    padding: 12,
-    textAlign: 'center',
   },
-  policy: {
-    color: colors.muted,
+  submitBtn: {
+    backgroundColor: '#059669',
+    borderRadius: 14,
+    height: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  submitBtnPressed: {
+    opacity: 0.88,
+  },
+  submitBtnDisabled: {
+    opacity: 0.6,
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  policyText: {
+    color: '#94a3b8',
     fontSize: 11,
     lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 18,
   },
   policyLink: {
-    color: colors.brandDark,
-    fontWeight: '800',
-    textDecorationLine: 'underline',
+    color: '#059669',
+    fontWeight: '700',
   },
-  primaryButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 22,
-    minHeight: 58,
-    shadowColor: colors.brandDark,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontWeight: '900',
-  },
-  socialRow: {
+  footerRow: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  socialButton: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(16,185,129,0.24)',
-    borderRadius: 20,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    gap: 8,
     justifyContent: 'center',
-    minHeight: 54,
+    alignItems: 'center',
+    marginTop: 22,
   },
-  socialText: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
+  footerPrompt: {
+    fontSize: 14,
+    color: '#64748b',
   },
-  googleMark: {
-    color: colors.brand,
-    fontSize: 18,
-    fontWeight: '900',
+  footerAction: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#059669',
   },
 });

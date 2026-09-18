@@ -15,17 +15,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useSubjectCatalog } from '../../hooks/useSubjectCatalog';
 import {
   createClassRequest,
-  cancelClassRequest,
-  expireClassRequest,
-  findEligibleOnlineTutor,
-  getClassRequestExpiryAtMs,
-  getOfferExpiresAtMs,
-  shouldExpireClassRequest,
   subscribeToRequestById,
   subscribeToStudentRequests,
 } from '../../services/classRequestService';
 import { subscribeToLiveTracking, updateLiveTracking } from '../../services/liveTrackingRealtimeService';
-import { getBestAvailableLocation, saveUserLiveLocation } from '../../services/locationService';
+import { getBestAvailableLocation, resolveLocationFromOption, saveUserLiveLocation } from '../../services/locationService';
 import { fetchPricingQuote } from '../../services/pricingService';
 import { uploadUserFile } from '../../services/storageService';
 import { cancelInPersonSession } from '../../services/sessionService';
@@ -33,8 +27,6 @@ import { buildSafetySnapshot } from '../../constants/safety';
 import { SafetySupportModal } from '../../components/common/SafetySupportModal';
 import { CancellationQuoteModal } from '../../components/common/CancellationQuoteModal';
 import { PinVerificationModal } from '../../components/student/PinVerificationModal';
-import { getFirebaseClients } from '../../firebase/config';
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { colors } from '../../theme/colors';
 import {
   DEFAULT_LESSON_DURATION,
@@ -63,8 +55,71 @@ const QUALIFIED_TUTOR_SUBJECTS = [
   'English',
 ];
 
-function getRequestStatusUi(request = null, liveTracking = null) {
-  const normalized = String(request?.status || liveTracking?.status || 'matching').toLowerCase();
+const STATUS_RANK = {
+  // Terminal / Final
+  canceled: 100,
+  canceled_by_tutor: 100,
+  canceled_by_student: 100,
+  canceled_during: 100,
+  cancelled: 100,
+  completed: 100,
+  settled: 100,
+  expired: 100,
+  closed: 100,
+  // Lesson active
+  in_session: 80,
+  in_progress: 80,
+  ending_requested: 75,
+  // Preparation grace (PIN verified)
+  preparing_for_lesson: 60,
+  // Arrived / waiting for PIN
+  arrived: 50,
+  waiting_student: 50,
+  // En route
+  travelling: 40,
+  traveling: 40,
+  in_transit: 40,
+  // Accepted
+  accepted: 30,
+  tutor_accepted: 30,
+  tutor_assigned: 30,
+  // Offered
+  offered: 20,
+  // Matching
+  no_tutor_available: 12,
+  matching: 10,
+  pending: 10,
+};
+
+function resolveEffectiveStatus(...candidates) {
+  let highestStatus = '';
+  let highestRank = -1;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'string') continue;
+    const normalized = candidate.trim().toLowerCase();
+    const rank = STATUS_RANK[normalized] ?? 0;
+    if (rank > highestRank) {
+      highestRank = rank;
+      highestStatus = normalized;
+    }
+  }
+
+  return highestStatus || 'matching';
+}
+
+function getRequestStatusUi(statusOrRequest = null, currentRequest = null, liveTracking = null) {
+  let rawStatus = '';
+  if (typeof statusOrRequest === 'string' && statusOrRequest.trim()) {
+    rawStatus = statusOrRequest.trim();
+  } else if (statusOrRequest?.status) {
+    rawStatus = statusOrRequest.status;
+  } else if (currentRequest?.status) {
+    rawStatus = currentRequest.status;
+  } else if (liveTracking?.status) {
+    rawStatus = liveTracking.status;
+  }
+  const normalized = String(rawStatus || 'matching').toLowerCase();
 
   if (['pending', 'matching'].includes(normalized)) {
     return {
@@ -166,11 +221,11 @@ function getRequestStatusUi(request = null, liveTracking = null) {
     };
   }
 
-  if (['canceled', 'canceled_during', 'cancelled', 'expired', 'closed'].includes(normalized)) {
+  if (['canceled', 'canceled_during', 'canceled_by_tutor', 'canceled_by_student', 'cancelled', 'expired', 'closed'].includes(normalized)) {
     return {
       icon: 'close-circle-outline',
       title: 'Request closed',
-      subtitle: request?.statusDetail || 'This request is no longer active.',
+      subtitle: currentRequest?.statusDetail || liveTracking?.statusDetail || 'This request is no longer active.',
       badge: 'Closed',
       tone: '#e11d48',
     };
@@ -236,7 +291,7 @@ function CardBrandBadge({ brand = '', size = 'small' }) {
   );
 }
 
-export function SessionScreen({ navigate, goBack, route }) {
+export function SessionScreen({ navigate, goBack, route, sessions = [] }) {
   const { user } = useAuth();
   const params = route?.params || {};
   const { subjectOptions } = useSubjectCatalog();
@@ -250,8 +305,6 @@ export function SessionScreen({ navigate, goBack, route }) {
     subject: initialSubject,
     durationMinutes: initialDuration,
   });
-  const offerExpiryAdvanceRef = useRef('');
-
   const [selectedSubject, setSelectedSubject] = useState(initialSubject);
   const [selectedDuration, setSelectedDuration] = useState(initialDuration);
   const [quote, setQuote] = useState(
@@ -279,6 +332,7 @@ export function SessionScreen({ navigate, goBack, route }) {
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
+  const [bottomCardHeight, setBottomCardHeight] = useState(580);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -343,8 +397,9 @@ export function SessionScreen({ navigate, goBack, route }) {
     };
   }, [selectedMethodId, paymentMethods]);
 
-  // Load quote on mount if missing, or when duration/subject change
+  // Load quote on mount if missing, or when duration/subject change (only if no active request)
   useEffect(() => {
+    if (activeRequestId) return;
     let isCurrent = true;
     async function updateQuote() {
       try {
@@ -370,7 +425,14 @@ export function SessionScreen({ navigate, goBack, route }) {
       isCurrent = false;
       setIsRefreshingQuote(false);
     };
-  }, [selectedDuration, selectedSubject]);
+  }, [activeRequestId, selectedDuration, selectedSubject]);
+
+  // Synchronize pricing quote from activeRequest if available
+  useEffect(() => {
+    if (activeRequest?.pricingSnapshot) {
+      setQuote(normalizePricingSnapshot(activeRequest.pricingSnapshot));
+    }
+  }, [activeRequest?.pricingSnapshot]);
 
   // Synchronize route params if updated after mount
   useEffect(() => {
@@ -379,7 +441,13 @@ export function SessionScreen({ navigate, goBack, route }) {
       setActiveRequestId(nextRequestId);
     }
     if (params.request) {
-      setActiveRequest(params.request);
+      setActiveRequest((prev) => {
+        if (!prev) return params.request;
+        if (params.request.id !== prev.id || params.request.status !== prev.status) {
+          return params.request;
+        }
+        return prev;
+      });
     }
     if (params.subject && params.subject !== syncedParamsRef.current.subject) {
       syncedParamsRef.current.subject = params.subject;
@@ -390,7 +458,7 @@ export function SessionScreen({ navigate, goBack, route }) {
       syncedParamsRef.current.durationMinutes = nextDuration;
       setSelectedDuration(nextDuration);
     }
-  }, [params.requestId, params.activeRequestId, params.id, params.request, params.subject, params.durationMinutes, params.estimatedMinutes, activeRequestId]);
+  }, [params.requestId, params.activeRequestId, params.id, params.request?.id, params.request?.status, params.subject, params.durationMinutes, params.estimatedMinutes, activeRequestId]);
 
   // Auto-bind active request if student opens session screen with an ongoing request
   useEffect(() => {
@@ -404,7 +472,7 @@ export function SessionScreen({ navigate, goBack, route }) {
         const active = reqs.find((r) =>
           ['pending', 'matching', 'offered', 'accepted', 'tutor_accepted', 'tutor_assigned', 'traveling', 'travelling', 'in_transit', 'arrived', 'waiting_student', 'preparing_for_lesson'].includes(
             String(r?.status || '').toLowerCase()
-          ) && !shouldExpireClassRequest(r)
+          )
         );
         if (active?.id) {
           setActiveRequestId(active.id);
@@ -426,7 +494,7 @@ export function SessionScreen({ navigate, goBack, route }) {
       (req) => {
         if (req) setActiveRequest(req);
       },
-      () => setActiveRequest(null),
+      (err) => console.warn('[SessionScreen] subscribeToRequestById warning:', err?.message || err),
     );
   }, [activeRequestId]);
 
@@ -438,8 +506,10 @@ export function SessionScreen({ navigate, goBack, route }) {
 
     return subscribeToLiveTracking(
       activeRequestId,
-      setLiveTracking,
-      () => setLiveTracking(null),
+      (tracking) => {
+        if (tracking) setLiveTracking(tracking);
+      },
+      (err) => console.warn('[SessionScreen] subscribeToLiveTracking warning:', err?.message || err),
     );
   }, [activeRequestId]);
 
@@ -504,8 +574,14 @@ export function SessionScreen({ navigate, goBack, route }) {
         selectedLocationAddress = user?.locationAddress || user?.address || 'Current Location';
       }
 
-      const studentLocation = await getBestAvailableLocation(user).catch(() => user?.homeLocation || user?.location || null);
-      await saveUserLiveLocation(user?.uid || '', studentLocation).catch(() => null);
+      const liveLocation = await getBestAvailableLocation(user).catch(() => user?.homeLocation || user?.location || null);
+      await saveUserLiveLocation(user?.uid || '', liveLocation).catch(() => null);
+
+      const meetingLocation = await resolveLocationFromOption(locationOption, {
+        user,
+        customAddress,
+        studentHomeAddress,
+      }).catch(() => liveLocation) || liveLocation;
 
       const safetySnapshot = buildSafetySnapshot(user);
 
@@ -548,9 +624,11 @@ export function SessionScreen({ navigate, goBack, route }) {
           currency: 'ZAR',
         },
         mode: 'in_person',
-        studentLocation,
-        location: studentLocation,
-        destination: studentLocation,
+        studentLocation: meetingLocation,
+        location: meetingLocation,
+        destination: meetingLocation,
+        meetingCoordinates: meetingLocation,
+        studentLiveLocation: liveLocation,
         safetySnapshot,
         isMinor: safetySnapshot.isMinor,
         guardianPresenceRequired: safetySnapshot.guardianPresenceRequired,
@@ -558,28 +636,19 @@ export function SessionScreen({ navigate, goBack, route }) {
         preferPublicMeetingPlace: safetySnapshot.preferPublicMeetingPlace,
       });
 
-      const matchedTutor = await findEligibleOnlineTutor(selectedSubject, user?.uid, studentLocation, safetySnapshot).catch(() => null);
-      const initialStatus = matchedTutor ? 'offered' : 'matching';
-      const requestExpiresAt = Date.now() + (3 * 60 * 1000);
-      const initialDetail = matchedTutor
-        ? 'Tutor notified. Waiting for acceptance.'
-        : 'Request submitted. Initializing tutor matching.';
-
       await updateLiveTracking(requestId, {
         requestId,
         studentId: user?.uid || '',
-        tutorId: matchedTutor?.uid || null,
-        studentLocation,
+        studentLocation: meetingLocation,
+        destination: meetingLocation,
+        meetingCoordinates: meetingLocation,
+        studentLiveLocation: liveLocation,
         studentAddress: selectedLocationAddress,
         meetingAddress: selectedLocationAddress,
         locationOption,
         tutorLocation: null,
-        destination: studentLocation,
-        status: initialStatus,
-        statusDetail: initialDetail,
         mode: 'in_person',
         createdAtMs: Date.now(),
-        requestExpiresAt,
         updatedAtMs: Date.now(),
       }).catch((rtdbErr) => console.warn('[RTDB:live-tracking-in-person-error]', rtdbErr));
 
@@ -598,232 +667,145 @@ export function SessionScreen({ navigate, goBack, route }) {
     createdAtMs: liveTracking?.createdAtMs,
     requestExpiresAt: liveTracking?.requestExpiresAt,
   } : null);
-  const statusUi = getRequestStatusUi(currentRequest, liveTracking);
+
+  const matchingSession = useMemo(() => {
+    if (!activeRequestId && !currentRequest?.id) return null;
+    const targetId = activeRequestId || currentRequest?.id;
+    return (sessions || []).find((s) => s?.id === targetId || s?.requestId === targetId || (currentRequest?.sessionId && s?.id === currentRequest.sessionId)) || null;
+  }, [sessions, activeRequestId, currentRequest?.id, currentRequest?.sessionId]);
+
+  const currentStatus = useMemo(() => {
+    return resolveEffectiveStatus(
+      liveTracking?.status,
+      currentRequest?.status,
+      matchingSession?.status,
+    );
+  }, [liveTracking?.status, currentRequest?.status, matchingSession?.status]);
+
+  const statusUi = getRequestStatusUi(currentStatus, currentRequest, liveTracking);
   const hasLiveRequest = Boolean(activeRequestId);
-  const currentStatus = String(currentRequest?.status || liveTracking?.status || '').toLowerCase();
-
-  useEffect(() => {
-    if (!activeRequestId || !currentRequest) return undefined;
-
-    const expiresAtMs = getClassRequestExpiryAtMs(currentRequest);
-    if (!expiresAtMs || !['pending', 'matching', 'offered', 'no_tutor_available'].includes(currentStatus)) {
-      return undefined;
-    }
-
-    let isCancelled = false;
-
-    const expireAndRelease = async () => {
-      await expireClassRequest({
-        requestId: activeRequestId,
-        reason: 'Request expired because no tutor accepted within 3 minutes.',
-      });
-
-      if (isCancelled) return;
-      setActiveRequestId('');
-      setActiveRequest(null);
-      setLiveTracking(null);
-      setSubmissionSuccess(false);
-      setIsSubmitting(false);
-      setShowCancelModal(false);
-      setShowSafetyModal(false);
-      setShowPinModal(false);
-    };
-
-    const remainingMs = expiresAtMs - Date.now();
-    if (remainingMs <= 0 || shouldExpireClassRequest(currentRequest)) {
-      expireAndRelease();
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    const timer = setTimeout(expireAndRelease, remainingMs);
-    return () => {
-      isCancelled = true;
-      clearTimeout(timer);
-    };
-  }, [
-    activeRequestId,
-    currentRequest?.createdAt,
-    currentRequest?.createdAtMs,
-    currentRequest?.expiresAt,
-    currentRequest?.requestExpiresAt,
-    currentStatus,
-  ]);
 
   // 5-minute arrival grace countdown
   const arrivalGraceEndsAt = Number(
     currentRequest?.arrivalGraceEndsAt
+    || currentRequest?.arrivalGraceEndsAtMs
     || liveTracking?.arrivalGraceEndsAt
+    || liveTracking?.arrivalGraceEndsAtMs
     || (currentRequest?.arrivedAt ? currentRequest.arrivedAt + 5 * 60 * 1000 : 0)
+    || (liveTracking?.arrivedAtMs ? liveTracking.arrivedAtMs + 5 * 60 * 1000 : 0)
   );
   const remainingArrivalGraceMs = arrivalGraceEndsAt ? Math.max(0, arrivalGraceEndsAt - now) : 0;
 
   // 5-minute preparation grace countdown
   const prepGraceEndsAt = Number(
     currentRequest?.preparationGraceEndsAt
+    || currentRequest?.preparationGraceEndsAtMs
     || liveTracking?.preparationGraceEndsAt
+    || liveTracking?.preparationGraceEndsAtMs
     || (currentRequest?.preparingStartedAt ? currentRequest.preparingStartedAt + 5 * 60 * 1000 : 0)
+    || (liveTracking?.preparingStartedAtMs ? liveTracking.preparingStartedAtMs + 5 * 60 * 1000 : 0)
   );
   const remainingPrepGraceMs = prepGraceEndsAt ? Math.max(0, prepGraceEndsAt - now) : 0;
 
+  // Auto-open PIN modal when tutor arrives
+  const hasAutoOpenedPinRef = useRef(false);
+  useEffect(() => {
+    if (['arrived', 'waiting_student'].includes(currentStatus)) {
+      const isPinVerified = Boolean(
+        currentRequest?.pinVerified
+        || liveTracking?.pinVerified
+        || matchingSession?.pinVerified
+        || currentRequest?.meetingConfirmed
+        || liveTracking?.meetingConfirmed
+        || matchingSession?.meetingConfirmed
+      );
+      if (!isPinVerified && !hasAutoOpenedPinRef.current) {
+        hasAutoOpenedPinRef.current = true;
+        setShowPinModal(true);
+      }
+    } else if (!['arrived', 'waiting_student', 'preparing_for_lesson'].includes(currentStatus)) {
+      hasAutoOpenedPinRef.current = false;
+    }
+  }, [currentStatus, currentRequest?.pinVerified, liveTracking?.pinVerified, matchingSession?.pinVerified, currentRequest?.meetingConfirmed, liveTracking?.meetingConfirmed, matchingSession?.meetingConfirmed]);
+
   // Auto-navigate to ActiveSession when lesson is active
   useEffect(() => {
-    if (['in_session', 'in_progress'].includes(currentStatus) && activeRequestId) {
+    if (['in_session', 'in_progress', 'ending_requested'].includes(currentStatus) && activeRequestId) {
+      const effSessionId = matchingSession?.id || currentRequest?.sessionId || activeRequestId;
       navigate?.({
         key: 'ActiveSession',
         params: {
-          sessionId: currentRequest?.sessionId || activeRequestId,
-          request: currentRequest,
+          sessionId: effSessionId,
+          request: currentRequest || matchingSession,
+          session: matchingSession,
           requestId: activeRequestId,
           parentTab: 'Dashboard',
         },
       });
     }
-  }, [currentRequest, currentStatus, activeRequestId, navigate]);
-
-  // Continuous tutor matching polling while waiting in pending/matching/no_tutor_available
-  useEffect(() => {
-    if (!activeRequestId || !user?.uid) return undefined;
-    const norm = String(currentStatus || '').toLowerCase();
-    if (!['pending', 'matching', 'no_tutor_available'].includes(norm)) return undefined;
-
-    let isCancelled = false;
-    const interval = setInterval(async () => {
-      if (isCancelled) return;
-      try {
-        if (shouldExpireClassRequest(currentRequest)) {
-          await expireClassRequest({
-            requestId: activeRequestId,
-            reason: 'Request expired because no tutor accepted within 3 minutes.',
-          });
-          return;
-        }
-
-        const reqStudentLoc = currentRequest?.studentLocation || liveTracking?.studentLocation || null;
-        const tutor = await findEligibleOnlineTutor(selectedSubject, user.uid, reqStudentLoc);
-        if (tutor?.uid && !isCancelled) {
-          const { db } = getFirebaseClients();
-          const requestExpiresAt = getClassRequestExpiryAtMs(currentRequest) || Date.now() + (3 * 60 * 1000);
-          await updateDoc(doc(db, 'classRequests', activeRequestId), {
-            status: 'offered',
-            currentOfferTutorId: tutor.uid,
-            tutorQueue: [tutor.uid],
-            offerExpiresAt: Math.min(Date.now() + 30000, requestExpiresAt),
-            statusDetail: 'Tutor notified. Waiting for acceptance.',
-            updatedAt: serverTimestamp(),
-          });
-          await updateLiveTracking(activeRequestId, {
-            status: 'offered',
-            statusDetail: 'Tutor notified. Waiting for acceptance.',
-            requestExpiresAt,
-            updatedAtMs: Date.now(),
-          }).catch(() => null);
-        }
-      } catch (err) {
-        console.warn('[SessionScreen] Tutor matching retry error:', err);
-      }
-    }, 4000);
-
-    return () => {
-      isCancelled = true;
-      clearInterval(interval);
-    };
-  }, [activeRequestId, currentRequest, currentStatus, selectedSubject, user?.uid]);
-
-  // Trigger the server lifecycle to advance an expired tutor offer to the next tutor.
-  useEffect(() => {
-    if (!activeRequestId || currentStatus !== 'offered') return undefined;
-
-    const offerExpiresAt = getOfferExpiresAtMs(currentRequest);
-    if (!offerExpiresAt) return undefined;
-    const offerKey = [
-      activeRequestId,
-      currentRequest?.currentOfferTutorId || '',
-      currentRequest?.offerRevision || '',
-      offerExpiresAt,
-    ].join(':');
-
-    const markOfferExpiredForServerAdvance = () => {
-      if (offerExpiryAdvanceRef.current === offerKey) return;
-      offerExpiryAdvanceRef.current = offerKey;
-      const { db } = getFirebaseClients();
-      updateDoc(doc(db, 'classRequests', activeRequestId), {
-        offerExpiresAt: Date.now() - 1,
-        statusDetail: 'Offer expired. Finding another tutor...',
-        updatedAt: serverTimestamp(),
-      }).catch((err) => console.warn('[SessionScreen] offer expiry advance trigger error:', err));
-    };
-
-    const remainingMs = offerExpiresAt - Date.now();
-    if (remainingMs <= 0) {
-      markOfferExpiredForServerAdvance();
-      return undefined;
-    }
-
-    const timer = setTimeout(markOfferExpiredForServerAdvance, remainingMs + 250);
-    return () => clearTimeout(timer);
-  }, [activeRequestId, currentRequest?.currentOfferTutorId, currentRequest?.offerExpiresAt, currentRequest?.offerRevision, currentStatus]);
+  }, [currentRequest, currentStatus, activeRequestId, matchingSession, navigate]);
 
   const handleCancelForSafety = async (reason) => {
+    let didCancel = false;
     try {
       setShowSafetyModal(false);
       const effReason = reason || 'Student safety concern';
       if (activeRequestId) {
-        await cancelClassRequest({
-          requestId: activeRequestId,
-          canceledBy: 'student',
-          reason: effReason,
-        }).catch(() => null);
         await cancelInPersonSession({
           requestId: activeRequestId,
           sessionId: currentRequest?.sessionId || activeRequestId,
           session: currentRequest,
           canceledBy: 'student',
           reason: effReason,
-        }).catch(() => null);
+        });
+        didCancel = true;
       }
     } catch (err) {
       console.warn('handleCancelForSafety error:', err);
     } finally {
-      setActiveRequestId('');
-      setActiveRequest(null);
-      setLiveTracking(null);
+      if (didCancel) {
+        setActiveRequestId('');
+        setActiveRequest(null);
+        setLiveTracking(null);
+      }
       setShowSafetyModal(false);
       setShowCancelModal(false);
-      setSubmissionSuccess(false);
-      setIsSubmitting(false);
+      if (didCancel) {
+        setSubmissionSuccess(false);
+        setIsSubmitting(false);
+      }
     }
   };
 
   const handleConfirmCancel = async (payload) => {
+    let didCancel = false;
     try {
       setShowCancelModal(false);
       const effReason = payload?.reason || 'Canceled by student';
       if (activeRequestId) {
-        await cancelClassRequest({
-          requestId: activeRequestId,
-          canceledBy: 'student',
-          reason: effReason,
-        }).catch(() => null);
         await cancelInPersonSession({
           requestId: activeRequestId,
           sessionId: currentRequest?.sessionId || activeRequestId,
           session: currentRequest,
           canceledBy: 'student',
           reason: effReason,
-        }).catch(() => null);
+        });
+        didCancel = true;
       }
     } catch (err) {
       console.warn('handleConfirmCancel error:', err);
     } finally {
-      setActiveRequestId('');
-      setActiveRequest(null);
-      setLiveTracking(null);
+      if (didCancel) {
+        setActiveRequestId('');
+        setActiveRequest(null);
+        setLiveTracking(null);
+      }
       setShowCancelModal(false);
       setShowSafetyModal(false);
-      setSubmissionSuccess(false);
-      setIsSubmitting(false);
+      if (didCancel) {
+        setSubmissionSuccess(false);
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -855,38 +837,49 @@ export function SessionScreen({ navigate, goBack, route }) {
 
   return (
     <View style={styles.screen}>
-      {/* Keep the native Android map out of the request-review state. Native map
-          surfaces can sit above React Native press targets even when pointerEvents
-          is disabled, which made the entire booking card appear frozen. */}
-      {showTutorTravelPlaceholder ? (
-        <View style={styles.mapLayer} pointerEvents="none">
-          <SessionMapView
-            requestId={activeRequestId}
-            studentLocation={
-              liveTracking?.studentLocation
-              || currentRequest?.studentLocation
-              || user?.liveLocation
-              || user?.homeLocation
-              || user?.location
-            }
-            studentLocationName={currentRequest?.studentAddress || currentRequest?.locationAddress || 'Your location'}
-            tutorName={tutorName}
-            liveTracking={liveTracking}
-          />
-        </View>
-      ) : (
-        <View style={styles.requestReviewBackdrop} pointerEvents="none">
-          <View style={styles.requestReviewIcon}>
-            <Ionicons name="school-outline" size={34} color="#059669" />
+      {/* 1. Top Map & Visual Section */}
+      <View style={styles.topMapContainer}>
+        {showTutorTravelPlaceholder ? (
+          <View style={styles.mapLayerContainer} pointerEvents="box-none">
+            <SessionMapView
+              requestId={activeRequestId}
+              studentLocation={
+                liveTracking?.destination
+                || liveTracking?.meetingCoordinates
+                || currentRequest?.destination
+                || currentRequest?.meetingCoordinates
+                || liveTracking?.studentLocation
+                || currentRequest?.studentLocation
+                || user?.liveLocation
+                || user?.homeLocation
+                || user?.location
+              }
+              studentLocationName={
+                currentRequest?.meetingAddress
+                || liveTracking?.meetingAddress
+                || currentRequest?.studentAddress
+                || currentRequest?.locationAddress
+                || 'Meeting location'
+              }
+              tutorName={tutorName}
+              liveTracking={liveTracking}
+              currentStatus={currentStatus}
+            />
           </View>
-          <Text style={styles.requestReviewTitle}>Review your lesson details</Text>
-          <Text style={styles.requestReviewSubtitle}>Confirm the details below when you are ready.</Text>
-        </View>
-      )}
+        ) : (
+          <View style={styles.requestReviewBackdrop} pointerEvents="none">
+            <View style={styles.requestReviewIcon}>
+              <Ionicons name="school-outline" size={34} color="#059669" />
+            </View>
+            <Text style={styles.requestReviewTitle}>Review your lesson details</Text>
+            <Text style={styles.requestReviewSubtitle}>Confirm the details below when you are ready.</Text>
+          </View>
+        )}
+      </View>
 
       {/* 2. Floating Top Container */}
-      <View style={styles.topBarWrap} pointerEvents="box-none">
-        <View style={styles.topCard}>
+      <View style={styles.topBarWrap} collapsable={false} pointerEvents="box-none">
+        <View style={styles.topCard} pointerEvents="auto">
           {/* Close Button */}
           <Pressable
             accessibilityLabel="Close"
@@ -908,7 +901,7 @@ export function SessionScreen({ navigate, goBack, route }) {
             </View>
           </View>
 
-          {/* Edit Subject Plus Button (only when creating new request) */}
+          {/* Edit Subject Plus Button (only when creating new request) / Safety Center Button (when live request active) */}
           {!hasLiveRequest ? (
             <Pressable
               accessibilityLabel="Edit subject"
@@ -919,9 +912,15 @@ export function SessionScreen({ navigate, goBack, route }) {
               <Ionicons name="add" size={24} color={isSubjectDropdownOpen ? '#059669' : '#0f172a'} />
             </Pressable>
           ) : (
-            <View style={styles.topIconButton}>
-              <Ionicons name="pulse" size={18} color="#059669" />
-            </View>
+            <Pressable
+              accessibilityLabel="Safety Center"
+              accessibilityRole="button"
+              onPress={() => setShowSafetyModal(true)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.topIconButton}
+            >
+              <Ionicons name="shield-checkmark" size={20} color="#059669" />
+            </Pressable>
           )}
         </View>
 
@@ -951,8 +950,12 @@ export function SessionScreen({ navigate, goBack, route }) {
         ) : null}
       </View>
 
-      {/* 3. Floating Bottom Sheet Card */}
-      <View style={styles.bottomCard} pointerEvents="auto">
+      {/* 3. Bottom Sheet Card */}
+      <View
+        style={styles.bottomCard}
+        collapsable={false}
+        pointerEvents="auto"
+      >
         {hasLiveRequest ? (
           <View style={styles.liveStatusPanel}>
             <View style={styles.liveStatusHeader}>
@@ -965,10 +968,6 @@ export function SessionScreen({ navigate, goBack, route }) {
                 <Text style={styles.liveStatusSubtitle}>{statusUi.subtitle}</Text>
               </View>
             </View>
-
-            {currentRequest?.statusDetail ? (
-              <Text style={styles.liveStatusDetail}>{currentRequest.statusDetail}</Text>
-            ) : null}
 
             {/* Arrival Grace Countdown (Phase 10) */}
             {['arrived', 'waiting_student'].includes(currentStatus) ? (
@@ -1004,8 +1003,10 @@ export function SessionScreen({ navigate, goBack, route }) {
                 const isPinVerified = Boolean(
                   currentRequest?.pinVerified
                   || liveTracking?.pinVerified
+                  || matchingSession?.pinVerified
                   || currentRequest?.meetingConfirmed
                   || liveTracking?.meetingConfirmed
+                  || matchingSession?.meetingConfirmed
                 );
 
                 if (isPinVerified) {
@@ -1092,7 +1093,7 @@ export function SessionScreen({ navigate, goBack, route }) {
               </Pressable>
             </View>
 
-            {['waiting_student', 'in_progress', 'in_session', 'arrived', 'preparing_for_lesson'].includes(currentStatus) ? (
+            {['in_session', 'in_progress'].includes(currentStatus) ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
@@ -1114,7 +1115,7 @@ export function SessionScreen({ navigate, goBack, route }) {
               </Pressable>
             ) : null}
 
-            {['completed', 'settled'].includes(currentStatus) || (['canceled', 'canceled_during'].includes(currentStatus) && currentRequest?.tutorId) ? (
+            {['completed', 'settled'].includes(currentStatus) || (['canceled', 'canceled_during', 'canceled_by_tutor', 'canceled_by_student'].includes(currentStatus) && currentRequest?.tutorId) ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
@@ -1136,7 +1137,7 @@ export function SessionScreen({ navigate, goBack, route }) {
               </Pressable>
             ) : null}
 
-            {['canceled', 'canceled_during', 'expired', 'closed'].includes(currentStatus) ? (
+            {['canceled', 'canceled_during', 'canceled_by_tutor', 'canceled_by_student', 'expired', 'closed'].includes(currentStatus) ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
@@ -1152,16 +1153,6 @@ export function SessionScreen({ navigate, goBack, route }) {
                 <Ionicons name="arrow-forward" size={16} color="#ffffff" />
               </Pressable>
             ) : null}
-
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => navigate?.({ key: 'RequestStatus', params: { requestId: activeRequestId, parentTab: 'Requests' } })}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.manageLiveRequestButton}
-            >
-              <Text style={styles.manageLiveRequestText}>View full status or cancel</Text>
-              <Ionicons name="chevron-forward" size={16} color="#059669" />
-            </Pressable>
           </View>
         ) : null}
 
@@ -1517,11 +1508,18 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: '#ecfdf5',
     flex: 1,
-    overflow: 'hidden',
-    position: 'relative',
   },
-  mapLayer: {
+  topMapContainer: {
+    flex: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  mapLayerContainer: {
     ...StyleSheet.absoluteFillObject,
+    paddingTop: 108,
+    paddingBottom: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
     elevation: 0,
     zIndex: 0,
   },
@@ -1530,7 +1528,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ecfdf5',
     justifyContent: 'center',
-    paddingBottom: 330,
+    paddingBottom: 40,
     paddingHorizontal: 32,
     zIndex: 0,
   },
@@ -1560,18 +1558,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   topBarWrap: {
-    elevation: 100,
+    elevation: 210,
     left: 16,
     position: 'absolute',
     right: 16,
     top: 48,
-    zIndex: 100,
+    zIndex: 210,
   },
   topCard: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
     borderRadius: 24,
-    elevation: 8,
+    elevation: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 8,
@@ -1580,6 +1578,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
+    zIndex: 10,
   },
   topIconButton: {
     alignItems: 'center',
@@ -1669,19 +1668,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    bottom: 0,
-    elevation: 90,
-    left: 0,
+    marginTop: -16,
     paddingBottom: 28,
     paddingHorizontal: 20,
     paddingTop: 18,
-    position: 'absolute',
-    right: 0,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.15,
     shadowRadius: 14,
-    zIndex: 90,
+    elevation: 200,
+    zIndex: 200,
   },
   hidden: {
     display: 'none',

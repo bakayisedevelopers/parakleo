@@ -26,17 +26,22 @@ export function subscribeToTutorAvailableRequests(tutorId, callback, onError) {
   const q = query(
     collection(db, 'classRequests'),
     where('status', '==', 'offered'),
-    where('currentOfferTutorId', '==', tutorId),
-    orderBy('updatedAt', 'desc')
+    where('currentOfferTutorId', '==', tutorId)
   );
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const items = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
+      const items = snapshot.docs
+        .map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }))
+        .sort((a, b) => {
+          const aTime = a.updatedAt?.toMillis?.() || (typeof a.updatedAt === 'number' ? a.updatedAt : 0);
+          const bTime = b.updatedAt?.toMillis?.() || (typeof b.updatedAt === 'number' ? b.updatedAt : 0);
+          return bTime - aTime;
+        });
       callback(items);
     },
     (error) => {
@@ -55,8 +60,7 @@ export function subscribeToTutorAcceptedRequests(tutorId, callback, onError) {
   const { db } = getFirebaseClients();
   const q = query(
     collection(db, 'classRequests'),
-    where('tutorId', '==', tutorId),
-    orderBy('updatedAt', 'desc')
+    where('tutorId', '==', tutorId)
   );
 
   return onSnapshot(
@@ -67,7 +71,15 @@ export function subscribeToTutorAcceptedRequests(tutorId, callback, onError) {
           id: docSnap.id,
           ...docSnap.data(),
         }))
-        .filter((req) => ['accepted', 'in_session'].includes(req.status));
+        .filter((req) => {
+          const norm = String(req?.status || '').toLowerCase();
+          return !['canceled', 'canceled_during', 'canceled_by_tutor', 'canceled_by_student', 'cancelled', 'expired', 'closed', 'completed'].includes(norm);
+        })
+        .sort((a, b) => {
+          const aTime = a.updatedAt?.toMillis?.() || (typeof a.updatedAt === 'number' ? a.updatedAt : 0);
+          const bTime = b.updatedAt?.toMillis?.() || (typeof b.updatedAt === 'number' ? b.updatedAt : 0);
+          return bTime - aTime;
+        });
       callback(items);
     },
     (error) => {
@@ -82,251 +94,94 @@ export async function acceptClassRequest({ requestId, tutorId, tutorName, tutorE
     throw new Error('Request ID and Tutor ID are required.');
   }
 
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const token = await auth.currentUser?.getIdToken();
   const tutorLocation = await getCurrentLocationSnapshot().catch(() => null);
-
-  try {
-    const endpoint = getFunctionEndpoint('acceptClassRequest');
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        requestId,
-        tutorId,
-        tutorName,
-        tutorEmail,
-        tutorLocation: tutorLocation || undefined,
-      }),
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (response.ok && result?.success) {
-      await updateLiveTracking(requestId, {
-        tutorId,
-        tutorName: tutorName || '',
-        sessionId: result.sessionId || requestId,
-        tutorLocation: tutorLocation || undefined,
-        status: 'accepted',
-        statusDetail: 'Tutor accepted and is preparing for class.',
-        acceptedAtMs: Date.now(),
-        updatedAtMs: Date.now(),
-      }).catch(() => null);
-      return { ...result, sessionId: result.sessionId || requestId };
-    }
-  } catch (err) {
-    console.warn('acceptClassRequest endpoint fallback:', err?.message);
+  const endpoint = getFunctionEndpoint('acceptClassRequest');
+  if (!token || !endpoint) {
+    throw new Error('Unable to accept request while offline. Please try again.');
   }
 
-  const reqRef = doc(db, 'classRequests', requestId);
-  const tutorRef = doc(db, 'users', tutorId);
-  const sessionRef = doc(db, 'sessions', requestId);
-  const now = Date.now();
-
-  await runTransaction(db, async (transaction) => {
-    const reqSnap = await transaction.get(reqRef);
-    if (!reqSnap.exists()) {
-      throw new Error('Class request not found.');
-    }
-    const currentData = reqSnap.data() || {};
-    if (currentData.status !== 'offered' && currentData.status !== 'matching') {
-      throw new Error('Class request is no longer available.');
-    }
-
-    transaction.update(reqRef, {
-      status: 'accepted',
-      statusDetail: 'Tutor accepted and is preparing for class.',
-      tutorId,
-      tutorName: tutorName || '',
-      tutorEmail: tutorEmail || '',
-      currentOfferTutorId: null,
-      offerExpiresAt: null,
-      sessionId: requestId,
-      acceptedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    transaction.set(tutorRef, {
-      activeClassRequestId: requestId,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-
-    transaction.set(sessionRef, {
-      id: requestId,
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
       requestId,
       tutorId,
-      tutorName: tutorName || '',
-      studentId: currentData.studentId || '',
-      studentName: currentData.studentName || '',
-      mode: currentData.mode || 'in_person',
-      subject: currentData.subject || 'Mathematics',
-      topic: currentData.topic || '',
-      grade: currentData.grade || '',
-      curriculum: currentData.curriculum || '',
-      status: 'accepted',
-      statusDetail: 'Tutor accepted and is preparing for class.',
-      meetingAddress: currentData.meetingAddress || currentData.studentAddress || currentData.locationAddress || '',
-      studentLocation: currentData.studentLocation || currentData.location || null,
-      pricingSnapshot: currentData.pricingSnapshot || null,
-      durationMinutes: Number(currentData.durationMinutes || currentData.pricingSnapshot?.durationMinutes || 10),
-      createdAtMs: now,
-      acceptedAtMs: now,
-      acceptedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
+      tutorName,
+      tutorEmail,
+      tutorLocation: tutorLocation || undefined,
+    }),
   });
 
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || 'Unable to accept request right now.');
+  }
   await updateLiveTracking(requestId, {
-    tutorId,
-    tutorName: tutorName || '',
-    sessionId: requestId,
     tutorLocation: tutorLocation || undefined,
-    status: 'accepted',
-    statusDetail: 'Tutor accepted and is preparing for class.',
-    acceptedAtMs: now,
-    updatedAtMs: now,
+    updatedAtMs: Date.now(),
   }).catch(() => null);
-
-  return { success: true, requestId, sessionId: requestId };
+  return { ...result, sessionId: result.sessionId || requestId };
 }
 
 export async function declineClassRequest({ requestId, tutorId }) {
   if (!requestId || !tutorId) return;
 
-  const { auth, db } = getFirebaseClients();
+  const { auth } = getFirebaseClients();
   const token = await auth.currentUser?.getIdToken();
-
-  try {
-    const endpoint = getFunctionEndpoint('declineClassRequest');
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ requestId, tutorId }),
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (response.ok && result?.success) {
-      return result;
-    }
-  } catch (err) {
-    console.warn('declineClassRequest endpoint fallback:', err?.message);
+  const endpoint = getFunctionEndpoint('declineClassRequest');
+  if (!token || !endpoint) {
+    throw new Error('Unable to decline request while offline. Please try again.');
   }
 
-  const reqRef = doc(db, 'classRequests', requestId);
-  await runTransaction(db, async (transaction) => {
-    const reqSnap = await transaction.get(reqRef);
-    if (!reqSnap.exists()) return;
-    const currentData = reqSnap.data() || {};
-
-    const nextQueue = Array.isArray(currentData.tutorQueue)
-      ? currentData.tutorQueue.filter((id) => id !== tutorId)
-      : [];
-    const nextDeclinedTutorIds = Array.from(new Set([
-      ...(Array.isArray(currentData.declinedTutorIds) ? currentData.declinedTutorIds : []),
-      tutorId,
-    ]));
-    const nextExcludedTutorIds = Array.from(new Set([
-      ...(Array.isArray(currentData.offerCycleExcludedTutorIds) ? currentData.offerCycleExcludedTutorIds : []),
-      tutorId,
-    ]));
-
-    transaction.update(reqRef, {
-      status: 'matching',
-      statusDetail: 'Tutor declined. Matching next tutor.',
-      currentOfferTutorId: null,
-      offerExpiresAt: null,
-      tutorQueue: nextQueue,
-      declinedTutorIds: nextDeclinedTutorIds,
-      offerCycleExcludedTutorIds: nextExcludedTutorIds,
-      updatedAt: serverTimestamp(),
-    });
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ requestId, tutorId }),
   });
-
-  return { success: true, requestId };
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || 'Unable to decline request right now.');
+  }
+  return result;
 }
 
 export async function cancelClassRequestAndSession({ requestId, sessionId, tutorId, reason }) {
-  const { db } = getFirebaseClients();
-  const canceledAt = Date.now();
+  const { auth } = getFirebaseClients();
+  const token = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('cancelInPersonLesson');
   const trimmedReason = String(reason || 'Canceled by tutor').trim();
-
-  // 1. Update classRequest if requestId exists
-  if (requestId) {
-    const reqRef = doc(db, 'classRequests', requestId);
-    await updateDoc(reqRef, {
-      status: 'canceled',
-      statusDetail: trimmedReason,
-      canceledAt,
+  if (!requestId) {
+    throw new Error('Missing request ID.');
+  }
+  if (!token || !endpoint) {
+    throw new Error('Unable to cancel while offline. Please try again.');
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      requestId,
+      sessionId: sessionId || requestId,
       canceledBy: 'tutor',
-      canceledReason: trimmedReason,
-      currentOfferTutorId: null,
-      offerExpiresAt: null,
-      updatedAt: serverTimestamp(),
-    }).catch((err) => console.warn('cancel classRequest error:', err));
-
-    // Update Realtime Database live tracking
-    await updateLiveTracking(requestId, {
-      status: 'canceled',
-      closedReason: trimmedReason,
-      closedAtMs: canceledAt,
-      updatedAtMs: canceledAt,
-    }).catch((err) => console.warn('cancel liveTracking error:', err));
+      reason: trimmedReason,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || 'Unable to cancel request right now.');
   }
-
-  // 2. Resolve sessionId if missing
-  let targetSessionId = sessionId;
-  if (!targetSessionId && requestId && tutorId) {
-    targetSessionId = await findSessionIdByRequestAndTutor({ requestId, tutorId }).catch(() => null);
-  }
-
-  // 3. Update session if targetSessionId exists
-  if (targetSessionId) {
-    const sessionRef = doc(db, 'sessions', targetSessionId);
-    await updateDoc(sessionRef, {
-      status: 'canceled',
-      statusDetail: trimmedReason,
-      endedAt: canceledAt,
-      canceledAt,
-      canceledBy: 'tutor',
-      canceledReason: trimmedReason,
-      updatedAt: serverTimestamp(),
-    }).catch((err) => console.warn('cancel session error:', err));
-  } else if (requestId) {
-    const sessionsQuery = query(collection(db, 'sessions'), where('requestId', '==', requestId));
-    const snap = await getDocs(sessionsQuery).catch(() => null);
-    if (snap && !snap.empty) {
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => {
-        batch.update(d.ref, {
-          status: 'canceled',
-          statusDetail: trimmedReason,
-          endedAt: canceledAt,
-          canceledAt,
-          canceledBy: 'tutor',
-          canceledReason: trimmedReason,
-          updatedAt: serverTimestamp(),
-        });
-      });
-      await batch.commit().catch((err) => console.warn('batch cancel sessions error:', err));
-    }
-  }
-
-  // 4. Clear activeClassRequestId on tutor user doc
-  if (tutorId) {
-    const tutorRef = doc(db, 'users', tutorId);
-    await updateDoc(tutorRef, {
-      activeClassRequestId: null,
-      updatedAt: serverTimestamp(),
-    }).catch((err) => console.warn('clear tutor activeClassRequestId error:', err));
-  }
-
-  return { success: true };
+  return result;
 }
 
 export function subscribeToRequestById(requestId, callback, onError) {
@@ -345,4 +200,3 @@ export function subscribeToRequestById(requestId, callback, onError) {
     }
   );
 }
-

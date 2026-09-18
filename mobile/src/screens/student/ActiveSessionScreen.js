@@ -107,7 +107,7 @@ export function ActiveSessionScreen({ route, navigate, goBack }) {
 
   // Check if session has transitioned to terminal status (completed or canceled)
   const sessionStatus = String(session?.status || request?.status || '').toLowerCase();
-  const isTerminal = ['completed', 'settled', 'canceled', 'canceled_during', 'expired'].includes(sessionStatus);
+  const isTerminal = ['completed', 'settled', 'canceled', 'canceled_during', 'canceled_by_student', 'canceled_by_tutor', 'expired'].includes(sessionStatus);
   const isSessionActive = ['in_session', 'in_progress', 'ending_requested'].includes(sessionStatus);
   const isPinVerified = Boolean(
     session?.pinVerified

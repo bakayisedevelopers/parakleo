@@ -52,7 +52,7 @@ export function EarningsSummaryCard({
           <Text style={styles.feeBadgeText}>73% Tutor Split Rate</Text>
         </View>
         <View style={[styles.feeBadge, styles.platformFeeBadge]}>
-          <Text style={styles.platformFeeText}>20% Platform Fee</Text>
+          <Text style={styles.platformFeeText}>27% Platform Fee</Text>
         </View>
       </View>
     </Card>

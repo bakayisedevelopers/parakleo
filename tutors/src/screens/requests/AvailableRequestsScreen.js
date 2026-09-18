@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -60,16 +60,28 @@ export function AvailableRequestsScreen({ navigate, goBack }) {
     return ['All', ...Array.from(subs)];
   }, [requests]);
 
+  const acceptInFlight = useRef(false);
+
   const handleAcceptOffer = async (request) => {
     if (!request || !user?.uid) return;
+    if (acceptInFlight.current) return;
+    acceptInFlight.current = true;
     try {
       setIsProcessing(true);
-      const acceptResult = await acceptClassRequest({
-        requestId: request.id,
-        tutorId: user.uid,
-        tutorName: user.fullName || user.displayName || 'Tutor',
-        tutorEmail: user.email,
-      });
+      let acceptResult = null;
+      try {
+        acceptResult = await acceptClassRequest({
+          requestId: request.id,
+          tutorId: user.uid,
+          tutorName: user.fullName || user.displayName || 'Tutor',
+          tutorEmail: user.email,
+        });
+      } catch (acceptErr) {
+        const msg = acceptErr?.message || '';
+        const alreadyAccepted = msg.includes('no longer available') || msg.includes('already') || msg.includes('accepted');
+        if (!alreadyAccepted) throw acceptErr;
+        console.warn('[AvailableRequestsScreen] Offer already accepted, navigating to session.');
+      }
 
       setActiveModalRequest(null);
       const sessionId = acceptResult?.sessionId
@@ -86,6 +98,7 @@ export function AvailableRequestsScreen({ navigate, goBack }) {
       Alert.alert('Error Accepting Offer', err?.message || 'Unable to accept request.');
     } finally {
       setIsProcessing(false);
+      acceptInFlight.current = false;
     }
   };
 

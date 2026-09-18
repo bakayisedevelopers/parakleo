@@ -1,10 +1,20 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button } from '../../components/ui/Button';
-import { FormField } from '../../components/ui/FormField';
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { ErrorState } from '../../components/ui/States';
 import { useAuth } from '../../context/AuthContext';
-import { colors } from '../../theme/colors';
 
 export function ForgotPasswordScreen({ navigate }) {
   const { resetPassword } = useAuth();
@@ -28,160 +38,271 @@ export function ForgotPasswordScreen({ navigate }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <Pressable accessibilityRole="button" onPress={() => navigate('Login')} style={styles.switchLink}>
-        <Text style={styles.switchText}>Sign in</Text>
-      </Pressable>
+    <View style={styles.mainContainer}>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      <KeyboardAvoidingView
+        style={styles.flexOne}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          {/* Top Hero Banner with Home Tutoring Image */}
+          <View style={styles.imageHeroContainer}>
+            <Image
+              source={require('../../../assets/student-home-tutoring.png')}
+              style={styles.heroImage}
+              resizeMode="cover"
+            />
+            <View style={styles.imageGradientOverlay} />
+            <View style={styles.heroTextOverlay}>
+              <View style={styles.pillBadge}>
+                <Text style={styles.pillBadgeText}>ACCOUNT RECOVERY</Text>
+              </View>
+              <Text style={styles.heroTitle}>Reset Password</Text>
+              <Text style={styles.heroSubtitle}>We'll send a secure link to restore your account</Text>
+            </View>
+          </View>
 
-      <View style={styles.brandStage}>
-        <View style={styles.brandShadow} />
-        <View style={styles.brandMark}>
-          <Text style={styles.brandLetter}>P</Text>
-        </View>
-      </View>
+          {/* Bottom Card containing redesigned Auth Fields */}
+          <View style={styles.authCard}>
+            <Text style={styles.cardHeading}>Forgot Password?</Text>
+            <Text style={styles.cardSubheading}>
+              Enter your registered email address below to receive password reset instructions.
+            </Text>
 
-      <View style={styles.panel}>
-        <Text style={styles.title}>Reset password</Text>
-        <Text style={styles.subtitle}>Enter your email and we will send you a secure link to create a new password.</Text>
+            {error ? <ErrorState title="Reset failed" message={error} /> : null}
+            {sent ? (
+              <View style={styles.successBanner}>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#166534" />
+                <Text style={styles.successBannerText}>
+                  Password reset email sent. Please check your inbox.
+                </Text>
+              </View>
+            ) : null}
 
-        {error ? <ErrorState title="Reset failed" message={error} /> : null}
-        {sent ? <Text style={styles.success}>Password reset email sent. Please check your inbox.</Text> : null}
+            {/* Input: Email Address */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="mail-outline" size={19} color="#64748b" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="student@example.com"
+                  placeholderTextColor="#94a3b8"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                />
+              </View>
+            </View>
 
-        <FormField
-          autoCapitalize="none"
-          inputStyle={styles.input}
-          keyboardType="email-address"
-          label="Email address"
-          onChangeText={setEmail}
-          placeholder="Enter your email"
-          value={email}
-        />
+            {/* Submit Button */}
+            <Pressable
+              onPress={submit}
+              disabled={busy || !email}
+              style={({ pressed }) => [
+                styles.submitBtn,
+                pressed && styles.submitBtnPressed,
+                (busy || !email) && styles.submitBtnDisabled,
+              ]}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Text style={styles.submitBtnText}>Send Reset Link</Text>
+              )}
+            </Pressable>
 
-        <Button disabled={busy || !email} onPress={submit} style={styles.primaryButton} textStyle={styles.primaryButtonText}>
-          {busy ? 'Sending...' : 'Send reset link'}
-        </Button>
-
-        <Pressable accessibilityRole="button" onPress={() => navigate('Login')} style={styles.backToLogin}>
-          <Text style={styles.link}>Back to login</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
+            {/* Back to Login Link */}
+            <View style={styles.footerRow}>
+              <Text style={styles.footerPrompt}>Remembered your password? </Text>
+              <Pressable onPress={() => navigate('Login')}>
+                <Text style={styles.footerAction}>Sign in here</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    backgroundColor: colors.background,
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+  },
+  flexOne: {
+    flex: 1,
+  },
+  scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    padding: 20,
-    paddingBottom: 32,
-    paddingTop: 24,
+    backgroundColor: '#f8fafc',
   },
-  switchLink: {
-    alignSelf: 'flex-end',
-    borderBottomColor: colors.brandDark,
-    borderBottomWidth: 1,
-    marginBottom: 34,
+  imageHeroContainer: {
+    height: 280,
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#0f172a',
   },
-  switchText: {
-    color: colors.brandDark,
-    fontSize: 15,
-    fontWeight: '800',
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.82,
   },
-  brandStage: {
-    alignItems: 'center',
-    height: 188,
-    justifyContent: 'center',
+  imageGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  heroTextOverlay: {
+    position: 'absolute',
+    bottom: 32,
+    left: 20,
+    right: 20,
+  },
+  pillBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(5, 150, 105, 0.9)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
     marginBottom: 8,
   },
-  brandShadow: {
-    backgroundColor: 'rgba(4,120,87,0.10)',
-    borderColor: 'rgba(16,185,129,0.14)',
-    borderRadius: 34,
-    borderWidth: 1,
-    bottom: 28,
-    height: 92,
-    position: 'absolute',
-    transform: [{ rotate: '-10deg' }],
-    width: 132,
+  pillBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
-  brandMark: {
+  heroTitle: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  heroSubtitle: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  authCard: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -20,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 36,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  cardHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  cardSubheading: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  successBanner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(16,185,129,0.24)',
-    borderRadius: 34,
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
     borderWidth: 1,
-    height: 112,
-    justifyContent: 'center',
-    shadowColor: colors.brandDark,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    transform: [{ rotate: '45deg' }],
-    width: 112,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 18,
+    gap: 8,
   },
-  brandLetter: {
-    color: colors.brand,
-    fontSize: 54,
-    fontWeight: '900',
-    transform: [{ rotate: '-45deg' }],
+  successBannerText: {
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
-  panel: {
-    gap: 14,
+  inputGroup: {
+    marginBottom: 18,
   },
-  title: {
-    color: colors.text,
-    fontSize: 31,
-    fontWeight: '900',
-    letterSpacing: 0,
-    textAlign: 'center',
-  },
-  subtitle: {
-    color: colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  input: {
-    backgroundColor: '#ffffff',
-    borderColor: 'rgba(16,185,129,0.24)',
-    borderRadius: 18,
-    minHeight: 58,
-    paddingHorizontal: 18,
-  },
-  success: {
-    backgroundColor: 'rgba(16,185,129,0.10)',
-    borderColor: 'rgba(16,185,129,0.20)',
-    borderRadius: 16,
-    borderWidth: 1,
-    color: colors.brandDark,
+  inputLabel: {
     fontSize: 13,
     fontWeight: '700',
-    padding: 12,
-    textAlign: 'center',
+    color: '#334155',
+    marginBottom: 6,
   },
-  primaryButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 22,
-    minHeight: 58,
-    shadowColor: colors.brandDark,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontWeight: '900',
-  },
-  backToLogin: {
+  inputWrapper: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 52,
   },
-  link: {
-    color: colors.brandDark,
+  inputIcon: {
+    marginRight: 10,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#0f172a',
+    fontWeight: '500',
+  },
+  submitBtn: {
+    backgroundColor: '#059669',
+    borderRadius: 14,
+    height: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  submitBtnPressed: {
+    opacity: 0.88,
+  },
+  submitBtnDisabled: {
+    opacity: 0.6,
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  footerPrompt: {
     fontSize: 14,
-    fontWeight: '800',
+    color: '#64748b',
+  },
+  footerAction: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#059669',
   },
 });

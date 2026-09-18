@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Image,
   Platform,
@@ -15,11 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { NotificationsButton } from '../../components/navigation/NotificationsButton';
 import { useAuth } from '../../context/AuthContext';
 import {
-  expireClassRequest,
-  shouldExpireClassRequest,
-  subscribeToStudentRequests,
-} from '../../services/classRequestService';
-import { subscribeToStudentSessions } from '../../services/sessionService';
+  isActiveLessonStatus,
+  isActiveTrackingStatus,
+} from '../../constants/lessonStatus';
+import { normalizeRequestStatus } from '../../utils/requestStatus';
 
 function getTimeOfDayGreeting() {
   const hour = new Date().getHours();
@@ -28,90 +27,42 @@ function getTimeOfDayGreeting() {
   return 'Good Evening,';
 }
 
-export function DashboardScreen({ navigate, unreadCount = 0 }) {
+export function DashboardScreen({ navigate, unreadCount = 0, requests = [], sessions = [] }) {
   const { user } = useAuth();
   const { width, height } = useWindowDimensions();
-  const [requests, setRequests] = useState([]);
-  const [sessions, setSessions] = useState([]);
-
-  const expiringRequestIdsRef = useRef(new Set());
-
-  useEffect(() => {
-    if (!user?.uid) return;
-    const unsubRequests = subscribeToStudentRequests(user.uid, (data) => {
-      setRequests(Array.isArray(data) ? data : []);
-    }, () => {});
-    const unsubSessions = subscribeToStudentSessions(user.uid, (data) => {
-      setSessions(Array.isArray(data) ? data : []);
-    }, () => {});
-
-    return () => {
-      if (typeof unsubRequests === 'function') unsubRequests();
-      if (typeof unsubSessions === 'function') unsubSessions();
-    };
-  }, [user?.uid]);
+  const studentRequests = Array.isArray(requests) ? requests : [];
+  const studentSessions = Array.isArray(sessions) ? sessions : [];
 
   const displayName = String(user?.fullName || user?.displayName || 'Student').trim();
   const greeting = getTimeOfDayGreeting();
   const photoURL = user?.profilePhoto || user?.photoURL;
   const initial = displayName.charAt(0).toUpperCase() || 'S';
   const activeSession = useMemo(() => {
-    return sessions.find((s) =>
-      ['in_progress', 'in_session', 'ending_requested'].includes(String(s?.status || '').toLowerCase())
-    ) || null;
-  }, [sessions]);
+    return studentSessions.find((s) => isActiveLessonStatus(normalizeRequestStatus(s?.status))) || null;
+  }, [studentSessions]);
 
   const trackingSession = useMemo(() => {
-    return sessions.find((s) =>
-      [
-        'accepted',
-        'tutor_accepted',
-        'tutor_assigned',
-        'traveling',
-        'travelling',
-        'in_transit',
-        'arrived',
-        'waiting_student',
-        'preparing_for_lesson',
-      ].includes(String(s?.status || '').toLowerCase())
-    ) || null;
-  }, [sessions]);
+    return studentSessions.find((s) => isActiveTrackingStatus(normalizeRequestStatus(s?.status))) || null;
+  }, [studentSessions]);
 
   const activeRequest = useMemo(() => {
-    return requests.find((r) =>
-      ['pending', 'matching', 'offered', 'accepted', 'tutor_accepted', 'tutor_assigned', 'traveling', 'travelling', 'in_transit', 'arrived', 'waiting_student', 'preparing_for_lesson'].includes(
-        String(r?.status || '').toLowerCase()
-      ) && !shouldExpireClassRequest(r)
+    return studentRequests.find((r) =>
+      ['pending', 'matching', 'offered', 'no_tutor_available'].includes(normalizeRequestStatus(r?.status))
+        || isActiveTrackingStatus(normalizeRequestStatus(r?.status))
     ) || null;
-  }, [requests]);
-
-  useEffect(() => {
-    requests.forEach((request) => {
-      const requestId = String(request?.id || '').trim();
-      if (!requestId || !shouldExpireClassRequest(request) || expiringRequestIdsRef.current.has(requestId)) {
-        return;
-      }
-
-      expiringRequestIdsRef.current.add(requestId);
-      expireClassRequest({
-        requestId,
-        reason: 'Request expired because no tutor accepted within 3 minutes.',
-      }).finally(() => {
-        expiringRequestIdsRef.current.delete(requestId);
-      });
-    });
-  }, [requests]);
+  }, [studentRequests]);
 
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor="#f0fdf4" />
-      <Image
-        source={require('../../../assets/student-home-tutoring.png')}
-        style={styles.backgroundArt}
-        resizeMode={width > height ? 'contain' : 'cover'}
-        accessible={false}
-        pointerEvents="none"
-      />
+      <View pointerEvents="none" style={styles.backdropLayer}>
+        <Image
+          source={require('../../../assets/student-home-tutoring.png')}
+          style={styles.backgroundArt}
+          resizeMode={width > height ? 'contain' : 'cover'}
+          accessible={false}
+        />
+      </View>
 
       <SafeAreaView style={styles.safeContainer}>
         {/* Top Header Bar */}
@@ -261,6 +212,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0fdf4',
     flex: 1,
   },
+  backdropLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
   backgroundArt: {
     ...StyleSheet.absoluteFillObject,
     width: '100%',
@@ -270,6 +225,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 8 : 12,
+    zIndex: 1,
   },
   topHeader: {
     alignItems: 'center',

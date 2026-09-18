@@ -27,6 +27,7 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
   const [declinedOfferIds, setDeclinedOfferIds] = useState([]);
   const [latchedOffer, setLatchedOffer] = useState(null);
   const shimmer = useRef(new Animated.Value(0)).current;
+  const acceptInFlight = useRef(false);
 
   const onboardingStatus = useMemo(() => getTutorOnboardingStatus(user || {}), [user]);
   const isOnline = user?.onlineStatus === 'online';
@@ -121,27 +122,43 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
   };
 
   const handleAccept = async () => {
-    if (!activeOffer?.id || !user?.uid) return;
+    const targetOffer = activeOffer;
+    if (!targetOffer?.id || !user?.uid) return;
+    // Ref-based guard: prevents double-tap race where second tap fires before
+    // React re-renders with isProcessing=true (state updates are async).
+    if (acceptInFlight.current) return;
+    acceptInFlight.current = true;
+
+    const offerId = targetOffer.id;
+    // Immediately unmount/hide overlay to prevent any lingering or pink UI flash during transition
+    setLatchedOffer(null);
+    setDeclinedOfferIds((prev) => [...prev, offerId]);
+    setIsProcessing(true);
 
     try {
-      setIsProcessing(true);
-      const acceptResult = await acceptClassRequest({
-        requestId: activeOffer.id,
-        tutorId: user.uid,
-        tutorName: user.fullName || user.displayName || 'Tutor',
-        tutorEmail: user.email || '',
-      });
-
-      const offerId = activeOffer.id;
-      setDeclinedOfferIds((prev) => [...prev, offerId]);
-      setLatchedOffer((current) => (current?.id === offerId ? null : current));
+      let acceptResult = null;
+      try {
+        acceptResult = await acceptClassRequest({
+          requestId: offerId,
+          tutorId: user.uid,
+          tutorName: user.fullName || user.displayName || 'Tutor',
+          tutorEmail: user.email || '',
+        });
+      } catch (acceptErr) {
+        // "Class request is no longer available" means a prior tap already accepted it.
+        // Treat this as a recoverable success and navigate to the session.
+        const msg = acceptErr?.message || '';
+        const alreadyAccepted = msg.includes('no longer available') || msg.includes('already') || msg.includes('accepted');
+        if (!alreadyAccepted) throw acceptErr;
+        console.warn('[TutorOfferOverlay] Offer already accepted by previous tap, navigating to session.');
+      }
 
       const sessionId = acceptResult?.sessionId
         || await findSessionIdByRequestAndTutor({ requestId: offerId, tutorId: user.uid })
         || offerId;
 
-      if (activeOffer.mode === 'in_person' && onNavigate) {
-        onNavigate('TutorNavigation', { requestId: offerId, sessionId, request: activeOffer });
+      if (targetOffer.mode === 'in_person' && onNavigate) {
+        onNavigate('TutorNavigation', { requestId: offerId, sessionId, request: targetOffer });
       } else if (sessionId && onNavigate) {
         onNavigate('SessionRoom', { sessionId });
       } else if (onNavigate) {
@@ -151,6 +168,7 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
       console.warn('[TutorOfferOverlay] Error accepting offer:', err);
     } finally {
       setIsProcessing(false);
+      acceptInFlight.current = false;
     }
   };
 
@@ -161,7 +179,24 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
     }
   }, [isExpired, activeOffer, isProcessing]);
 
-  if (!activeOffer || isExpired) return null;
+  const activeOfferStatus = String(activeOffer?.status || '').toLowerCase();
+  const isOfferActiveOrCompleted = [
+    'accepted',
+    'tutor_accepted',
+    'tutor_assigned',
+    'travelling',
+    'traveling',
+    'en_route',
+    'in_transit',
+    'arrived',
+    'waiting_student',
+    'preparing_for_lesson',
+    'in_session',
+    'in_progress',
+    'completed',
+  ].includes(activeOfferStatus);
+
+  if (!activeOffer || isExpired || acceptInFlight.current || isOfferActiveOrCompleted) return null;
 
   const pricing = activeOffer.pricingSnapshot || {};
   const requestedDuration = Number(

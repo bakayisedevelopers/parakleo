@@ -1,5 +1,6 @@
 import { Platform, SafeAreaView, StyleSheet, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
 import { RadialActionMenu } from '../student/RadialActionMenu';
 
 const DESTINATIONS = [
@@ -12,9 +13,10 @@ const DESTINATIONS = [
 
 export function StudentBottomNavigation({ currentRoute, navigate, onCapture, onUpload, onDescribe }) {
   const selectedRoute = currentRoute === 'Sessions' ? 'Requests' : currentRoute;
+  const [isRequestMenuOpen, setIsRequestMenuOpen] = useState(false);
   return (
     <SafeAreaView pointerEvents="box-none" style={styles.safeArea}>
-      <View pointerEvents="box-none" style={styles.dock}>
+      <View pointerEvents="box-none" style={[styles.dock, isRequestMenuOpen && styles.dockOpen]}>
         <View style={styles.bar}>
           {DESTINATIONS.map((item, index) => item ? (
             <Pressable
@@ -32,7 +34,13 @@ export function StudentBottomNavigation({ currentRoute, navigate, onCapture, onU
             </Pressable>
           ) : <View key={`request-${index}`} pointerEvents="none" style={styles.tab} />)}
         </View>
-        <RadialActionMenu docked onCapture={onCapture} onUpload={onUpload} onDescribe={onDescribe} />
+        <RadialActionMenu
+          docked
+          onCapture={onCapture}
+          onUpload={onUpload}
+          onDescribe={onDescribe}
+          onOpenChange={setIsRequestMenuOpen}
+        />
       </View>
     </SafeAreaView>
   );
@@ -41,12 +49,15 @@ export function StudentBottomNavigation({ currentRoute, navigate, onCapture, onU
 const styles = StyleSheet.create({
   safeArea: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 1100 },
   dock: {
-    height: 200,
+    height: 96,
     width: '100%',
     maxWidth: 520,
     marginBottom: Platform.OS === 'ios' ? 8 : 16,
     alignItems: 'center',
     justifyContent: 'flex-end',
+  },
+  dockOpen: {
+    height: 200,
   },
   bar: {
     position: 'absolute',

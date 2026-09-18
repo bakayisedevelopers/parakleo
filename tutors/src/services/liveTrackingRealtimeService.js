@@ -4,11 +4,16 @@ import { getFirebaseClients } from '../firebase/config';
 const LIVE_TRACKING_ROOT = 'liveTracking/classRequests';
 
 function normalizeCoordinate(coordinate = null) {
-  const latitude = Number(coordinate?.latitude);
-  const longitude = Number(coordinate?.longitude);
+  if (!coordinate) return null;
+  const rawLat = coordinate?.latitude ?? coordinate?.lat;
+  const rawLng = coordinate?.longitude ?? coordinate?.lng;
+  const latitude = Number(rawLat);
+  const longitude = Number(rawLng);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
+  const rawHeading = coordinate?.heading ?? coordinate?.bearing;
+  const rawTime = coordinate?.updatedAtMs ?? coordinate?.time;
 
   return {
     latitude,
@@ -16,9 +21,9 @@ function normalizeCoordinate(coordinate = null) {
     accuracy: Number.isFinite(Number(coordinate?.accuracy)) ? Number(coordinate.accuracy) : null,
     altitude: Number.isFinite(Number(coordinate?.altitude)) ? Number(coordinate.altitude) : null,
     altitudeAccuracy: Number.isFinite(Number(coordinate?.altitudeAccuracy)) ? Number(coordinate.altitudeAccuracy) : null,
-    heading: Number.isFinite(Number(coordinate?.heading)) ? Number(coordinate.heading) : null,
+    heading: Number.isFinite(Number(rawHeading)) ? Number(rawHeading) : null,
     speed: Number.isFinite(Number(coordinate?.speed)) ? Number(coordinate.speed) : null,
-    updatedAtMs: Number.isFinite(Number(coordinate?.updatedAtMs)) ? Number(coordinate.updatedAtMs) : Date.now(),
+    updatedAtMs: Number.isFinite(Number(rawTime)) ? Number(rawTime) : Date.now(),
   };
 }
 
@@ -57,6 +62,7 @@ function normalizeLiveTrackingSnapshot(snapshot = {}) {
     tutorLocation: normalizeCoordinate(snapshot.tutorLocation),
     studentLocation: normalizeCoordinate(snapshot.studentLocation),
     destination: normalizeCoordinate(snapshot.destination),
+    meetingCoordinates: normalizeCoordinate(snapshot.meetingCoordinates),
     routeSnapshot,
     routeSteps: Array.isArray(routeSnapshot?.routeSteps) ? routeSnapshot.routeSteps : [],
     routePolylineEncoded: String(routeSnapshot?.encodedPolyline || '').trim(),
@@ -72,8 +78,32 @@ function normalizeLiveTrackingSnapshot(snapshot = {}) {
       : null,
     etaSeconds: Number.isFinite(Number(snapshot.etaSeconds)) ? Number(snapshot.etaSeconds) : null,
     status: String(snapshot.status || '').trim(),
-    mode: String(snapshot.mode || 'online').trim(),
+    statusDetail: String(snapshot.statusDetail || '').trim(),
+    mode: String(snapshot.mode || 'in_person').trim(),
     acceptedAtMs: Number.isFinite(Number(snapshot.acceptedAtMs)) ? Number(snapshot.acceptedAtMs) : 0,
+    travelStartedAtMs: Number.isFinite(Number(snapshot.travelStartedAtMs ?? snapshot.startedTravellingAtMs)) ? Number(snapshot.travelStartedAtMs ?? snapshot.startedTravellingAtMs) : 0,
+    startedTravellingAtMs: Number.isFinite(Number(snapshot.startedTravellingAtMs ?? snapshot.travelStartedAtMs)) ? Number(snapshot.startedTravellingAtMs ?? snapshot.travelStartedAtMs) : 0,
+    arrivedAtMs: Number.isFinite(Number(snapshot.arrivedAtMs)) ? Number(snapshot.arrivedAtMs) : null,
+    arrivalGraceEndsAt: snapshot.arrivalGraceEndsAt != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAt))
+      ? Number(snapshot.arrivalGraceEndsAt)
+      : (snapshot.arrivalGraceEndsAtMs != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAtMs)) ? Number(snapshot.arrivalGraceEndsAtMs) : null),
+    arrivalGraceEndsAtMs: snapshot.arrivalGraceEndsAtMs != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAtMs))
+      ? Number(snapshot.arrivalGraceEndsAtMs)
+      : (snapshot.arrivalGraceEndsAt != null && Number.isFinite(Number(snapshot.arrivalGraceEndsAt)) ? Number(snapshot.arrivalGraceEndsAt) : null),
+    arrivalGraceStartedAtMs: Number.isFinite(Number(snapshot.arrivalGraceStartedAtMs)) ? Number(snapshot.arrivalGraceStartedAtMs) : null,
+    preparationGraceEndsAt: snapshot.preparationGraceEndsAt != null && Number.isFinite(Number(snapshot.preparationGraceEndsAt))
+      ? Number(snapshot.preparationGraceEndsAt)
+      : (snapshot.preparationGraceEndsAtMs != null && Number.isFinite(Number(snapshot.preparationGraceEndsAtMs)) ? Number(snapshot.preparationGraceEndsAtMs) : null),
+    preparationGraceEndsAtMs: snapshot.preparationGraceEndsAtMs != null && Number.isFinite(Number(snapshot.preparationGraceEndsAtMs))
+      ? Number(snapshot.preparationGraceEndsAtMs)
+      : (snapshot.preparationGraceEndsAt != null && Number.isFinite(Number(snapshot.preparationGraceEndsAt)) ? Number(snapshot.preparationGraceEndsAt) : null),
+    preparationGraceStartedAtMs: Number.isFinite(Number(snapshot.preparationGraceStartedAtMs)) ? Number(snapshot.preparationGraceStartedAtMs) : null,
+    verificationPin: String(snapshot.verificationPin || '').trim(),
+    pinVerified: Boolean(snapshot.pinVerified),
+    meetingConfirmed: Boolean(snapshot.meetingConfirmed),
+    studentAddress: String(snapshot.studentAddress || '').trim(),
+    meetingAddress: String(snapshot.meetingAddress || snapshot.studentAddress || '').trim(),
+    locationOption: String(snapshot.locationOption || 'My Location').trim(),
     startedAtMs: Number.isFinite(Number(snapshot.startedAtMs)) ? Number(snapshot.startedAtMs) : 0,
     closedAtMs: Number.isFinite(Number(snapshot.closedAtMs)) ? Number(snapshot.closedAtMs) : 0,
     closedReason: String(snapshot.closedReason || '').trim(),
@@ -85,13 +115,62 @@ function sanitizePatch(patch = {}) {
   const nextPatch = {};
 
   if (patch.requestId !== undefined) nextPatch.requestId = String(patch.requestId || '').trim();
+  if (patch.sessionId !== undefined) nextPatch.sessionId = String(patch.sessionId || '').trim();
   if (patch.tutorId !== undefined) nextPatch.tutorId = String(patch.tutorId || '').trim();
+  if (patch.tutorName !== undefined) nextPatch.tutorName = String(patch.tutorName || '').trim();
   if (patch.studentId !== undefined) nextPatch.studentId = String(patch.studentId || '').trim();
+  if (patch.studentName !== undefined) nextPatch.studentName = String(patch.studentName || '').trim();
   if (patch.status !== undefined) nextPatch.status = String(patch.status || '').trim();
-  if (patch.mode !== undefined) nextPatch.mode = String(patch.mode || 'online').trim();
+  if (patch.statusDetail !== undefined) nextPatch.statusDetail = String(patch.statusDetail || '').trim();
+  if (patch.mode !== undefined) nextPatch.mode = String(patch.mode || 'in_person').trim();
 
   if (patch.acceptedAtMs !== undefined) {
     nextPatch.acceptedAtMs = Number.isFinite(Number(patch.acceptedAtMs)) ? Number(patch.acceptedAtMs) : Date.now();
+  }
+  if (patch.travelStartedAtMs !== undefined) {
+    nextPatch.travelStartedAtMs = Number.isFinite(Number(patch.travelStartedAtMs)) ? Number(patch.travelStartedAtMs) : Date.now();
+  }
+  if (patch.startedTravellingAtMs !== undefined) {
+    nextPatch.startedTravellingAtMs = Number.isFinite(Number(patch.startedTravellingAtMs)) ? Number(patch.startedTravellingAtMs) : Date.now();
+  }
+  if (patch.arrivedAtMs !== undefined) {
+    nextPatch.arrivedAtMs = Number.isFinite(Number(patch.arrivedAtMs)) ? Number(patch.arrivedAtMs) : Date.now();
+  }
+  if (patch.arrivalGraceStartedAtMs !== undefined) {
+    nextPatch.arrivalGraceStartedAtMs = Number.isFinite(Number(patch.arrivalGraceStartedAtMs)) ? Number(patch.arrivalGraceStartedAtMs) : null;
+  }
+  if (patch.arrivalGraceEndsAt !== undefined) {
+    nextPatch.arrivalGraceEndsAt = Number.isFinite(Number(patch.arrivalGraceEndsAt)) ? Number(patch.arrivalGraceEndsAt) : null;
+  }
+  if (patch.arrivalGraceEndsAtMs !== undefined) {
+    nextPatch.arrivalGraceEndsAtMs = Number.isFinite(Number(patch.arrivalGraceEndsAtMs)) ? Number(patch.arrivalGraceEndsAtMs) : null;
+  }
+  if (patch.preparationGraceStartedAtMs !== undefined) {
+    nextPatch.preparationGraceStartedAtMs = Number.isFinite(Number(patch.preparationGraceStartedAtMs)) ? Number(patch.preparationGraceStartedAtMs) : null;
+  }
+  if (patch.preparationGraceEndsAt !== undefined) {
+    nextPatch.preparationGraceEndsAt = Number.isFinite(Number(patch.preparationGraceEndsAt)) ? Number(patch.preparationGraceEndsAt) : null;
+  }
+  if (patch.preparationGraceEndsAtMs !== undefined) {
+    nextPatch.preparationGraceEndsAtMs = Number.isFinite(Number(patch.preparationGraceEndsAtMs)) ? Number(patch.preparationGraceEndsAtMs) : null;
+  }
+  if (patch.verificationPin !== undefined) {
+    nextPatch.verificationPin = String(patch.verificationPin || '').trim();
+  }
+  if (patch.pinVerified !== undefined) {
+    nextPatch.pinVerified = Boolean(patch.pinVerified);
+  }
+  if (patch.meetingConfirmed !== undefined) {
+    nextPatch.meetingConfirmed = Boolean(patch.meetingConfirmed);
+  }
+  if (patch.studentAddress !== undefined) {
+    nextPatch.studentAddress = String(patch.studentAddress || '').trim();
+  }
+  if (patch.meetingAddress !== undefined) {
+    nextPatch.meetingAddress = String(patch.meetingAddress || '').trim();
+  }
+  if (patch.locationOption !== undefined) {
+    nextPatch.locationOption = String(patch.locationOption || 'My Location').trim();
   }
   if (patch.startedAtMs !== undefined) {
     nextPatch.startedAtMs = Number.isFinite(Number(patch.startedAtMs)) ? Number(patch.startedAtMs) : Date.now();
@@ -114,6 +193,9 @@ function sanitizePatch(patch = {}) {
   }
   if (patch.destination !== undefined) {
     nextPatch.destination = normalizeCoordinate(patch.destination);
+  }
+  if (patch.meetingCoordinates !== undefined) {
+    nextPatch.meetingCoordinates = normalizeCoordinate(patch.meetingCoordinates);
   }
   if (patch.routeSnapshot !== undefined) {
     nextPatch.routeSnapshot = normalizeRouteSnapshot(patch.routeSnapshot);

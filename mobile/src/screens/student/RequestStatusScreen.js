@@ -10,17 +10,23 @@ import { subscribeToRequestById, cancelClassRequest } from '../../services/class
 import { subscribeToStudentSessions } from '../../services/sessionService';
 import { getUserProfile } from '../../services/userService';
 import { colors } from '../../theme/colors';
-import { TERMINAL_REQUEST_STATUSES } from '../../utils/requestStatus';
+import {
+  TERMINAL_REQUEST_STATUSES,
+  isRequestJoinable,
+  normalizeRequestStatus,
+} from '../../utils/requestStatus';
+import { isActiveLessonStatus, isActiveTrackingStatus } from '../../constants/lessonStatus';
 
 function getStatusCopy(status) {
-  const normalized = String(status || '').toLowerCase();
+  const normalized = normalizeRequestStatus(status);
   if (['pending', 'matching'].includes(normalized)) return 'Searching for a tutor';
   if (normalized === 'offered') return 'Waiting for tutor to accept';
   if (normalized === 'accepted') return 'Tutor found';
-  if (['waiting_student', 'in_progress', 'in_session'].includes(normalized)) return 'Class ready';
+  if (isActiveTrackingStatus(normalized)) return 'Tutor tracking active';
+  if (isActiveLessonStatus(normalized)) return 'Class ready';
   if (normalized === 'no_tutor_available') return 'No tutor available';
-  if (normalized === 'completed') return 'Class completed';
-  if (['canceled', 'canceled_during', 'expired'].includes(normalized)) return 'Request closed';
+  if (['completed', 'settled'].includes(normalized)) return 'Class completed';
+  if (TERMINAL_REQUEST_STATUSES.includes(normalized)) return 'Request closed';
   return 'Request made';
 }
 
@@ -215,10 +221,10 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     [requestId, sessions],
   );
 
-  const relatedSessionStatus = String(relatedSession?.status || '').toLowerCase();
-  const relatedSessionIsActive = ['waiting_student', 'in_progress', 'in_session'].includes(relatedSessionStatus);
+  const relatedSessionStatus = normalizeRequestStatus(relatedSession?.status);
+  const relatedSessionIsActive = isRequestJoinable(relatedSessionStatus);
   const joinSessionId = relatedSession?.id || request?.sessionId || '';
-  const normalizedStatus = String(request?.status || '').toLowerCase();
+  const normalizedStatus = normalizeRequestStatus(request?.status);
   const hasActiveSession = Boolean(joinSessionId) && (relatedSession ? relatedSessionIsActive : true);
   const canJoin = hasActiveSession && !TERMINAL_REQUEST_STATUSES.includes(normalizedStatus);
   const shouldAutoOpenSession = canJoin && Boolean(joinSessionId);
@@ -227,6 +233,19 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
     if (!shouldAutoOpenSession || !joinSessionId) return;
     if (relatedSession?.meetingProvider === 'gemini_live' || relatedSession?.sessionType === 'ai') {
       navigate({ key: 'SessionRoom', params: { sessionId: joinSessionId, parentTab: 'Sessions' } });
+    } else if (isActiveTrackingStatus(relatedSessionStatus) || isActiveTrackingStatus(normalizedStatus)) {
+      navigate({
+        key: 'SessionScreen',
+        params: {
+          requestId,
+          activeRequestId: requestId,
+          request: request || relatedSession,
+          session: relatedSession,
+          subject: request?.subject || relatedSession?.subject || 'Lesson',
+          topic: request?.topic || relatedSession?.topic || '',
+          parentTab: 'Requests',
+        },
+      });
     } else {
       navigate({
         key: 'ActiveSession',
@@ -239,7 +258,7 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
         },
       });
     }
-  }, [joinSessionId, navigate, relatedSession, request, requestId, shouldAutoOpenSession]);
+  }, [joinSessionId, navigate, normalizedStatus, relatedSession, relatedSessionStatus, request, requestId, shouldAutoOpenSession]);
 
   if (loading) {
     return <LoadingState label="Loading request status" />;

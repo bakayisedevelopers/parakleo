@@ -29,11 +29,7 @@ import {
   subscribeToNotifications,
 } from '../services/notificationService';
 import { subscribeToStudentSessions } from '../services/sessionService';
-import {
-  expireClassRequest,
-  shouldExpireClassRequest,
-  subscribeToStudentRequests,
-} from '../services/classRequestService';
+import { subscribeToStudentRequests } from '../services/classRequestService';
 import { colors } from '../theme/colors';
 import { RATABLE_SESSION_STATUSES } from '../utils/sessionStatus';
 import { getStudentOnboardingStatus } from '../utils/onboarding';
@@ -175,18 +171,84 @@ function getParentTab(routeKey, params) {
   return routeKey;
 }
 
-function resolveNotificationRoute(notification = {}) {
+function normalizeStatus(value) {
+  return String(value || '').toLowerCase();
+}
+
+function isTrackingSessionStatus(status) {
+  return TRACKING_SESSION_REHYDRATION_STATUSES.includes(normalizeStatus(status));
+}
+
+function isActiveSessionStatus(status) {
+  return ACTIVE_SESSION_REHYDRATION_STATUSES.includes(normalizeStatus(status));
+}
+
+function getRequestIdForSession(session = {}, fallbackId = '') {
+  return session?.requestId || session?.activeRequestId || fallbackId || session?.id || '';
+}
+
+function buildTrackingSessionRoute(session = {}, fallbackId = '') {
+  const requestId = getRequestIdForSession(session, fallbackId);
+  return {
+    key: 'SessionScreen',
+    params: {
+      requestId,
+      activeRequestId: requestId,
+      request: session,
+      subject: session?.subject || 'Lesson',
+      topic: session?.topic || '',
+      parentTab: 'Dashboard',
+    },
+  };
+}
+
+function resolveSessionRoute(session = {}, fallbackSessionId = '') {
+  const status = normalizeStatus(session?.status);
+  const sessionId = session?.id || fallbackSessionId;
+
+  if (isActiveSessionStatus(status)) {
+    return {
+      key: 'ActiveSession',
+      params: {
+        sessionId,
+        requestId: getRequestIdForSession(session, sessionId),
+        session,
+        parentTab: 'Dashboard',
+      },
+    };
+  }
+
+  if (isTrackingSessionStatus(status)) {
+    return buildTrackingSessionRoute(session, sessionId);
+  }
+
+  return sessionId
+    ? { key: 'SessionRoom', params: { sessionId, parentTab: 'Sessions' } }
+    : { key: 'Sessions', params: {} };
+}
+
+function getRouteIdentity(route = {}) {
+  const params = route.params || {};
+  const request = params.request || params.session || {};
+  const primaryId = params.sessionId || params.requestId || params.activeRequestId || request?.id || '';
+  const status = request?.status ? normalizeStatus(request.status) : '';
+  const draftSignature = params.isNewRequest
+    ? [params.subject || '', params.topic || '', params.durationMinutes || '', params.estimatedMinutes || ''].join(':')
+    : '';
+  return [route.key || 'Dashboard', primaryId, status, draftSignature].join('|');
+}
+
+function resolveNotificationRoute(notification = {}, context = {}) {
   const targetPath = String(notification?.targetPath || '').trim();
   const type = String(notification?.type || '').toLowerCase();
   const requestId = notification?.requestId || '';
   const sessionId = notification?.sessionId || '';
-
-  if (targetPath.startsWith('/app/session/')) {
-    const targetSessionId = targetPath.split('/app/session/')[1] || sessionId;
-    return targetSessionId
-      ? { key: 'SessionRoom', params: { sessionId: targetSessionId, parentTab: 'Sessions' } }
-      : { key: 'Sessions', params: {} };
-  }
+  const sessions = Array.isArray(context.sessions) ? context.sessions : [];
+  const session = sessions.find((item) => {
+    const itemId = String(item?.id || '');
+    const itemRequestId = String(item?.requestId || item?.activeRequestId || '');
+    return (sessionId && itemId === String(sessionId)) || (requestId && itemRequestId === String(requestId));
+  });
 
   if (['lesson_completed', 'session_completed', 'session_canceled', 'lesson_canceled'].includes(type)) {
     if (sessionId) {
@@ -195,9 +257,25 @@ function resolveNotificationRoute(notification = {}) {
   }
 
   if (['tutor_arrived', 'session_started', 'lesson_started'].includes(type)) {
-    if (sessionId) {
-      return { key: 'ActiveSession', params: { sessionId, parentTab: 'Sessions' } };
+    if (session) {
+      return resolveSessionRoute(session, sessionId);
     }
+    if (sessionId) {
+      return { key: 'ActiveSession', params: { sessionId, parentTab: 'Dashboard' } };
+    }
+  }
+
+  if (targetPath.startsWith('/app/session/')) {
+    const targetSessionId = targetPath.split('/app/session/')[1] || sessionId;
+    if (session) {
+      return resolveSessionRoute(session, targetSessionId);
+    }
+    if (['request_accepted', 'lesson_accepted', 'tutor_accepted', 'tutor_assigned'].includes(type) || requestId) {
+      return buildTrackingSessionRoute({ id: targetSessionId, requestId, status: 'accepted' }, requestId || targetSessionId);
+    }
+    return targetSessionId
+      ? { key: 'SessionRoom', params: { sessionId: targetSessionId, parentTab: 'Sessions' } }
+      : { key: 'Sessions', params: {} };
   }
 
   if (targetPath.includes('/student/payment') || type.includes('payment')) {
@@ -211,7 +289,10 @@ function resolveNotificationRoute(notification = {}) {
   }
 
   if (sessionId) {
-    return { key: 'ActiveSession', params: { sessionId, parentTab: 'Sessions' } };
+    if (session) {
+      return resolveSessionRoute(session, sessionId);
+    }
+    return { key: 'ActiveSession', params: { sessionId, parentTab: 'Dashboard' } };
   }
 
   if (requestId) {
@@ -248,7 +329,6 @@ export function RootNavigator() {
   const [handledRatingSessionIds, setHandledRatingSessionIds] = useState([]);
   const previousSessionStatusesRef = useRef(new Map());
   const hasRehydratedActiveStateRef = useRef(false);
-  const expiringRequestIdsRef = useRef(new Set());
   const ratingTarget = useMemo(() => {
     if (!ratingQueue.length) return null;
     const [nextSessionId] = ratingQueue;
@@ -344,23 +424,6 @@ export function RootNavigator() {
     );
   }, [user?.uid]);
 
-  useEffect(() => {
-    requests.forEach((request) => {
-      const requestId = String(request?.id || '').trim();
-      if (!requestId || !shouldExpireClassRequest(request) || expiringRequestIdsRef.current.has(requestId)) {
-        return;
-      }
-
-      expiringRequestIdsRef.current.add(requestId);
-      expireClassRequest({
-        requestId,
-        reason: 'Request expired because no tutor accepted within 3 minutes.',
-      }).finally(() => {
-        expiringRequestIdsRef.current.delete(requestId);
-      });
-    });
-  }, [requests]);
-
   // BUG-003: Rehydrate active ongoing request or active session on launch / auth ready
   useEffect(() => {
     if (!user?.uid) return;
@@ -371,54 +434,27 @@ export function RootNavigator() {
     if (activeRoute.key !== 'Dashboard') return;
 
     // 1. Check for active ongoing session
-    const activeSession = sessions.find((s) => {
-      const st = String(s?.status || '').toLowerCase();
-      return ACTIVE_SESSION_REHYDRATION_STATUSES.includes(st);
-    });
+    const activeSession = sessions.find((s) => isActiveSessionStatus(s?.status));
 
     if (activeSession) {
       hasRehydratedActiveStateRef.current = true;
-      const targetSessionId = activeSession.id;
-      const targetRequestId = activeSession.requestId || activeSession.id;
-      openRoute({
-        key: 'ActiveSession',
-        params: {
-          sessionId: targetSessionId,
-          requestId: targetRequestId,
-          session: activeSession,
-          parentTab: 'Dashboard',
-        },
-      });
+      openRoute(resolveSessionRoute(activeSession, activeSession.id));
       return;
     }
 
     // 2. Check for accepted/travelling session that belongs on the live tracking screen.
-    const trackingSession = sessions.find((s) => {
-      const st = String(s?.status || '').toLowerCase();
-      return TRACKING_SESSION_REHYDRATION_STATUSES.includes(st);
-    });
+    const trackingSession = sessions.find((s) => isTrackingSessionStatus(s?.status));
 
     if (trackingSession) {
       hasRehydratedActiveStateRef.current = true;
-      const targetRequestId = trackingSession.requestId || trackingSession.id;
-      openRoute({
-        key: 'SessionScreen',
-        params: {
-          requestId: targetRequestId,
-          activeRequestId: targetRequestId,
-          request: trackingSession,
-          subject: trackingSession.subject || 'Lesson',
-          topic: trackingSession.topic || '',
-          parentTab: 'Dashboard',
-        },
-      });
+      openRoute(resolveSessionRoute(trackingSession, trackingSession.id));
       return;
     }
 
     // 3. Check for active ongoing class request
     const activeRequest = requests.find((r) => {
-      const st = String(r?.status || '').toLowerCase();
-      return ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(st) && !shouldExpireClassRequest(r);
+      const st = normalizeStatus(r?.status);
+      return ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(st);
     });
 
     if (activeRequest) {
@@ -441,16 +477,82 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user?.uid) return;
     const hasActiveSession = sessions.some((s) =>
-      ACTIVE_SESSION_REHYDRATION_STATUSES.includes(String(s?.status || '').toLowerCase())
-      || TRACKING_SESSION_REHYDRATION_STATUSES.includes(String(s?.status || '').toLowerCase())
+      isActiveSessionStatus(s?.status) || isTrackingSessionStatus(s?.status)
     );
     const hasActiveRequest = requests.some((r) =>
-      ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(String(r?.status || '').toLowerCase()) && !shouldExpireClassRequest(r)
+      ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(normalizeStatus(r?.status))
     );
     if (!hasActiveSession && !hasActiveRequest) {
       hasRehydratedActiveStateRef.current = false;
     }
   }, [requests, sessions, user?.uid]);
+
+  // Reactive Auto-Navigation on Live Status Changes:
+  // 1) Lesson starts (in_session, in_progress): auto-navigate to ActiveSession
+  // 2) Tutor arrives or prepares (arrived, waiting_student, preparing_for_lesson): auto-navigate to SessionScreen
+  useEffect(() => {
+    if (!user?.uid || !onboardingStatus.complete) return;
+
+    // 1. Check for active lesson in progress (in_session, in_progress, ending_requested)
+    const activeLessonSession = sessions.find((s) => isActiveSessionStatus(s?.status));
+    const activeLessonRequest = requests.find((r) =>
+      ['in_session', 'in_progress', 'ending_requested'].includes(normalizeStatus(r?.status))
+    );
+
+    if (activeLessonSession || activeLessonRequest) {
+      if (activeRoute.key !== 'ActiveSession' && activeRoute.key !== 'SessionSummary') {
+        const effSessionId = activeLessonSession?.id
+          || activeLessonRequest?.sessionId
+          || activeLessonRequest?.id;
+        const effRequestId = activeLessonSession?.requestId
+          || activeLessonRequest?.id
+          || effSessionId;
+
+        openRoute({
+          key: 'ActiveSession',
+          params: {
+            sessionId: effSessionId,
+            requestId: effRequestId,
+            session: activeLessonSession || activeLessonRequest,
+            request: activeLessonRequest || activeLessonSession,
+            parentTab: 'Dashboard',
+          },
+        });
+      }
+      return;
+    }
+
+    // 2. Check for tutor arrived / waiting / preparing
+    const arrivedSession = sessions.find((s) =>
+      ['arrived', 'waiting_student', 'preparing_for_lesson'].includes(normalizeStatus(s?.status))
+    );
+    const arrivedRequest = requests.find((r) =>
+      ['arrived', 'waiting_student', 'preparing_for_lesson'].includes(normalizeStatus(r?.status))
+    );
+
+    if (arrivedSession || arrivedRequest) {
+      if (
+        activeRoute.key !== 'SessionScreen' &&
+        activeRoute.key !== 'Session' &&
+        activeRoute.key !== 'ActiveSession' &&
+        activeRoute.key !== 'SessionSummary'
+      ) {
+        const target = arrivedRequest || arrivedSession;
+        const effRequestId = target?.id || target?.requestId || target?.activeRequestId;
+        openRoute({
+          key: 'SessionScreen',
+          params: {
+            requestId: effRequestId,
+            activeRequestId: effRequestId,
+            request: target,
+            subject: target?.subject || 'Lesson',
+            topic: target?.topic || '',
+            parentTab: 'Dashboard',
+          },
+        });
+      }
+    }
+  }, [activeRoute.key, onboardingStatus.complete, requests, sessions, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -534,10 +636,7 @@ export function RootNavigator() {
         : { key: target?.key || 'Dashboard', params: target?.params || {} };
 
     const currentRoute = activeRouteRef.current;
-    if (
-      nextRoute.key === currentRoute?.key &&
-      JSON.stringify(nextRoute.params || {}) === JSON.stringify(currentRoute?.params || {})
-    ) {
+    if (getRouteIdentity(nextRoute) === getRouteIdentity(currentRoute)) {
       return;
     }
 
@@ -623,14 +722,10 @@ export function RootNavigator() {
     activeRoute.key === 'SessionSummary';
   const showBottomNavigation = onboardingStatus.complete && !REQUEST_FLOW_ROUTES.has(activeRoute.key) && activeRoute.key !== 'Onboarding';
   const ongoingRequest = requests.find((request) =>
-    ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(String(request?.status || '').toLowerCase()) && !shouldExpireClassRequest(request)
+    ACTIVE_REQUEST_REHYDRATION_STATUSES.includes(normalizeStatus(request?.status))
   );
-  const ongoingSession = sessions.find((session) =>
-    [
-      ...TRACKING_SESSION_REHYDRATION_STATUSES,
-      ...ACTIVE_SESSION_REHYDRATION_STATUSES,
-    ].includes(String(session?.status || '').toLowerCase())
-  );
+  const ongoingActiveSession = sessions.find((session) => isActiveSessionStatus(session?.status));
+  const ongoingTrackingSession = sessions.find((session) => isTrackingSessionStatus(session?.status));
   const unreadCount = notifications.filter((item) => !item?.read).length;
 
   if (initializing) {
@@ -655,7 +750,14 @@ export function RootNavigator() {
       <View style={styles.shell}>
         {isFullscreenRoute ? (
           <View style={[styles.screenContent, showBottomNavigation && activeRoute.key !== 'Dashboard' && styles.screenWithNavigation]}>
-            <ActiveScreen navigate={openRoute} goBack={goBack} route={activeRoute} unreadCount={unreadCount} />
+            <ActiveScreen
+              navigate={openRoute}
+              goBack={goBack}
+              route={activeRoute}
+              unreadCount={unreadCount}
+              requests={requests}
+              sessions={sessions}
+            />
           </View>
         ) : (
           <SafeAreaView style={styles.contentSafe}>
@@ -684,10 +786,12 @@ export function RootNavigator() {
                 notifications={notifications}
                 isLoading={notificationsLoading}
                 unreadCount={unreadCount}
+                requests={requests}
+                sessions={sessions}
                 onMarkAllRead={() => markAllNotificationsRead(user?.uid).catch(() => null)}
                 onOpenNotification={async (notification) => {
                   await markNotificationRead(notification?.id).catch(() => null);
-                  openRoute(resolveNotificationRoute(notification));
+                  openRoute(resolveNotificationRoute(notification, { sessions, requests }));
                 }}
               />
             </ScrollView>
@@ -699,7 +803,8 @@ export function RootNavigator() {
             navigate={openRoute}
             parentTab={activeRoute.key}
             activeRequest={ongoingRequest}
-            activeSession={ongoingSession}
+            activeSession={ongoingActiveSession}
+            trackingSession={ongoingTrackingSession}
           >
             {(actions) => (
               <StudentBottomNavigation

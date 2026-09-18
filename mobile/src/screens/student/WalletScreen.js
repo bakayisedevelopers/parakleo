@@ -169,7 +169,7 @@ export function WalletScreen({ navigate, goBack, unreadCount = 0 }) {
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor="#f0fdf4" />
       <SafeAreaView style={styles.safeContainer}>
-        {/* Top Header with Back Button and Notifications */}
+        {/* Top Header with Back Button, Payment Title, and Notifications */}
         <View style={styles.topHeader}>
           <Pressable
             accessibilityLabel="Back"
@@ -179,6 +179,7 @@ export function WalletScreen({ navigate, goBack, unreadCount = 0 }) {
           >
             <Ionicons name="arrow-back" size={24} color="#0f172a" />
           </Pressable>
+          <Text style={styles.headerTitle}>Payment</Text>
           <NotificationsButton
             navigate={navigate}
             unreadCount={unreadCount}
@@ -186,8 +187,6 @@ export function WalletScreen({ navigate, goBack, unreadCount = 0 }) {
         </View>
 
         <ScrollView contentContainerStyle={styles.container} bounces={false}>
-          {/* Title */}
-          <Text style={styles.screenTitle}>Payment</Text>
 
         {/* Balance Card with Pastel Mint Background */}
         <View style={styles.balanceCard}>
@@ -422,6 +421,11 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     width: 40,
+  },
+  headerTitle: {
+    color: '#0f172a',
+    fontSize: 18,
+    fontWeight: '700',
   },
   screenTitle: {
     color: '#0f172a',

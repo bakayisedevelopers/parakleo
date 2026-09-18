@@ -67,27 +67,9 @@ export function shouldExpireClassRequest(request = null, nowMs = Date.now()) {
 
 export async function expireClassRequest({ requestId, reason = 'Request expired because no tutor accepted in time.' } = {}) {
   if (!requestId) return;
-
-  const { db } = getFirebaseClients();
-  const expiredAt = Date.now();
-  await updateDoc(doc(db, 'classRequests', requestId), {
-    status: 'expired',
-    statusDetail: reason,
-    expiredAt,
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
-    updatedAt: serverTimestamp(),
-  }).catch((e) => {
-    console.warn('[expireClassRequest] updateDoc warning:', e);
-  });
-
-  await updateLiveTracking(requestId, {
-    status: 'expired',
-    statusDetail: reason,
-    closedAtMs: expiredAt,
-    closedReason: reason,
-    updatedAtMs: expiredAt,
-  }).catch(() => null);
+  // Expiry is advanced by the backend lifecycle trigger/sweeper. Keeping this
+  // as a no-op prevents the student app from racing Cloud Functions.
+  console.info('[expireClassRequest] Backend lifecycle owns request expiry.', { requestId, reason });
 }
 
 export function computeHaversineDistanceKm(coord1, coord2) {
@@ -243,10 +225,11 @@ export async function createClassRequest(payload) {
     studentAddress: meetingAddress,
     locationAddress: meetingAddress,
     address: meetingAddress,
-    studentLocation,
-    location: studentLocation,
-    destination: studentLocation,
-    coordinates: studentLocation,
+    studentLocation: payload.destination || payload.meetingCoordinates || studentLocation,
+    location: payload.destination || payload.meetingCoordinates || studentLocation,
+    destination: payload.destination || payload.meetingCoordinates || studentLocation,
+    meetingCoordinates: payload.destination || payload.meetingCoordinates || studentLocation,
+    coordinates: payload.destination || payload.meetingCoordinates || studentLocation,
     paymentMethod: payload.paymentMethod || payload.paymentMethodType || (payload.selectedCardId === 'cash' ? 'cash' : 'card'),
     paymentMethodType: payload.paymentMethodType || (payload.selectedCardId === 'cash' ? 'cash' : 'card'),
     selectedCardId: payload.selectedCardId || 'cash',
@@ -314,61 +297,24 @@ export async function createClassRequest(payload) {
     const result = await response.json().catch(() => ({}));
     if (response.ok && result?.success !== false && result?.requestId) {
       createdRequestId = result.requestId;
-      await updateDoc(doc(db, 'classRequests', result.requestId), {
-        createdAtMs,
-        requestExpiresAt,
-        expiresAt: requestExpiresAt,
-        ...(initialOfferTutorId ? {
-          status: initialStatus,
-          currentOfferTutorId: initialOfferTutorId,
-          tutorQueue: initialQueue,
-          offerExpiresAt: initialExpiresAt,
-          statusDetail: initialDetail,
-        } : {}),
-        updatedAt: serverTimestamp(),
-      }).catch(() => null);
     } else {
-      if (response.status >= 400 && response.status < 500) {
-        throw new Error(result?.message || 'Unable to submit request. Please review your payment method and try again.');
-      }
-      console.warn('[classRequestService] submitClassRequest endpoint non-ok, falling back to direct Firestore:', result?.message);
+      throw new Error(result?.message || 'Unable to submit request right now.');
     }
   } catch (endpointErr) {
-    if (String(endpointErr?.message || '').includes('payment') || String(endpointErr?.message || '').includes('card')) {
-      throw endpointErr;
-    }
-    console.warn('[classRequestService] submitClassRequest network error, falling back to direct Firestore:', endpointErr?.message);
+    throw endpointErr;
   }
 
-  // Resilient Direct Firestore Fallback if endpoint fails
-  if (!createdRequestId) {
-    try {
-      const docRef = await addDoc(collection(db, 'classRequests'), {
-        ...requestBody,
-        paymentHold: null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      createdRequestId = docRef.id;
-    } catch (firestoreErr) {
-      console.error('[classRequestService] Direct Firestore creation error:', firestoreErr?.message);
-      throw new Error(firestoreErr?.message || 'Unable to submit request right now.');
-    }
-  }
-
-  // Ensure RTDB live tracking record is initialized with status, studentLocation, and timestamps
+  const resolvedDestination = payload.destination || payload.meetingCoordinates || studentLocation;
   await updateLiveTracking(createdRequestId, {
     requestId: createdRequestId,
     studentId,
-    tutorId: initialOfferTutorId,
-    studentLocation,
+    studentLocation: resolvedDestination,
+    destination: resolvedDestination,
+    meetingCoordinates: resolvedDestination,
     studentAddress: meetingAddress,
     meetingAddress,
     locationOption: payload.locationOption || 'My Location',
     tutorLocation: null,
-    destination: studentLocation,
-    status: initialStatus,
-    statusDetail: initialDetail,
     mode: payload.mode || 'in_person',
     safetySnapshot: requestBody.safetySnapshot,
     isMinor,
@@ -392,30 +338,22 @@ export function subscribeToStudentRequests(studentId, callback, onError) {
   const requestsQuery = query(
     collection(db, 'classRequests'),
     where('studentId', '==', studentId),
-    orderBy('createdAt', 'desc'),
   );
 
   return onSnapshot(
     requestsQuery,
-    (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+    (snapshot) => {
+      const items = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => {
+          const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt || a.createdAtMs || 0);
+          const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt || b.createdAtMs || 0);
+          return bTime - aTime;
+        });
+      callback(items);
+    },
     (err) => {
-      // If composite index is missing or building, fallback to single field query
-      if (err?.code === 'failed-precondition' || String(err?.message || '').toLowerCase().includes('index')) {
-        const fallbackQuery = query(collection(db, 'classRequests'), where('studentId', '==', studentId));
-        return onSnapshot(
-          fallbackQuery,
-          (snapshot) => {
-            const items = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-            items.sort((a, b) => {
-              const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt || 0);
-              const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt || 0);
-              return bTime - aTime;
-            });
-            callback(items);
-          },
-          onError,
-        );
-      }
+      console.warn('[classRequestService] subscribeToStudentRequests error:', err?.message || err);
       if (typeof onError === 'function') onError(err);
     },
   );
@@ -437,58 +375,33 @@ export function subscribeToRequestById(requestId, callback, onError) {
 
 export async function cancelClassRequest({ requestId, canceledBy, reason }) {
   const trimmedReason = String(reason || '').trim();
-  const { db } = getFirebaseClients();
-  const canceledAt = Date.now();
-  const requestPatch = {
-    status: 'canceled',
-    statusDetail: canceledBy === 'tutor' ? 'Request canceled by tutor.' : 'Request canceled by student.',
-    canceledAt,
-    canceledBy: canceledBy || 'student',
-    canceledReason: trimmedReason,
-    currentOfferTutorId: null,
-    offerExpiresAt: null,
-    updatedAt: serverTimestamp(),
-  };
+  const { auth } = getFirebaseClients();
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('cancelInPersonLesson');
 
-  await updateDoc(doc(db, 'classRequests', requestId), requestPatch).catch((e) => {
-    console.warn('[cancelClassRequest] updateDoc warning:', e);
-  });
-
-  await updateLiveTracking(requestId, {
-    status: 'canceled',
-    canceledBy: canceledBy || 'student',
-    closedAtMs: canceledAt,
-    closedReason: trimmedReason,
-    updatedAtMs: canceledAt,
-  }).catch(() => null);
-
-  const sessionsQuery = query(collection(db, 'sessions'), where('requestId', '==', requestId));
-  const sessionsSnapshot = await getDocs(sessionsQuery).catch(() => ({ docs: [] }));
-  if (!sessionsSnapshot.docs?.length) {
-    return;
+  if (!requestId) {
+    throw new Error('Missing request ID.');
+  }
+  if (!idToken || !endpoint) {
+    throw new Error('Unable to cancel request while offline. Please try again.');
   }
 
-  const batch = writeBatch(db);
-  let updatesCount = 0;
-
-  sessionsSnapshot.docs.forEach((sessionDoc) => {
-    const session = sessionDoc.data() || {};
-    if (!['waiting_student', 'in_progress', 'in_session'].includes(String(session.status || '').toLowerCase())) {
-      return;
-    }
-
-    updatesCount += 1;
-    batch.update(sessionDoc.ref, {
-      status: 'canceled',
-      endedAt: canceledAt,
-      canceledAt,
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requestId,
+      sessionId: requestId,
       canceledBy: canceledBy || 'student',
-      canceledReason: trimmedReason,
-      updatedAt: serverTimestamp(),
-    });
+      reason: trimmedReason || 'Canceled by student',
+    }),
   });
-
-  if (updatesCount) {
-    await batch.commit().catch(() => null);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || 'Unable to cancel request right now.');
   }
+  return payload;
 }

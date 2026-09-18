@@ -59,6 +59,53 @@ export async function getBestAvailableLocation(user = {}) {
   return currentLocation || getProfileLocation(user);
 }
 
+export async function geocodeAddress(addressString) {
+  const query = String(addressString || '').trim();
+  if (!query || query.toLowerCase() === 'current location' || query.toLowerCase() === 'my location') {
+    return null;
+  }
+  try {
+    const results = await Location.geocodeAsync(query);
+    if (Array.isArray(results) && results.length > 0) {
+      const best = results[0];
+      return normalizeLocation(best, 'geocoded');
+    }
+  } catch (err) {
+    console.warn('[geocodeAddress:error]', err?.message || err);
+  }
+  return null;
+}
+
+export async function resolveLocationFromOption(locationOption = 'My Location', { user = {}, customAddress = '', studentHomeAddress = '' } = {}) {
+  const normOption = String(locationOption || 'My Location').trim();
+
+  if (normOption === 'Home') {
+    const homeCoords = normalizeLocation(user?.homeCoordinates || user?.homeLocation);
+    if (homeCoords) {
+      return homeCoords;
+    }
+    const cleanHomeAddress = String(studentHomeAddress || user?.homeAddress || user?.address || '').trim();
+    if (cleanHomeAddress) {
+      const geocoded = await geocodeAddress(cleanHomeAddress);
+      if (geocoded) return geocoded;
+    }
+    return (await getBestAvailableLocation(user).catch(() => null)) || getProfileLocation(user);
+  }
+
+  if (normOption === 'Other') {
+    const cleanCustom = String(customAddress || '').trim();
+    if (cleanCustom) {
+      const geocoded = await geocodeAddress(cleanCustom);
+      if (geocoded) return geocoded;
+    }
+    return (await getBestAvailableLocation(user).catch(() => null)) || getProfileLocation(user);
+  }
+
+  // 'My Location' default
+  const live = await getBestAvailableLocation(user).catch(() => null);
+  return live || getProfileLocation(user);
+}
+
 export async function saveUserLiveLocation(uid, location) {
   const normalized = normalizeLocation(location, location?.source || 'device');
   if (!uid || !normalized) return null;
@@ -76,3 +123,5 @@ export async function saveUserLiveLocation(uid, location) {
 
   return normalized;
 }
+
+export { normalizeLocation };

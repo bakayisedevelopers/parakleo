@@ -20,74 +20,86 @@ export function SessionHistoryCard({ session, onOpenSession }) {
   const tutorEarnings = Number(session.tutorPayoutAmount || (session.totalAmount ? session.totalAmount * TUTOR_PAYOUT_RATE : 0));
 
   return (
-    <Card style={styles.card}>
-      {/* Header Badges */}
-      <View style={styles.topRow}>
-        <View style={styles.badgeGroup}>
-          <Badge variant="emerald">{session.subject || 'Mathematics'}</Badge>
-          <Badge variant={session.mode === 'in_person' ? 'amber' : 'sky'}>
-            {session.mode === 'in_person' ? '📍 In-Person' : '💻 Online'}
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => onOpenSession?.(session)}
+      style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+    >
+      <Card style={styles.card}>
+        {/* Header Badges */}
+        <View style={styles.topRow}>
+          <View style={styles.badgeGroup}>
+            <Badge variant="emerald">{session.subject || 'Mathematics'}</Badge>
+            <Badge variant={session.mode === 'in_person' ? 'amber' : 'sky'}>
+              {session.mode === 'in_person' ? '📍 In-Person' : '💻 Online'}
+            </Badge>
+          </View>
+          <Badge variant={badgeVariant}>
+            {isCompleted ? 'Completed' : isInProgress ? 'In Progress' : isCancelled ? 'Cancelled' : (session.status || 'Active')}
           </Badge>
         </View>
-        <Badge variant={badgeVariant}>
-          {isCompleted ? 'Completed' : isInProgress ? 'In Progress' : isCancelled ? 'Cancelled' : (session.status || 'Active')}
-        </Badge>
-      </View>
 
-      {/* Topic & Description */}
-      <Text style={styles.topicText}>{session.topic || 'Tutoring Class'}</Text>
-      <Text style={styles.metaRowText}>
-        {formattedDate} • Student: <Text style={styles.bold}>{session.studentName || 'Student'}</Text>
-      </Text>
+        {/* Topic & Description */}
+        <Text style={styles.topicText}>{session.topic || 'Tutoring Class'}</Text>
+        <Text style={styles.metaRowText}>
+          {formattedDate} • Student: <Text style={styles.bold}>{session.studentName || 'Student'}</Text>
+        </Text>
 
-      {/* Metrics Row (Duration & Earnings) */}
-      <View style={styles.metricsRow}>
-        <View style={styles.metricItem}>
-          <Ionicons name="time-outline" size={15} color={colors.textMuted} />
-          <Text style={styles.metricText}>
-            {isCompleted ? `${billedMinutes} Mins Taught` : session.duration || `${session.durationMinutes || 10} Mins`}
-          </Text>
-        </View>
-
-        {tutorEarnings > 0 ? (
+        {/* Metrics Row (Duration & Earnings) */}
+        <View style={styles.metricsRow}>
           <View style={styles.metricItem}>
-            <Ionicons name="cash-outline" size={15} color={colors.brandDark} />
-            <Text style={[styles.metricText, styles.earningsText]}>
-              +R{tutorEarnings.toFixed(2)} Earned
+            <Ionicons name="time-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.metricText}>
+              {isCompleted ? `${billedMinutes} Mins Taught` : session.duration || `${session.durationMinutes || 10} Mins`}
             </Text>
           </View>
-        ) : null}
-      </View>
 
-      {/* Student Rating & Feedback (if rated) */}
-      {session.rating?.score || session.studentRating ? (
-        <View style={styles.feedbackBox}>
-          <View style={styles.ratingStars}>
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Ionicons
-                key={`rating-star-${star}`}
-                name="star"
-                size={14}
-                color={star <= Number(session.rating?.score || session.studentRating) ? '#f59e0b' : colors.border}
-              />
-            ))}
-          </View>
-          {session.rating?.feedback || session.studentFeedback ? (
-            <Text style={styles.feedbackText}>
-              "{session.rating?.feedback || session.studentFeedback}"
-            </Text>
+          {tutorEarnings > 0 ? (
+            <View style={styles.metricItem}>
+              <Ionicons name="cash-outline" size={15} color={colors.brandDark} />
+              <Text style={[styles.metricText, styles.earningsText]}>
+                +R{tutorEarnings.toFixed(2)} Earned
+              </Text>
+            </View>
           ) : null}
         </View>
-      ) : null}
 
-      {/* Action button */}
-      {isInProgress && (
-        <Pressable onPress={() => onOpenSession(session.id)} style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>Rejoin Live Classroom</Text>
-          <Ionicons name="arrow-forward" size={15} color="#ffffff" />
-        </Pressable>
-      )}
-    </Card>
+        {/* Student Rating & Feedback (if rated) */}
+        {session.rating?.score || session.studentRating ? (
+          <View style={styles.feedbackBox}>
+            <View style={styles.ratingStars}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Ionicons
+                  key={`rating-star-${star}`}
+                  name="star"
+                  size={14}
+                  color={star <= Number(session.rating?.score || session.studentRating) ? '#f59e0b' : colors.border}
+                />
+              ))}
+            </View>
+            {session.rating?.feedback || session.studentFeedback ? (
+              <Text style={styles.feedbackText}>
+                "{session.rating?.feedback || session.studentFeedback}"
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Action button if in progress */}
+        {isInProgress && (
+          <Pressable onPress={() => onOpenSession?.(session)} style={styles.actionButton}>
+            <Text style={styles.actionButtonText}>Rejoin Live Classroom</Text>
+            <Ionicons name="arrow-forward" size={15} color="#ffffff" />
+          </Pressable>
+        )}
+
+        {/* View Details Link */}
+        <View style={styles.viewDetailsRow}>
+          <Text style={styles.viewDetailsText}>View Request Details</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.brandDark} />
+        </View>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -178,5 +190,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  viewDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMuted,
+  },
+  viewDetailsText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brandDark,
   },
 });

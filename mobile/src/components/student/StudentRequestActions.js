@@ -31,7 +31,7 @@ function getAttachmentPayload(file) {
   };
 }
 
-export function StudentRequestActions({ children, navigate, parentTab, activeRequest, activeSession }) {
+export function StudentRequestActions({ children, navigate, parentTab, activeRequest, activeSession, trackingSession }) {
   const { subjectOptions } = useSubjectCatalog();
 
   const [pickerMode, setPickerMode] = useState('');
@@ -55,6 +55,21 @@ export function StudentRequestActions({ children, navigate, parentTab, activeReq
   function resumeExistingLesson() {
     if (activeSession) {
       navigate({ key: 'ActiveSession', params: { sessionId: activeSession.id, session: activeSession, parentTab } });
+      return true;
+    }
+    if (trackingSession) {
+      const requestId = trackingSession.requestId || trackingSession.activeRequestId || trackingSession.id;
+      navigate({
+        key: 'SessionScreen',
+        params: {
+          requestId,
+          activeRequestId: requestId,
+          request: trackingSession,
+          subject: trackingSession.subject || 'Lesson',
+          topic: trackingSession.topic || '',
+          parentTab,
+        },
+      });
       return true;
     }
     if (activeRequest) {
@@ -245,24 +260,28 @@ export function StudentRequestActions({ children, navigate, parentTab, activeReq
         onDescribe: () => { if (!resumeExistingLesson()) setIsDescribeOpen(true); },
       })}
       {/* Attachment Picker Modal (Camera / Upload File) */}
-      <AttachmentPickerModal
-        visible={Boolean(pickerMode)}
-        mode={pickerMode}
-        onCancel={() => setPickerMode('')}
-        onError={(errMsg) => {
-          setPickerMode('');
-          setError(errMsg);
-        }}
-        onFilesSelected={handlePickedFiles}
-      />
+      {pickerMode ? (
+        <AttachmentPickerModal
+          visible
+          mode={pickerMode}
+          onCancel={() => setPickerMode('')}
+          onError={(errMsg) => {
+            setPickerMode('');
+            setError(errMsg);
+          }}
+          onFilesSelected={handlePickedFiles}
+        />
+      ) : null}
 
       {/* Describe Request Pop-up Modal */}
-      <DescribeRequestModal
-        visible={isDescribeOpen}
-        onClose={() => setIsDescribeOpen(false)}
-        onSubmit={handleDescribeSubmit}
-        isPreparing={isPreparingReview}
-      />
+      {isDescribeOpen ? (
+        <DescribeRequestModal
+          visible
+          onClose={() => setIsDescribeOpen(false)}
+          onSubmit={handleDescribeSubmit}
+          isPreparing={isPreparingReview}
+        />
+      ) : null}
 
       {/* Processing / OCR Analyzing Overlay */}
       <Modal animationType="fade" transparent visible={isProcessing} onRequestClose={() => {}}>

@@ -34,7 +34,7 @@ import {
   formatRand,
   LESSON_DURATION_OPTIONS,
 } from '../../utils/pricing';
-import { ACTIVE_REQUEST_STATUSES, getRequestStatusMeta } from '../../utils/requestStatus';
+import { ACTIVE_REQUEST_STATUSES, getRequestStatusMeta, normalizeRequestStatus } from '../../utils/requestStatus';
 
 const QUICK_REQUEST_SUGGESTIONS = [
   { label: 'I need help with homework', value: 'I need help with homework.' },
@@ -249,8 +249,8 @@ export function StudentRequestComposer({
   const paymentMethods = user?.paymentMethods || [];
   const freeMinutesRemaining = Number(user?.freeMinutesRemaining || 0);
   const onboardingStatus = getStudentOnboardingStatus(user);
-  const activeOrOngoingRequest = requests.find((request) => ACTIVE_REQUEST_STATUSES.includes(request.status));
-  const latestOpenSession = sessions.find((session) => ['waiting_student', 'in_progress', 'in_session'].includes(session.status));
+  const activeOrOngoingRequest = requests.find((request) => ACTIVE_REQUEST_STATUSES.includes(normalizeRequestStatus(request.status)));
+  const latestOpenSession = sessions.find((session) => ACTIVE_REQUEST_STATUSES.includes(normalizeRequestStatus(session.status)));
   const flowState = getRequestFlowState({
     onboardingComplete: onboardingStatus.complete,
     latestOpenSession,
