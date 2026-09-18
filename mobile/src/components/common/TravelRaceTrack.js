@@ -254,6 +254,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
     marginHorizontal: 16,
+    alignSelf: 'stretch',
     marginTop: 10,
     marginBottom: 6,
   },

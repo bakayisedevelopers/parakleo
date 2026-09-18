@@ -1519,7 +1519,7 @@ const styles = StyleSheet.create({
     paddingTop: 108,
     paddingBottom: 24,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'stretch',
     elevation: 0,
     zIndex: 0,
   },

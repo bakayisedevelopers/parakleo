@@ -888,10 +888,11 @@ const styles = StyleSheet.create({
   middleTrackContainer: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'stretch',
     paddingTop: 108,
     paddingBottom: 16,
     position: 'relative',
+    width: '100%',
   },
   topBarWrap: {
     elevation: 210,
