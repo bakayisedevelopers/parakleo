@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
-import { subscribeToRequestById } from '../../services/classRequestService';
+import { confirmCashCollectionService, subscribeToRequestById } from '../../services/classRequestService';
+import { clearUserActiveState } from '../../services/userService';
 import {
   submitSessionRating,
   subscribeToSessionById,
@@ -43,7 +44,7 @@ function formatRand(amount) {
 }
 
 export function TutorSessionSummaryScreen({ route, navigate, goBack }) {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const params = route?.params || {};
   const sessionId = String(params.sessionId || '').trim();
   const requestId = String(params.requestId || '').trim();
@@ -51,6 +52,21 @@ export function TutorSessionSummaryScreen({ route, navigate, goBack }) {
   const [session, setSession] = useState(params.session || null);
   const [request, setRequest] = useState(params.request || null);
   const [loading, setLoading] = useState(!params.session);
+
+  // Clear tutor active state on summary screen mount so tutor is never stuck
+  useEffect(() => {
+    if (user?.uid) {
+      setUser?.((prev) => ({
+        ...prev,
+        activeClassRequestId: null,
+        activeSessionId: null,
+      }));
+      clearUserActiveState(user.uid).catch(() => null);
+    }
+  }, [user?.uid, setUser]);
+
+  // Cash Confirmation State
+  const [confirmingCash, setConfirmingCash] = useState(false);
 
   // Rating State
   const [ratingStars, setRatingStars] = useState(5);
@@ -167,11 +183,71 @@ export function TutorSessionSummaryScreen({ route, navigate, goBack }) {
     }
   };
 
+  const isCashPayment = session?.paymentMethod === 'cash'
+    || request?.paymentMethod === 'cash'
+    || session?.selectedCardId === 'cash'
+    || request?.selectedCardId === 'cash'
+    || session?.paymentMethodType === 'cash'
+    || request?.paymentMethodType === 'cash'
+    || session?.pricingSnapshot?.paymentMethod === 'cash'
+    || request?.pricingSnapshot?.paymentMethod === 'cash';
+
+  const totalAmountDue = Number(
+    session?.totalAmount
+    ?? request?.totalAmount
+    ?? session?.cashAmountDue
+    ?? request?.cashAmountDue
+    ?? snapshot?.finalAmount
+    ?? snapshot?.totalAmount
+    ?? 0
+  );
+
+  const cashStatus = useMemo(() => {
+    if (session?.cashCollected === true || request?.cashCollected === true || session?.paymentStatus === 'paid') {
+      return 'collected';
+    }
+    if (session?.cashCollected === false || request?.cashCollected === false || session?.paymentStatus === 'wallet_debt_recorded') {
+      return 'uncollected';
+    }
+    return null;
+  }, [session?.cashCollected, session?.paymentStatus, request?.cashCollected]);
+
+  const handleConfirmCash = async (collected) => {
+    if (confirmingCash) return;
+    setConfirmingCash(true);
+    try {
+      await confirmCashCollectionService({
+        sessionId: session?.id || sessionId,
+        requestId: effectiveRequestId,
+        collected,
+      });
+      setSession((prev) => prev ? {
+        ...prev,
+        cashCollected: collected,
+        paymentStatus: collected ? 'paid' : 'wallet_debt_recorded',
+      } : prev);
+      Alert.alert(
+        collected ? 'Cash Payment Received' : 'Student Wallet Charged',
+        collected
+          ? `Marked R${totalAmountDue.toFixed(2)} as collected from student in cash.`
+          : `R${totalAmountDue.toFixed(2)} has been recorded as debt on the student’s wallet.`
+      );
+    } catch (err) {
+      Alert.alert('Error', err?.message || 'Unable to record cash confirmation.');
+    } finally {
+      setConfirmingCash(false);
+    }
+  };
+
   const handleGoHome = () => {
+    setUser?.((prev) => ({ ...prev, activeClassRequestId: null, activeSessionId: null }));
+    clearUserActiveState(user?.uid).catch(() => null);
     navigate?.('Dashboard');
   };
 
   const handleGoClasses = () => {
+    setUser?.((prev) => ({ ...prev, activeClassRequestId: null, activeSessionId: null }));
+    clearUserActiveState(user?.uid).catch(() => null);
     navigate?.('MyClasses');
   };
 
@@ -234,6 +310,80 @@ export function TutorSessionSummaryScreen({ route, navigate, goBack }) {
               </Text>
             </View>
           )}
+
+          {/* Cash Payment Confirmation Card */}
+          {isCashPayment && totalAmountDue > 0 ? (
+            <View style={styles.cashCard}>
+              <View style={styles.cashHeaderRow}>
+                <Ionicons name="cash-outline" size={24} color="#059669" />
+                <View style={styles.cashHeaderTextWrap}>
+                  <Text style={styles.cashTitle}>Cash Payment</Text>
+                  <Text style={styles.cashSubtitle}>Amount Due: {formatRand(totalAmountDue)}</Text>
+                </View>
+                {cashStatus ? (
+                  <View style={[styles.cashBadge, cashStatus === 'collected' ? styles.cashBadgePaid : styles.cashBadgeDebt]}>
+                    <Text style={[styles.cashBadgeText, cashStatus === 'collected' ? styles.cashBadgeTextPaid : styles.cashBadgeTextDebt]}>
+                      {cashStatus === 'collected' ? '✓ Received' : '⚠ Charged to Debt'}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {cashStatus ? (
+                <View style={[styles.cashStatusBanner, cashStatus === 'collected' ? styles.cashStatusPaidBanner : styles.cashStatusDebtBanner]}>
+                  <Ionicons
+                    name={cashStatus === 'collected' ? 'checkmark-circle' : 'alert-circle'}
+                    size={18}
+                    color={cashStatus === 'collected' ? '#059669' : '#d97706'}
+                  />
+                  <Text style={[styles.cashStatusBannerText, cashStatus === 'collected' ? styles.cashStatusPaidText : styles.cashStatusDebtText]}>
+                    {cashStatus === 'collected'
+                      ? `You confirmed receiving ${formatRand(totalAmountDue)} in cash from ${studentName}.`
+                      : `You marked cash as uncollected. ${formatRand(totalAmountDue)} was loaded to ${studentName}’s wallet debt.`}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.cashActionSection}>
+                  <Text style={styles.cashPromptText}>
+                    Did you collect {formatRand(totalAmountDue)} in cash from {studentName}?
+                  </Text>
+                  <View style={styles.cashButtonRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={confirmingCash}
+                      onPress={() => handleConfirmCash(true)}
+                      style={[styles.cashBtn, styles.cashBtnCollect, confirmingCash && styles.buttonDisabled]}
+                    >
+                      {confirmingCash ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark" size={16} color="#ffffff" />
+                          <Text style={styles.cashBtnTextCollect}>Yes, Collected</Text>
+                        </>
+                      )}
+                    </Pressable>
+
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={confirmingCash}
+                      onPress={() => handleConfirmCash(false)}
+                      style={[styles.cashBtn, styles.cashBtnUncollected, confirmingCash && styles.buttonDisabled]}
+                    >
+                      {confirmingCash ? (
+                        <ActivityIndicator size="small" color="#b91c1c" />
+                      ) : (
+                        <>
+                          <Ionicons name="close" size={16} color="#b91c1c" />
+                          <Text style={styles.cashBtnTextUncollected}>No, Not Collected</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+            </View>
+          ) : null}
 
           {/* 2. Student Mini-Profile */}
           <View style={styles.studentCard}>
@@ -967,5 +1117,131 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     marginLeft: 8,
+  },
+  cashCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#a7f3d0',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 16,
+  },
+  cashHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cashHeaderTextWrap: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  cashTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#064e3b',
+  },
+  cashSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#059669',
+    marginTop: 2,
+  },
+  cashBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  cashBadgePaid: {
+    backgroundColor: '#d1fae5',
+  },
+  cashBadgeDebt: {
+    backgroundColor: '#fef3c7',
+  },
+  cashBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cashBadgeTextPaid: {
+    color: '#065f46',
+  },
+  cashBadgeTextDebt: {
+    color: '#92400e',
+  },
+  cashStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  cashStatusPaidBanner: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  cashStatusDebtBanner: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  cashStatusBannerText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginLeft: 8,
+    flex: 1,
+  },
+  cashStatusPaidText: {
+    color: '#166534',
+  },
+  cashStatusDebtText: {
+    color: '#92400e',
+  },
+  cashActionSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  cashPromptText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 10,
+  },
+  cashButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cashBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cashBtnCollect: {
+    backgroundColor: '#059669',
+  },
+  cashBtnUncollected: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  cashBtnTextCollect: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  cashBtnTextUncollected: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 6,
   },
 });

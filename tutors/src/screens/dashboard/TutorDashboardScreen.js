@@ -22,7 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTutorSessions } from '../../hooks/useSessions';
 import { useTutorAcceptedRequests } from '../../hooks/useClassRequests';
 import { getTutorOnboardingStatus } from '../../constants/onboarding';
-import { getUserProfile, updateTutorOnlineStatus } from '../../services/userService';
+import { clearUserActiveState, getUserProfile, updateTutorOnlineStatus } from '../../services/userService';
 import { cancelClassRequestAndSession } from '../../services/classRequestService';
 import { resolveTutorDispatchLocation, saveUserLiveLocation } from '../../services/locationService';
 import { colors } from '../../theme/colors';
@@ -240,11 +240,31 @@ export function TutorDashboardScreen({ navigate }) {
               setUser((prev) => ({
                 ...prev,
                 activeClassRequestId: null,
+                activeSessionId: null,
               }));
+              await clearUserActiveState(user?.uid);
               Alert.alert('Class Canceled', 'The class session and request have been canceled.');
             } catch (err) {
               console.error('Failed to cancel class:', err);
-              Alert.alert('Cancel Failed', err?.message || 'Unable to cancel this class. Please try again.');
+              Alert.alert(
+                'Cancel Class',
+                `${err?.message || 'Unable to cancel this class.'}\n\nWould you like to dismiss this request from your screen?`,
+                [
+                  { text: 'Keep Retrying', style: 'cancel' },
+                  {
+                    text: 'Dismiss From Screen',
+                    style: 'destructive',
+                    onPress: async () => {
+                      setUser((prev) => ({
+                        ...prev,
+                        activeClassRequestId: null,
+                        activeSessionId: null,
+                      }));
+                      await clearUserActiveState(user?.uid);
+                    },
+                  },
+                ]
+              );
             } finally {
               setCancelingClass(false);
             }

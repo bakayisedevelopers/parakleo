@@ -307,6 +307,11 @@ export function RequestStatusScreen({ route, navigate, goBack }) {
       setShowCancelModal(false);
       setCancelReason('');
       navigate({ key: 'Requests', params: {} });
+    } catch (err) {
+      console.warn('RequestStatusScreen handleCancel error:', err);
+      setShowCancelModal(false);
+      setCancelReason('');
+      navigate({ key: 'Requests', params: {} });
     } finally {
       setIsCanceling(false);
     }

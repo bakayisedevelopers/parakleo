@@ -154,16 +154,29 @@ export async function declineClassRequest({ requestId, tutorId }) {
 }
 
 export async function cancelClassRequestAndSession({ requestId, sessionId, tutorId, reason }) {
-  const { auth } = getFirebaseClients();
+  const { auth, db } = getFirebaseClients();
   const token = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('cancelInPersonLesson');
   const trimmedReason = String(reason || 'Canceled by tutor').trim();
-  if (!requestId) {
-    throw new Error('Missing request ID.');
+  const effTutorId = tutorId || auth.currentUser?.uid;
+
+  // Resilient local user active state cleanup
+  if (effTutorId) {
+    updateDoc(doc(db, 'users', effTutorId), {
+      activeClassRequestId: null,
+      activeSessionId: null,
+      updatedAt: serverTimestamp(),
+    }).catch(() => null);
   }
+
+  if (!requestId && !sessionId) {
+    return { success: true, alreadyTerminal: true };
+  }
+
   if (!token || !endpoint) {
     throw new Error('Unable to cancel while offline. Please try again.');
   }
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -171,15 +184,52 @@ export async function cancelClassRequestAndSession({ requestId, sessionId, tutor
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      requestId,
+      requestId: requestId || sessionId,
       sessionId: sessionId || requestId,
       canceledBy: 'tutor',
       reason: trimmedReason,
     }),
   });
+
   const result = await response.json().catch(() => ({}));
+
+  // If already terminal or 409, treat as cleanly closed
+  if (response.status === 409 || result?.alreadyTerminal) {
+    return { success: true, alreadyTerminal: true, ...result };
+  }
+
   if (!response.ok || !result?.success) {
     throw new Error(result?.message || 'Unable to cancel request right now.');
+  }
+
+  return result;
+}
+
+export async function confirmCashCollectionService({ sessionId, requestId, collected }) {
+  const { auth } = getFirebaseClients();
+  const token = await auth.currentUser?.getIdToken().catch(() => null);
+  const endpoint = getFunctionEndpoint('confirmCashCollection');
+
+  if (!token || !endpoint) {
+    throw new Error('Unable to confirm cash collection while offline.');
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      sessionId: sessionId || requestId,
+      requestId: requestId || sessionId,
+      collected: Boolean(collected),
+    }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || 'Unable to record cash collection.');
   }
   return result;
 }

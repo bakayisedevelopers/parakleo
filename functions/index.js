@@ -6590,9 +6590,22 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
     }
   }
 
-  const paymentStatus = isCashPayment && totalAmount > 0
+  let paymentStatus = isCashPayment && totalAmount > 0
     ? 'cash_pending'
     : (charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid');
+
+  let cashCollected = null;
+  if (isCashPayment && totalAmount > 0) {
+    if (req.body?.cashCollected === true) {
+      paymentStatus = 'paid';
+      cashCollected = true;
+    } else if (req.body?.cashCollected === false) {
+      paymentStatus = 'wallet_debt_recorded';
+      cashCollected = false;
+      charge.unpaidAmount = totalAmount;
+    }
+  }
+
   const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
   const nextWalletBalance = charge.unpaidAmount <= 0
     ? Number(wallet.balance || 0)
@@ -6664,6 +6677,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
       grossAmount: totalAmount,
     },
     paymentStatus,
+    cashCollected,
     paymentTransactionId: charge.transactionId || null,
     chargedCardLast4: selectedCard?.last4 || null,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -6687,6 +6701,7 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
         tuitionAmount: discountedTuition,
       },
       paymentStatus,
+      cashCollected,
       paymentHold: charge.paymentHold || paymentHold || null,
       paymentMethod: isCashPayment ? 'cash' : 'card',
       paymentMethodType: isCashPayment ? 'cash' : 'card',
@@ -6713,6 +6728,24 @@ exports.finalizeSessionBilling = onRequest({ cors: true, secrets: [PARAKLEO_PAYM
         currency: wallet.currency || 'ZAR',
         updatedAt: new Date().toISOString(),
       },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  // Clear activeClassRequestId and activeSessionId on both tutor and student
+  const tutorId = session.tutorId || requestData.tutorId;
+  const tutorRef = tutorId ? db.collection('users').doc(tutorId) : null;
+  if (tutorRef) {
+    batch.set(tutorRef, {
+      activeClassRequestId: null,
+      activeSessionId: null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+  if (studentRef) {
+    batch.set(studentRef, {
+      activeClassRequestId: null,
+      activeSessionId: null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   }
@@ -8321,158 +8354,312 @@ exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInsta
   const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
   if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
 
-  const requestId = req.body?.requestId?.toString().trim();
-  const sessionId = req.body?.sessionId?.toString().trim() || requestId;
-  const canceledBy = req.body?.canceledBy === 'tutor' ? 'tutor' : 'student';
-  const reason = req.body?.reason ? String(req.body.reason).trim() : 'Canceled by user request';
+  try {
+    const requestId = req.body?.requestId?.toString().trim();
+    const sessionId = req.body?.sessionId?.toString().trim() || requestId;
+    const canceledBy = req.body?.canceledBy === 'tutor' ? 'tutor' : 'student';
+    const reason = req.body?.reason ? String(req.body.reason).trim() : 'Canceled by user request';
 
-  const now = Date.now();
-  const terminalStatus = canceledBy === 'tutor' ? LESSON_STATUS.CANCELED_BY_TUTOR : LESSON_STATUS.CANCELED_BY_STUDENT;
+    const now = Date.now();
+    const terminalStatus = canceledBy === 'tutor' ? LESSON_STATUS.CANCELED_BY_TUTOR : LESSON_STATUS.CANCELED_BY_STUDENT;
 
-  let requestData = {};
-  let sessionData = {};
+    let requestData = {};
+    let sessionData = {};
 
-  if (requestId) {
-    const rSnap = await db.collection('classRequests').doc(requestId).get().catch(() => null);
-    if (rSnap?.exists) requestData = rSnap.data() || {};
-  }
-  if (sessionId) {
-    const sSnap = await db.collection('sessions').doc(sessionId).get().catch(() => null);
-    if (sSnap?.exists) sessionData = sSnap.data() || {};
-  }
-
-  const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
-  if (['completed', 'settled', 'expired', 'closed', 'canceled', 'canceled_during', 'canceled_by_student', 'canceled_by_tutor'].includes(currentStatus)) {
-    return res.status(409).json({ success: false, message: `Cannot cancel lesson from terminal status '${currentStatus}'.` });
-  }
-  const ratePerMinute = Number(sessionData.pricingSnapshot?.ratePerMinute || requestData.pricingSnapshot?.ratePerMinute || 3.0);
-  const estimatedAmount = Number(sessionData.pricingSnapshot?.totalAmount || requestData.pricingSnapshot?.totalAmount || 100);
-
-  let elapsedMinutes = 0;
-  const lessonStartMs = Number(sessionData.billingStartedAt || sessionData.lessonStartedAt || 0);
-  if (lessonStartMs) {
-    elapsedMinutes = Math.max(1, Math.ceil((now - lessonStartMs) / 60000));
-  }
-
-  const acceptedAtMs = Number(sessionData.acceptedAt || requestData.acceptedAt || 0);
-  let acceptedElapsedMinutes = 0;
-  if (acceptedAtMs) {
-    acceptedElapsedMinutes = Math.max(0, (now - acceptedAtMs) / 60000);
-  }
-
-  const quote = computeCancellationQuote({
-    status: currentStatus,
-    mode: 'in_person',
-    canceledBy,
-    distanceTravelledKm: Number(req.body?.distanceTravelledKm || 0),
-    totalRouteKm: Number(req.body?.totalRouteKm || requestData?.distanceKm || sessionData?.distanceKm || 10),
-    estimatedAmount,
-    elapsedMinutes,
-    agreedRatePerMinute: ratePerMinute,
-    acceptedElapsedMinutes: Number(req.body?.acceptedElapsedMinutes ?? acceptedElapsedMinutes),
-    isPastAcceptedGrace: Boolean(req.body?.isPastAcceptedGrace),
-  });
-
-  const cancelFee = Number(quote.finalAmount || 0);
-  let paymentStatus = cancelFee > 0 ? 'wallet_debt_recorded' : 'not_applicable';
-  let charge = {
-    ok: cancelFee === 0,
-    paidAmount: 0,
-    unpaidAmount: cancelFee,
-    transactionId: null,
-  };
-
-  if (cancelFee > 0) {
-    const studentId = sessionData.studentId || requestData.studentId;
-    const studentRef = studentId ? db.collection('users').doc(studentId) : null;
-    const studentSnap = studentRef ? await studentRef.get().catch(() => null) : null;
-    const studentData = studentSnap?.exists ? (studentSnap.data() || {}) : {};
-    const paymentMethods = studentData.paymentMethods || [];
-    const selectedCardId = sessionData.selectedCardId || requestData.selectedCardId || null;
-    const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
-      || paymentMethods.find((card) => card.isDefault)
-      || paymentMethods[0]
-      || null;
-
-    let paymentsSecrets = null;
-    try {
-      paymentsSecrets = getPaymentsSecrets();
-    } catch (e) {
-      paymentsSecrets = null;
+    if (requestId) {
+      const rSnap = await db.collection('classRequests').doc(requestId).get().catch(() => null);
+      if (rSnap?.exists) requestData = rSnap.data() || {};
+    }
+    if (sessionId) {
+      const sSnap = await db.collection('sessions').doc(sessionId).get().catch(() => null);
+      if (sSnap?.exists) sessionData = sSnap.data() || {};
     }
 
-    if (paymentsSecrets?.PAYSTACK_SECRET_KEY && selectedCard?.paystackAuthorizationCode) {
+    const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
+    const studentId = sessionData.studentId || requestData.studentId;
+    const tutorId = sessionData.tutorId || requestData.tutorId;
+
+    // Idempotent cancellation: if already terminal, ensure user active state is cleared and return success
+    if (['completed', 'settled', 'expired', 'closed', 'canceled', 'canceled_during', 'canceled_by_student', 'canceled_by_tutor', 'cancelled'].includes(currentStatus)) {
+      if (studentId) {
+        await db.collection('users').doc(studentId).set({
+          activeClassRequestId: null,
+          activeSessionId: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch(() => null);
+      }
+      if (tutorId) {
+        await db.collection('users').doc(tutorId).set({
+          activeClassRequestId: null,
+          activeSessionId: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch(() => null);
+      }
+      if (requestId) {
+        await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+          status: currentStatus,
+          closedAtMs: now,
+          updatedAtMs: now,
+        }).catch(() => null);
+      }
+      return res.status(200).json({
+        success: true,
+        status: currentStatus,
+        alreadyTerminal: true,
+        canceledAt: now,
+        message: `Lesson is already closed in terminal status '${currentStatus}'.`,
+      });
+    }
+
+    const ratePerMinute = Number(sessionData.pricingSnapshot?.ratePerMinute || requestData.pricingSnapshot?.ratePerMinute || 3.0);
+    const estimatedAmount = Number(sessionData.pricingSnapshot?.totalAmount || requestData.pricingSnapshot?.totalAmount || 100);
+
+    let elapsedMinutes = 0;
+    const lessonStartMs = Number(sessionData.billingStartedAt || sessionData.lessonStartedAt || 0);
+    if (lessonStartMs) {
+      elapsedMinutes = Math.max(1, Math.ceil((now - lessonStartMs) / 60000));
+    }
+
+    const acceptedAtMs = Number(sessionData.acceptedAt || requestData.acceptedAt || 0);
+    let acceptedElapsedMinutes = 0;
+    if (acceptedAtMs) {
+      acceptedElapsedMinutes = Math.max(0, (now - acceptedAtMs) / 60000);
+    }
+
+    const quote = computeCancellationQuote({
+      status: currentStatus,
+      mode: 'in_person',
+      canceledBy,
+      distanceTravelledKm: Number(req.body?.distanceTravelledKm || 0),
+      totalRouteKm: Number(req.body?.totalRouteKm || requestData?.distanceKm || sessionData?.distanceKm || 10),
+      estimatedAmount,
+      elapsedMinutes,
+      agreedRatePerMinute: ratePerMinute,
+      acceptedElapsedMinutes: Number(req.body?.acceptedElapsedMinutes ?? acceptedElapsedMinutes),
+      isPastAcceptedGrace: Boolean(req.body?.isPastAcceptedGrace),
+    });
+
+    const cancelFee = Number(quote.finalAmount || 0);
+    let paymentStatus = cancelFee > 0 ? 'wallet_debt_recorded' : 'not_applicable';
+    let charge = {
+      ok: cancelFee === 0,
+      paidAmount: 0,
+      unpaidAmount: cancelFee,
+      transactionId: null,
+    };
+
+    if (cancelFee > 0) {
+      const studentRef = studentId ? db.collection('users').doc(studentId) : null;
+      const studentSnap = studentRef ? await studentRef.get().catch(() => null) : null;
+      const studentData = studentSnap?.exists ? (studentSnap.data() || {}) : {};
+      const paymentMethods = studentData.paymentMethods || [];
+      const selectedCardId = sessionData.selectedCardId || requestData.selectedCardId || null;
+      const selectedCard = paymentMethods.find((card) => card.id === selectedCardId)
+        || paymentMethods.find((card) => card.isDefault)
+        || paymentMethods[0]
+        || null;
+
+      let paymentsSecrets = null;
       try {
-        charge = await settlePaystackAuthorization({
-          paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
-          email: studentData.email || sessionData.studentEmail || '',
-          totalAmount: cancelFee,
-          authorizationCode: selectedCard.paystackAuthorizationCode,
-          paymentHold: sessionData.paymentHold || requestData.paymentHold || null,
-        });
-      } catch (err) {
-        charge = { ok: false, paidAmount: 0, unpaidAmount: cancelFee, transactionId: null };
+        paymentsSecrets = getPaymentsSecrets();
+      } catch (e) {
+        paymentsSecrets = null;
+      }
+
+      if (paymentsSecrets?.PAYSTACK_SECRET_KEY && selectedCard?.paystackAuthorizationCode) {
+        try {
+          charge = await settlePaystackAuthorization({
+            paystackSecretKey: paymentsSecrets.PAYSTACK_SECRET_KEY,
+            email: studentData.email || sessionData.studentEmail || '',
+            totalAmount: cancelFee,
+            authorizationCode: selectedCard.paystackAuthorizationCode,
+            paymentHold: sessionData.paymentHold || requestData.paymentHold || null,
+          });
+        } catch (err) {
+          charge = { ok: false, paidAmount: 0, unpaidAmount: cancelFee, transactionId: null };
+        }
+      }
+
+      paymentStatus = charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid';
+
+      if (charge.unpaidAmount > 0 && studentRef) {
+        const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
+        const nextBalance = Number((Number(wallet.balance || 0) - charge.unpaidAmount).toFixed(2));
+        await studentRef.set({
+          wallet: {
+            ...wallet,
+            balance: nextBalance,
+            currency: wallet.currency || 'ZAR',
+            updatedAt: new Date().toISOString(),
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
       }
     }
 
-    paymentStatus = charge.unpaidAmount > 0 ? 'wallet_debt_recorded' : 'paid';
-
-    if (charge.unpaidAmount > 0 && studentRef) {
-      const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
-      const nextBalance = Number((Number(wallet.balance || 0) - charge.unpaidAmount).toFixed(2));
-      await studentRef.set({
-        wallet: {
-          ...wallet,
-          balance: nextBalance,
-          currency: wallet.currency || 'ZAR',
-          updatedAt: new Date().toISOString(),
-        },
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    }
-  }
-
-  const cancellationPayload = {
-    status: terminalStatus,
-    canceledBy,
-    canceledReason: reason,
-    canceledAt: now,
-    endedAt: now,
-    totalAmount: cancelFee,
-    cancellationFee: cancelFee,
-    travelFee: quote.travelFee || 0,
-    bookingFee: quote.bookingFee || 0,
-    lessonFee: quote.lessonFee || 0,
-    payoutBreakdown: {
-      tutorAmount: quote.tutorPayout || 0,
-      platformAmount: quote.platformFee || 0,
+    const cancellationPayload = {
+      status: terminalStatus,
+      canceledBy,
+      canceledReason: reason,
+      canceledAt: now,
+      endedAt: now,
+      totalAmount: cancelFee,
+      cancellationFee: cancelFee,
       travelFee: quote.travelFee || 0,
       bookingFee: quote.bookingFee || 0,
       lessonFee: quote.lessonFee || 0,
-      grossAmount: cancelFee,
-    },
-    paymentStatus,
-    paymentTransactionId: charge.transactionId || null,
-    statusDetail: `Lesson canceled by ${canceledBy}.`,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
+      payoutBreakdown: {
+        tutorAmount: quote.tutorPayout || 0,
+        platformAmount: quote.platformFee || 0,
+        travelFee: quote.travelFee || 0,
+        bookingFee: quote.bookingFee || 0,
+        lessonFee: quote.lessonFee || 0,
+        grossAmount: cancelFee,
+      },
+      paymentStatus,
+      paymentTransactionId: charge.transactionId || null,
+      statusDetail: `Lesson canceled by ${canceledBy}.`,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
 
-  if (requestId) {
-    await db.collection('classRequests').doc(requestId).set(cancellationPayload, { merge: true });
+    if (requestId) {
+      await db.collection('classRequests').doc(requestId).set(cancellationPayload, { merge: true });
 
-    await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
-      status: terminalStatus,
-      closedAtMs: now,
-      closedReason: reason,
-      updatedAtMs: now,
-    }).catch(() => null);
+      await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
+        status: terminalStatus,
+        closedAtMs: now,
+        closedReason: reason,
+        updatedAtMs: now,
+      }).catch(() => null);
+    }
+
+    if (sessionId) {
+      await db.collection('sessions').doc(sessionId).set(cancellationPayload, { merge: true });
+    }
+
+    // Always clear activeClassRequestId and activeSessionId on both users
+    if (studentId) {
+      await db.collection('users').doc(studentId).set({
+        activeClassRequestId: null,
+        activeSessionId: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => null);
+    }
+    if (tutorId) {
+      await db.collection('users').doc(tutorId).set({
+        activeClassRequestId: null,
+        activeSessionId: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => null);
+    }
+
+    return res.status(200).json({ success: true, status: terminalStatus, canceledAt: now, quote, paymentStatus });
+  } catch (err) {
+    logger.error('cancelInPersonLesson unexpected failure:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'Unable to cancel lesson right now.' });
   }
+});
 
-  if (sessionId) {
-    await db.collection('sessions').doc(sessionId).set(cancellationPayload, { merge: true });
+exports.confirmCashCollection = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances: 1 }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+  const token = getBearerToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  const decoded = await admin.auth().verifyIdToken(token).catch(() => null);
+  if (!decoded?.uid) return res.status(401).json({ success: false, message: 'Invalid token' });
+
+  try {
+    const sessionId = req.body?.sessionId?.toString().trim();
+    const requestId = req.body?.requestId?.toString().trim() || sessionId;
+    const collected = Boolean(req.body?.collected);
+
+    if (!sessionId && !requestId) {
+      return res.status(400).json({ success: false, message: 'Missing sessionId or requestId' });
+    }
+
+    let sessionData = {};
+    let requestData = {};
+    const sessionRef = sessionId ? db.collection('sessions').doc(sessionId) : null;
+    const requestRef = requestId ? db.collection('classRequests').doc(requestId) : null;
+
+    if (sessionRef) {
+      const sSnap = await sessionRef.get().catch(() => null);
+      if (sSnap?.exists) sessionData = sSnap.data() || {};
+    }
+    if (requestRef) {
+      const rSnap = await requestRef.get().catch(() => null);
+      if (rSnap?.exists) requestData = rSnap.data() || {};
+    }
+
+    const tutorId = sessionData.tutorId || requestData.tutorId;
+    if (tutorId && tutorId !== decoded.uid) {
+      return res.status(403).json({ success: false, message: 'Only the assigned tutor can confirm cash collection.' });
+    }
+
+    const studentId = sessionData.studentId || requestData.studentId;
+    const totalAmount = Number(sessionData.totalAmount ?? requestData.totalAmount ?? sessionData.pricingSnapshot?.totalAmount ?? 0);
+    const now = Date.now();
+
+    const paymentStatus = collected ? 'paid' : 'wallet_debt_recorded';
+    const updatePayload = {
+      cashCollected: collected,
+      cashConfirmedAt: now,
+      cashConfirmedBy: decoded.uid,
+      paymentStatus,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    const batch = db.batch();
+    if (sessionRef) batch.set(sessionRef, updatePayload, { merge: true });
+    if (requestRef) batch.set(requestRef, updatePayload, { merge: true });
+
+    // If not collected, deduct totalAmount from student's wallet balance using existing logic
+    if (!collected && studentId && totalAmount > 0) {
+      const studentRef = db.collection('users').doc(studentId);
+      const studentSnap = await studentRef.get().catch(() => null);
+      if (studentSnap?.exists) {
+        const studentData = studentSnap.data() || {};
+        const wallet = studentData.wallet || { balance: 0, currency: 'ZAR' };
+        const nextBalance = Number((Number(wallet.balance || 0) - totalAmount).toFixed(2));
+        batch.set(studentRef, {
+          wallet: {
+            ...wallet,
+            balance: nextBalance,
+            currency: wallet.currency || 'ZAR',
+            updatedAt: new Date().toISOString(),
+          },
+          activeClassRequestId: null,
+          activeSessionId: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    } else if (studentId) {
+      batch.set(db.collection('users').doc(studentId), {
+        activeClassRequestId: null,
+        activeSessionId: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    if (tutorId) {
+      batch.set(db.collection('users').doc(tutorId), {
+        activeClassRequestId: null,
+        activeSessionId: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    await batch.commit();
+
+    return res.status(200).json({
+      success: true,
+      paymentStatus,
+      cashCollected: collected,
+      totalAmount,
+    });
+  } catch (err) {
+    logger.error('confirmCashCollection unexpected failure:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'Failed to record cash collection.' });
   }
-
-  return res.status(200).json({ success: true, status: terminalStatus, canceledAt: now, quote, paymentStatus });
 });
 
 function decodePolylineString(encoded) {

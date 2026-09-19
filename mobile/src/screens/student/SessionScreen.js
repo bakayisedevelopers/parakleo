@@ -23,6 +23,7 @@ import { getBestAvailableLocation, resolveLocationFromOption, saveUserLiveLocati
 import { fetchPricingQuote } from '../../services/pricingService';
 import { uploadUserFile } from '../../services/storageService';
 import { cancelInPersonSession } from '../../services/sessionService';
+import { clearUserActiveState } from '../../services/userService';
 import { buildSafetySnapshot } from '../../constants/safety';
 import { SafetySupportModal } from '../../components/common/SafetySupportModal';
 import { CancellationQuoteModal } from '../../components/common/CancellationQuoteModal';
@@ -746,7 +747,6 @@ export function SessionScreen({ navigate, goBack, route, sessions = [] }) {
   }, [currentRequest, currentStatus, activeRequestId, matchingSession, navigate]);
 
   const handleCancelForSafety = async (reason) => {
-    let didCancel = false;
     try {
       setShowSafetyModal(false);
       const effReason = reason || 'Student safety concern';
@@ -758,27 +758,24 @@ export function SessionScreen({ navigate, goBack, route, sessions = [] }) {
           canceledBy: 'student',
           reason: effReason,
         });
-        didCancel = true;
       }
     } catch (err) {
       console.warn('handleCancelForSafety error:', err);
     } finally {
-      if (didCancel) {
-        setActiveRequestId('');
-        setActiveRequest(null);
-        setLiveTracking(null);
-      }
+      setActiveRequestId('');
+      setActiveRequest(null);
+      setLiveTracking(null);
       setShowSafetyModal(false);
       setShowCancelModal(false);
-      if (didCancel) {
-        setSubmissionSuccess(false);
-        setIsSubmitting(false);
+      setSubmissionSuccess(false);
+      setIsSubmitting(false);
+      if (user?.uid) {
+        clearUserActiveState(user.uid).catch(() => null);
       }
     }
   };
 
   const handleConfirmCancel = async (payload) => {
-    let didCancel = false;
     try {
       setShowCancelModal(false);
       const effReason = payload?.reason || 'Canceled by student';
@@ -790,21 +787,19 @@ export function SessionScreen({ navigate, goBack, route, sessions = [] }) {
           canceledBy: 'student',
           reason: effReason,
         });
-        didCancel = true;
       }
     } catch (err) {
       console.warn('handleConfirmCancel error:', err);
     } finally {
-      if (didCancel) {
-        setActiveRequestId('');
-        setActiveRequest(null);
-        setLiveTracking(null);
-      }
+      setActiveRequestId('');
+      setActiveRequest(null);
+      setLiveTracking(null);
       setShowCancelModal(false);
       setShowSafetyModal(false);
-      if (didCancel) {
-        setSubmissionSuccess(false);
-        setIsSubmitting(false);
+      setSubmissionSuccess(false);
+      setIsSubmitting(false);
+      if (user?.uid) {
+        clearUserActiveState(user.uid).catch(() => null);
       }
     }
   };
@@ -1145,6 +1140,9 @@ export function SessionScreen({ navigate, goBack, route, sessions = [] }) {
                   setActiveRequest(null);
                   setLiveTracking(null);
                   setSubmissionSuccess(false);
+                  if (user?.uid) {
+                    clearUserActiveState(user.uid).catch(() => null);
+                  }
                 }}
                 style={[styles.openActiveLessonButton, { backgroundColor: '#059669', marginTop: 10 }]}
               >

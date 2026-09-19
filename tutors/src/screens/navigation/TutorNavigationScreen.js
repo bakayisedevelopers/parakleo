@@ -28,6 +28,7 @@ import {
 import { TravelRaceTrack } from '../../components/common/TravelRaceTrack';
 import { SafetySupportModal } from '../../components/common/SafetySupportModal';
 import { CancellationQuoteModal } from '../../components/common/CancellationQuoteModal';
+import { clearUserActiveState } from '../../services/userService';
 import { useAuth } from '../../context/AuthContext';
 
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -136,7 +137,7 @@ export function TutorNavigationScreen({
   requestId: propRequestId = '',
   sessionId: propSessionId = '',
 }) {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const navigate = onNavigate || navigation?.navigate;
   const goBack = onBack || navigation?.goBack;
 
@@ -153,6 +154,38 @@ export function TutorNavigationScreen({
   const [hasMarkedArrived, setHasMarkedArrived] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
+
+  // Auto-dismiss if request transitions to canceled or terminal externally (e.g. canceled by student)
+  const hasAlertedCancellationRef = useRef(false);
+  useEffect(() => {
+    if (!requestId) return;
+    const status = String(currentRequest?.status || liveTracking?.status || '').toLowerCase();
+    if (['canceled', 'canceled_by_student', 'canceled_by_tutor', 'canceled_during', 'expired', 'closed'].includes(status)) {
+      if (!hasAlertedCancellationRef.current) {
+        hasAlertedCancellationRef.current = true;
+        setUser?.((prev) => ({
+          ...prev,
+          activeClassRequestId: null,
+          activeSessionId: null,
+        }));
+        clearUserActiveState(user?.uid).catch(() => null);
+        Alert.alert(
+          'Lesson Canceled',
+          status === 'canceled_by_student'
+            ? 'The student has canceled this lesson.'
+            : 'This lesson has been canceled or closed.',
+          [
+            {
+              text: 'Return to Dashboard',
+              onPress: () => {
+                goBack ? goBack() : navigate?.('Dashboard');
+              },
+            },
+          ]
+        );
+      }
+    }
+  }, [currentRequest?.status, liveTracking?.status, requestId, user?.uid, setUser, goBack, navigate]);
 
   // Subscribe to Firestore request document
   useEffect(() => {
@@ -866,14 +899,25 @@ export function TutorNavigationScreen({
         userRole="tutor"
         onConfirmCancel={async (reason) => {
           setShowCancelModal(false);
-          await cancelInPersonSession({
-            requestId,
-            sessionId: effSessionId,
-            tutorId: user?.uid,
-            reason: reason || 'Tutor canceled travel',
-            canceledBy: 'tutor',
-          });
-          goBack ? goBack() : navigate?.('Dashboard');
+          try {
+            await cancelInPersonSession({
+              requestId,
+              sessionId: effSessionId,
+              tutorId: user?.uid,
+              reason: reason || 'Tutor canceled travel',
+              canceledBy: 'tutor',
+            });
+          } catch (err) {
+            console.warn('onConfirmCancel error:', err);
+          } finally {
+            setUser?.((prev) => ({
+              ...prev,
+              activeClassRequestId: null,
+              activeSessionId: null,
+            }));
+            await clearUserActiveState(user?.uid);
+            goBack ? goBack() : navigate?.('Dashboard');
+          }
         }}
       />
     </View>

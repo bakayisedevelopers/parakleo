@@ -147,3 +147,13 @@ export async function updateUserRatingSummary(uid, roleKey, overallScore) {
   await updateDoc(ref, patch).catch(() => null);
   return { ...existing, ...patch };
 }
+
+export async function clearUserActiveState(uid) {
+  if (!uid) return;
+  const { db } = getFirebaseClients();
+  await updateDoc(doc(db, 'users', uid), {
+    activeClassRequestId: null,
+    activeSessionId: null,
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+}

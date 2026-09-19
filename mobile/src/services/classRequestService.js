@@ -375,12 +375,21 @@ export function subscribeToRequestById(requestId, callback, onError) {
 
 export async function cancelClassRequest({ requestId, canceledBy, reason }) {
   const trimmedReason = String(reason || '').trim();
-  const { auth } = getFirebaseClients();
+  const { auth, db } = getFirebaseClients();
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
   const endpoint = getFunctionEndpoint('cancelInPersonLesson');
+  const studentUid = auth.currentUser?.uid;
+
+  if (studentUid) {
+    updateDoc(doc(db, 'users', studentUid), {
+      activeClassRequestId: null,
+      activeSessionId: null,
+      updatedAt: serverTimestamp(),
+    }).catch(() => null);
+  }
 
   if (!requestId) {
-    throw new Error('Missing request ID.');
+    return { success: true, alreadyTerminal: true };
   }
   if (!idToken || !endpoint) {
     throw new Error('Unable to cancel request while offline. Please try again.');
@@ -400,6 +409,11 @@ export async function cancelClassRequest({ requestId, canceledBy, reason }) {
     }),
   });
   const payload = await response.json().catch(() => ({}));
+
+  if (response.status === 409 || payload?.alreadyTerminal) {
+    return { success: true, alreadyTerminal: true, ...payload };
+  }
+
   if (!response.ok || payload?.success === false) {
     throw new Error(payload?.message || 'Unable to cancel request right now.');
   }
