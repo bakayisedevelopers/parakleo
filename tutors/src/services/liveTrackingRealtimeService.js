@@ -97,10 +97,12 @@ function normalizeLiveTrackingSnapshot(snapshot = {}) {
     preparationGraceEndsAtMs: snapshot.preparationGraceEndsAtMs != null && Number.isFinite(Number(snapshot.preparationGraceEndsAtMs))
       ? Number(snapshot.preparationGraceEndsAtMs)
       : (snapshot.preparationGraceEndsAt != null && Number.isFinite(Number(snapshot.preparationGraceEndsAt)) ? Number(snapshot.preparationGraceEndsAt) : null),
-    preparationGraceStartedAtMs: Number.isFinite(Number(snapshot.preparationGraceStartedAtMs)) ? Number(snapshot.preparationGraceStartedAtMs) : null,
-    verificationPin: String(snapshot.verificationPin || '').trim(),
-    pinVerified: Boolean(snapshot.pinVerified),
-    meetingConfirmed: Boolean(snapshot.meetingConfirmed),
+    verificationPin: String(snapshot.verificationPin || snapshot.meetingPin || snapshot.pin || '').trim(),
+    meetingPin: String(snapshot.meetingPin || snapshot.verificationPin || snapshot.pin || '').trim(),
+    pin: String(snapshot.pin || snapshot.verificationPin || snapshot.meetingPin || '').trim(),
+    pinVerified: Boolean(snapshot.pinVerified || snapshot.meetingPinVerified),
+    meetingPinVerified: Boolean(snapshot.meetingPinVerified || snapshot.pinVerified),
+    meetingConfirmed: Boolean(snapshot.meetingConfirmed || snapshot.pinVerified),
     studentAddress: String(snapshot.studentAddress || '').trim(),
     meetingAddress: String(snapshot.meetingAddress || snapshot.studentAddress || '').trim(),
     locationOption: String(snapshot.locationOption || 'My Location').trim(),
@@ -156,9 +158,24 @@ function sanitizePatch(patch = {}) {
   }
   if (patch.verificationPin !== undefined) {
     nextPatch.verificationPin = String(patch.verificationPin || '').trim();
+    nextPatch.meetingPin = String(patch.verificationPin || '').trim();
+  }
+  if (patch.meetingPin !== undefined) {
+    nextPatch.meetingPin = String(patch.meetingPin || '').trim();
+    nextPatch.verificationPin = String(patch.meetingPin || '').trim();
+  }
+  if (patch.pin !== undefined) {
+    nextPatch.pin = String(patch.pin || '').trim();
+    nextPatch.verificationPin = String(patch.pin || '').trim();
+    nextPatch.meetingPin = String(patch.pin || '').trim();
   }
   if (patch.pinVerified !== undefined) {
     nextPatch.pinVerified = Boolean(patch.pinVerified);
+    nextPatch.meetingPinVerified = Boolean(patch.pinVerified);
+  }
+  if (patch.meetingPinVerified !== undefined) {
+    nextPatch.meetingPinVerified = Boolean(patch.meetingPinVerified);
+    nextPatch.pinVerified = Boolean(patch.meetingPinVerified);
   }
   if (patch.meetingConfirmed !== undefined) {
     nextPatch.meetingConfirmed = Boolean(patch.meetingConfirmed);

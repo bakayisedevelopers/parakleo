@@ -7944,6 +7944,8 @@ exports.markTutorArrived = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances
     arrivalGraceStartedAt: now,
     arrivalGraceEndsAt: now + gracePeriodMs,
     verificationPin: pin,
+    meetingPin: pin,
+    pin: pin,
     verificationPinGeneratedAt: now,
     verificationPinExpiresAt: pinExpiresAt,
     verificationPinAttempts: data.verificationPinAttempts || 0,
@@ -7958,6 +7960,8 @@ exports.markTutorArrived = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances
     arrivalGraceStartedAt: now,
     arrivalGraceEndsAt: now + gracePeriodMs,
     verificationPin: pin,
+    meetingPin: pin,
+    pin: pin,
     verificationPinGeneratedAt: now,
     verificationPinExpiresAt: pinExpiresAt,
     verificationPinAttempts: data.verificationPinAttempts || 0,
@@ -7972,6 +7976,8 @@ exports.markTutorArrived = onRequest({ cors: true, cpu: 'gcf_gen1', maxInstances
     arrivalGraceEndsAt: now + gracePeriodMs,
     arrivalGraceEndsAtMs: now + gracePeriodMs,
     verificationPin: pin,
+    meetingPin: pin,
+    pin: pin,
     updatedAtMs: now,
   }).catch(() => null);
 
@@ -8147,6 +8153,7 @@ exports.verifyInPersonMeetingPin = onRequest({ cors: true }, async (req, res) =>
 
   await reqRef.set({
     pinVerified: true,
+    meetingPinVerified: true,
     pinVerifiedAt: now,
     meetingConfirmed: true,
     meetingConfirmedAt: now,
@@ -8160,6 +8167,7 @@ exports.verifyInPersonMeetingPin = onRequest({ cors: true }, async (req, res) =>
   const effSessionId = data.sessionId || requestId;
   await db.collection('sessions').doc(effSessionId).set({
     pinVerified: true,
+    meetingPinVerified: true,
     pinVerifiedAt: now,
     meetingConfirmed: true,
     meetingConfirmedAt: now,
@@ -8171,6 +8179,7 @@ exports.verifyInPersonMeetingPin = onRequest({ cors: true }, async (req, res) =>
 
   await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
     pinVerified: true,
+    meetingPinVerified: true,
     pinVerifiedAtMs: now,
     status: LESSON_STATUS.PREPARING_FOR_LESSON,
     preparationGraceEndsAt: prepGraceEndsAt,

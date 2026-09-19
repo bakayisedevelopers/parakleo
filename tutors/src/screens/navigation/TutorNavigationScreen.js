@@ -154,6 +154,7 @@ export function TutorNavigationScreen({
   const [hasMarkedArrived, setHasMarkedArrived] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
+  const [arrivedPin, setArrivedPin] = useState(null);
 
   // Auto-dismiss if request transitions to canceled or terminal externally (e.g. canceled by student)
   const hasAlertedCancellationRef = useRef(false);
@@ -219,8 +220,12 @@ export function TutorNavigationScreen({
 
   // Derived state flags
   const isPinVerified = Boolean(
-    liveTracking?.meetingPinVerified
+    liveTracking?.pinVerified
+    || liveTracking?.meetingPinVerified
+    || currentRequest?.pinVerified
     || currentRequest?.meetingPinVerified
+    || currentRequest?.meetingConfirmed
+    || liveTracking?.meetingConfirmed
     || currentLiveStatus === 'preparing_for_lesson'
     || ['in_session', 'in_progress'].includes(currentLiveStatus)
   );
@@ -234,11 +239,19 @@ export function TutorNavigationScreen({
 
   const effSessionId = sessionId || currentRequest?.sessionId || initialRequest?.sessionId || requestId;
 
-  // Meeting PIN
-  const meetingPin = liveTracking?.meetingPin
+  // Meeting PIN resolution across all possible aliases
+  const rawPin = liveTracking?.verificationPin
+    || liveTracking?.meetingPin
+    || liveTracking?.pin
+    || currentRequest?.verificationPin
     || currentRequest?.meetingPin
+    || currentRequest?.pin
+    || initialRequest?.verificationPin
     || initialRequest?.meetingPin
-    || '----';
+    || initialRequest?.pin
+    || arrivedPin;
+
+  const meetingPin = rawPin ? String(rawPin).trim() : '----';
 
   // Destination Resolution
   const destination = useMemo(() => {
@@ -310,12 +323,18 @@ export function TutorNavigationScreen({
       setCurrentRequest((prev) => (prev ? { ...prev, status: 'arrived', arrivedAt: Date.now() } : prev));
 
       try {
-        await markTutorArrived({
+        const result = await markTutorArrived({
           requestId,
           sessionId: effSessionId,
           tutorId: user?.uid,
           distanceMeters: Math.round(dist),
         });
+        if (result?.verificationPin || result?.pin || result?.meetingPin) {
+          const pinVal = String(result.verificationPin || result.pin || result.meetingPin).trim();
+          setArrivedPin(pinVal);
+          setLiveTracking((prev) => (prev ? { ...prev, verificationPin: pinVal, meetingPin: pinVal, pin: pinVal } : prev));
+          setCurrentRequest((prev) => (prev ? { ...prev, verificationPin: pinVal, meetingPin: pinVal, pin: pinVal } : prev));
+        }
       } catch (err) {
         console.warn('[TutorNavigation] markTutorArrived error:', err);
       } finally {
