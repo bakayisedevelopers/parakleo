@@ -36,7 +36,46 @@ export function subscribeToTutorSessions(tutorId, callback, onError) {
         id: docSnap.id,
         ...docSnap.data(),
       }));
+
+      // Deliver current items immediately to the UI
       callback(items);
+
+      // Self-heal: check if any non-terminal session belongs to a closed/canceled request
+      const nonTerminalItems = items.filter(
+        (it) => ['arrived', 'accepted', 'travelling', 'traveling', 'waiting_student', 'preparing_for_lesson'].includes(String(it.status || '').toLowerCase()) && it.requestId
+      );
+
+      if (nonTerminalItems.length > 0) {
+        Promise.all(
+          nonTerminalItems.map(async (item) => {
+            try {
+              const reqSnap = await getDoc(doc(db, 'classRequests', item.requestId));
+              if (reqSnap.exists()) {
+                const reqData = reqSnap.data() || {};
+                const reqStatus = String(reqData.status || '').toLowerCase();
+                const isTerminal = ['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'cancelled', 'completed', 'settled', 'expired', 'closed'].includes(reqStatus);
+                if (isTerminal && reqStatus !== String(item.status || '').toLowerCase()) {
+                  await setDoc(
+                    doc(db, 'sessions', item.id),
+                    {
+                      status: reqStatus,
+                      canceledBy: reqData.canceledBy || null,
+                      canceledAt: reqData.canceledAt || Date.now(),
+                      canceledReason: reqData.canceledReason || null,
+                      updatedAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  ).catch(() => null);
+                  item.status = reqStatus;
+                  if (reqData.canceledBy) item.canceledBy = reqData.canceledBy;
+                }
+              }
+            } catch (_) {}
+          })
+        ).then(() => {
+          callback([...items]);
+        }).catch(() => null);
+      }
     },
     (error) => {
       console.error('subscribeToTutorSessions error:', error);

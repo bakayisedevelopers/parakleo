@@ -6,11 +6,51 @@ import { TUTOR_PAYOUT_RATE } from '../../constants/pricing';
 import { colors } from '../../theme/colors';
 
 export function SessionHistoryCard({ session, onOpenSession }) {
-  const isCompleted = session.status === 'completed';
-  const isInProgress = session.status === 'in_progress';
-  const isCancelled = session.status === 'cancelled';
+  const normStatus = String(session.status || '').toLowerCase();
+  const isCanceledByTutor = normStatus === 'canceled_by_tutor' || session.canceledBy === 'tutor';
+  const isCanceledByStudent = normStatus === 'canceled_by_student' || session.canceledBy === 'student';
+  const isCancelled = [
+    'canceled',
+    'canceled_during',
+    'canceled_by_tutor',
+    'canceled_by_student',
+    'cancelled',
+    'closed',
+    'expired',
+  ].includes(normStatus) || Boolean(session.canceledAt || session.canceledBy);
 
-  const badgeVariant = isCompleted ? 'emerald' : isInProgress ? 'sky' : isCancelled ? 'rose' : 'zinc';
+  const isCompleted = ['completed', 'settled'].includes(normStatus);
+  const isInProgress = ['in_progress', 'in_session'].includes(normStatus);
+
+  let badgeVariant = 'zinc';
+  let badgeLabel = 'Active';
+
+  if (isCompleted) {
+    badgeVariant = 'emerald';
+    badgeLabel = 'Completed';
+  } else if (isCanceledByTutor) {
+    badgeVariant = 'rose';
+    badgeLabel = 'Canceled by You';
+  } else if (isCanceledByStudent) {
+    badgeVariant = 'rose';
+    badgeLabel = 'Canceled by Student';
+  } else if (isCancelled) {
+    badgeVariant = 'rose';
+    badgeLabel = 'Cancelled';
+  } else if (isInProgress) {
+    badgeVariant = 'sky';
+    badgeLabel = 'In Progress';
+  } else if (normStatus === 'arrived') {
+    badgeVariant = 'amber';
+    badgeLabel = 'Arrived';
+  } else if (normStatus === 'accepted') {
+    badgeVariant = 'sky';
+    badgeLabel = 'Accepted';
+  } else {
+    badgeVariant = 'zinc';
+    badgeLabel = normStatus ? normStatus.replace(/_/g, ' ') : 'Active';
+  }
+
   const sessionDate = session.createdAt || session.updatedAt;
   const formattedDate = sessionDate
     ? new Date(typeof sessionDate?.toMillis === 'function' ? sessionDate.toMillis() : sessionDate).toLocaleDateString()
@@ -35,7 +75,7 @@ export function SessionHistoryCard({ session, onOpenSession }) {
             </Badge>
           </View>
           <Badge variant={badgeVariant}>
-            {isCompleted ? 'Completed' : isInProgress ? 'In Progress' : isCancelled ? 'Cancelled' : (session.status || 'Active')}
+            {badgeLabel}
           </Badge>
         </View>
 

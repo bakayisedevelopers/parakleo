@@ -161,55 +161,6 @@ export async function updateUserRatingSummary(uid, roleKey, overallScore) {
           tutorProfile: {
             ...(existing.tutorProfile || {}),
             overallRating: nextAverage,
-
-export async function updateUserProfile(uid, updates) {
-  const { db } = getFirebaseClients();
-  const userRef = doc(db, 'users', uid);
-
-  await setDoc(
-    userRef,
-    {
-      ...updates,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-
-  return getUserProfile(uid);
-}
-
-export async function deleteUserProfile(uid) {
-  const { db } = getFirebaseClients();
-  await deleteDoc(doc(db, 'users', uid));
-}
-
-export async function updateUserRatingSummary(uid, roleKey, overallScore) {
-  const existing = await getUserProfile(uid);
-  if (!existing) return null;
-
-  const currentStats = existing?.ratings?.[roleKey] || {};
-  const totalLessons = Number(currentStats.totalLessons ?? currentStats.count ?? 0);
-  const totalRatings = Number(currentStats.totalRatings ?? ((currentStats.average || 0) * totalLessons) ?? 0);
-  const nextTotalLessons = totalLessons + 1;
-  const nextTotalRatings = Number((totalRatings + Number(overallScore || 0)).toFixed(2));
-  const nextAverage = Number((nextTotalRatings / nextTotalLessons).toFixed(2));
-
-  return updateUserProfile(uid, {
-    ratings: {
-      ...(existing.ratings || {}),
-      [roleKey]: {
-        count: nextTotalLessons,
-        totalLessons: nextTotalLessons,
-        totalRatings: nextTotalRatings,
-        average: nextAverage,
-        updatedAt: Date.now(),
-      },
-    },
-    ...(roleKey === 'asTutor'
-      ? {
-          tutorProfile: {
-            ...(existing.tutorProfile || {}),
-            overallRating: nextAverage,
           },
         }
       : {}),

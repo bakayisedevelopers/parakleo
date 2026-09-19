@@ -1511,6 +1511,36 @@ exports.syncClassRequestLifecycle = onDocumentWritten('classRequests/{requestId}
   const afterData = event.data.after.exists ? event.data.after.data() : null;
   if (!afterData) return;
 
+  const requestId = event.params.requestId;
+  const afterStatus = String(afterData.status || '').toLowerCase();
+
+  // If request is terminal, ensure corresponding session docs are kept synchronized
+  if (['canceled', 'canceled_by_tutor', 'canceled_by_student', 'canceled_during', 'cancelled', 'completed', 'settled', 'expired', 'closed'].includes(afterStatus)) {
+    const sIds = new Set([requestId]);
+    if (afterData.sessionId) sIds.add(afterData.sessionId);
+    const related = await db.collection('sessions').where('requestId', '==', requestId).get().catch(() => null);
+    if (related && !related.empty) {
+      related.docs.forEach((d) => sIds.add(d.id));
+    }
+    const syncPayload = {
+      status: afterStatus,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (afterData.canceledBy) syncPayload.canceledBy = afterData.canceledBy;
+    if (afterData.canceledAt) syncPayload.canceledAt = afterData.canceledAt;
+    if (afterData.canceledReason) syncPayload.canceledReason = afterData.canceledReason;
+
+    for (const sId of sIds) {
+      const snap = await db.collection('sessions').doc(sId).get().catch(() => null);
+      if (snap?.exists) {
+        const cur = String(snap.data()?.status || '').toLowerCase();
+        if (cur !== afterStatus) {
+          await snap.ref.set(syncPayload, { merge: true }).catch(() => null);
+        }
+      }
+    }
+  }
+
   if (!ACTIVE_REQUEST_STATUSES.has(afterData.status) || afterData.tutorId) {
     return;
   }
@@ -8375,11 +8405,26 @@ exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInsta
       if (sSnap?.exists) sessionData = sSnap.data() || {};
     }
 
+    // Comprehensive session ID resolution
+    const resolvedSessionIds = new Set();
+    if (sessionId) resolvedSessionIds.add(sessionId);
+    if (requestId) resolvedSessionIds.add(requestId);
+    if (requestData?.sessionId) resolvedSessionIds.add(requestData.sessionId);
+    if (sessionData?.id) resolvedSessionIds.add(sessionData.id);
+    if (sessionData?.sessionId) resolvedSessionIds.add(sessionData.sessionId);
+
+    if (requestId) {
+      const qSnap = await db.collection('sessions').where('requestId', '==', requestId).get().catch(() => null);
+      if (qSnap && !qSnap.empty) {
+        qSnap.docs.forEach((d) => resolvedSessionIds.add(d.id));
+      }
+    }
+
     const currentStatus = String(sessionData.status || requestData.status || 'accepted').toLowerCase();
     const studentId = sessionData.studentId || requestData.studentId;
     const tutorId = sessionData.tutorId || requestData.tutorId;
 
-    // Idempotent cancellation: if already terminal, ensure user active state is cleared and return success
+    // Idempotent cancellation: if already terminal, ensure user active state is cleared, all sessions updated, and return success
     if (['completed', 'settled', 'expired', 'closed', 'canceled', 'canceled_during', 'canceled_by_student', 'canceled_by_tutor', 'cancelled'].includes(currentStatus)) {
       if (studentId) {
         await db.collection('users').doc(studentId).set({
@@ -8396,11 +8441,25 @@ exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInsta
         }, { merge: true }).catch(() => null);
       }
       if (requestId) {
+        await db.collection('classRequests').doc(requestId).set({
+          status: currentStatus,
+          canceledAt: requestData.canceledAt || now,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch(() => null);
+
         await admin.database().ref(`liveTracking/classRequests/${requestId}`).update({
           status: currentStatus,
           closedAtMs: now,
           updatedAtMs: now,
         }).catch(() => null);
+      }
+      for (const sId of resolvedSessionIds) {
+        await db.collection('sessions').doc(sId).set({
+          status: currentStatus,
+          canceledAt: sessionData.canceledAt || requestData.canceledAt || now,
+          canceledBy: sessionData.canceledBy || requestData.canceledBy || canceledBy,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }).catch(() => null);
       }
       return res.status(200).json({
         success: true,
@@ -8533,8 +8592,8 @@ exports.cancelInPersonLesson = onRequest({ cors: true, cpu: 'gcf_gen1', maxInsta
       }).catch(() => null);
     }
 
-    if (sessionId) {
-      await db.collection('sessions').doc(sessionId).set(cancellationPayload, { merge: true });
+    for (const sId of resolvedSessionIds) {
+      await db.collection('sessions').doc(sId).set(cancellationPayload, { merge: true }).catch(() => null);
     }
 
     // Always clear activeClassRequestId and activeSessionId on both users

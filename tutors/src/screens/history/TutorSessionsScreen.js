@@ -36,10 +36,24 @@ export function TutorSessionsScreen({ navigate, goBack }) {
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((session) => {
+      const norm = String(session.status || '').toLowerCase();
+      const isCancelled = [
+        'canceled',
+        'canceled_during',
+        'canceled_by_tutor',
+        'canceled_by_student',
+        'cancelled',
+        'closed',
+        'expired',
+      ].includes(norm) || Boolean(session.canceledAt || session.canceledBy);
+      const isCompleted = ['completed', 'settled'].includes(norm);
+      const isInProgress = ['in_progress', 'in_session', 'arrived', 'waiting_student', 'preparing_for_lesson', 'travelling', 'traveling', 'accepted'].includes(norm);
+
       // Status filter
-      if (selectedStatus !== 'all' && session.status !== selectedStatus) {
-        return false;
-      }
+      if (selectedStatus === 'completed' && !isCompleted) return false;
+      if (selectedStatus === 'cancelled' && !isCancelled) return false;
+      if (selectedStatus === 'in_progress' && !isInProgress) return false;
+
       // Search query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -53,7 +67,7 @@ export function TutorSessionsScreen({ navigate, goBack }) {
   }, [sessions, selectedStatus, searchQuery]);
 
   const completedCount = useMemo(() => {
-    return sessions.filter((s) => s.status === 'completed').length;
+    return sessions.filter((s) => ['completed', 'settled'].includes(String(s.status || '').toLowerCase())).length;
   }, [sessions]);
 
   const handleOpenSession = (session) => {
