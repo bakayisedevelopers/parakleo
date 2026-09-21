@@ -1,42 +1,28 @@
-# Parakleo Web App
+# Parakleo web application
 
-Parakleo is an online-first tutoring marketplace where students request classes and tutors accept/manage them in real time.
+This is the React + Vite application for all browser roles:
 
-## Stack
-- React + Vite + Tailwind + React Router
-- Firebase Auth + Firestore (modular SDK usage)
-- Firebase Hosting + Functions-ready project config
-- Resend email delivery through Firebase Functions (server-side only)
+- Student portal: `src/pages/app/student/`
+- Tutor portal: `src/pages/app/tutor/`
+- Admin portal: `src/pages/app/admin/`
 
-## Environment Variables
-Create a `.env` file in this `web/` directory:
+The routes, role guards, Firebase client configuration, and feature services are in `src/`. This is one web application, so the three roles share the same `web/.env.local` file and deployment.
 
-```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-VITE_FIREBASE_DATABASE_ID=claxi
-```
-
-Set Firebase Functions environment variables/secrets separately:
-
-```bash
-RESEND_API_KEY=
-EMAIL_FROM=noreply@yourdomain.com
-PAYSTACK_SECRET_KEY=
-```
-
-This project is configured to use Hosting/Vite route mapping for backend payment endpoints (`/verify-paystack`, `/finalize-session-billing`).
-
-## Local Development
+## Run locally
 
 ```bash
 npm install
-npm run dev
+cp .env.local.example .env.local
+npm run dev:raw
 ```
+
+`npm run dev`, `npm run dev:students`, `npm run dev:tutors`, and `npm run dev:admin` are convenience commands for the local Commander Preview Router. They are not required for ordinary Vite development.
+
+## Environment
+
+Keep `web/.env.local` local; it is ignored by Git. Begin with `.env.local.example`, then obtain the correct values from the project owner/Firebase console. Required client configuration is the `VITE_FIREBASE_*` set. The example also contains optional public endpoint settings for payment verification, ICE/WebRTC, AI/OCR, tutor agreements, pricing, and student-growth workflows.
+
+Only public client identifiers belong here. Do not add Paystack secret keys, Resend keys, Cloudflare tokens, Google AI keys, or OCR service keys; those belong in Firebase Functions secrets.
 
 ## Build
 
@@ -45,23 +31,4 @@ npm run build
 npm run preview
 ```
 
-## Firestore Collections
-- `users`
-- `classRequests`
-- `sessions`
-- `notifications`
-- `emailEvents` (queue consumed by Cloud Function)
-
-## Firebase Functions
-Functions source is in `../functions/index.js` (repo root `functions/`).
-
-Deploy flow example from repo root:
-
-```bash
-cd functions
-npm install
-cd ..
-firebase deploy --only functions,hosting
-```
-
-> Do not expose `RESEND_API_KEY` in frontend code.
+Firebase client setup is in `src/firebase/config.js`; server-side endpoints are implemented in `../functions/`. For the complete operational checklist, see [the repository handoff guide](../docs/DEVELOPER_HANDOFF.md).

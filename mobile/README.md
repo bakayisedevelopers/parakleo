@@ -1,3 +1,27 @@
+# Parakleo student mobile app
+
+This folder is the Expo / React Native application used by students. `App.js` is the entry point and the application code is under `src/`.
+
+## Run locally
+
+```bash
+npm install
+cp .env.example .env
+npm run start
+```
+
+Use `npm run android`, `npm run ios`, or `npm run web` for a platform-specific start. For Firebase emulator work, set `EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true` and use an emulator host that is reachable from the device/simulator.
+
+## Environment
+
+Create `mobile/.env` from `.env.example`. It supplies Firebase client configuration, the public Paystack key, the web-app URL, and emulator options. Variables beginning `EXPO_PUBLIC_` are bundled into the app; do not store Paystack secret keys, email credentials, AI keys, Cloudflare tokens, or any other server secret in this file.
+
+See [the repository developer handoff guide](../docs/DEVELOPER_HANDOFF.md) for the full environment, service, and deployment checklist.
+
+## Historical implementation plan
+
+The remaining material below records the earlier phased implementation plan. It is retained for context; use the sections above and the handoff guide as the current setup reference.
+
 # Parakleo Mobile Plan (React Native, Student App Only)
 
 This document replaces the previous starter-only note and serves as the implementation plan for the **student-only** mobile application.
