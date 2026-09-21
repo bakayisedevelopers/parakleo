@@ -89,6 +89,19 @@ const modalScreens = {
   TutorMetrics: TutorMetricsScreen,
 };
 
+const offerOverlayBlockedModals = new Set([
+  'Onboarding',
+  'ReviewStatus',
+  'Agreement',
+  'SessionRoom',
+  'TutorNavigation',
+  'TutorActiveSession',
+  'ActiveSession',
+  'TutorSessionSummary',
+  'SessionSummary',
+  'AvailableRequests',
+]);
+
 export function RootNavigator() {
   const { user, initializing } = useAuth();
   const insets = useSafeAreaInsets();
@@ -107,6 +120,7 @@ export function RootNavigator() {
     return String(user?.tutorProfile?.verificationStatus || user?.verificationStatus || 'pending').toLowerCase();
   }, [user?.tutorProfile?.verificationStatus, user?.verificationStatus]);
   const isVerified = verificationStatus === 'verified';
+  const shouldShowOfferOverlay = Boolean(user?.uid) && !offerOverlayBlockedModals.has(activeModal);
 
   useEffect(() => {
     authScreenRef.current = authScreen;
@@ -316,6 +330,9 @@ export function RootNavigator() {
         <View style={styles.screenContainer}>
           <ModalComponent route={{ params: modalParams }} navigate={navigate} goBack={goBack} />
         </View>
+        {shouldShowOfferOverlay ? (
+          <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -362,7 +379,9 @@ export function RootNavigator() {
       </View>
 
       {/* Global incoming class offer overlay */}
-      {!activeModal && <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />}
+      {shouldShowOfferOverlay ? (
+        <TutorOfferOverlay bottomSafeInset={insets.bottom} onNavigate={navigate} />
+      ) : null}
     </SafeAreaView>
   );
 }

@@ -19,12 +19,18 @@ function getCountdownColor(secondsLeft) {
   return '#22c55e';
 }
 
+function getOfferDismissKey(offer) {
+  if (!offer?.id) return '';
+  const revision = Number(offer.offerRevision || 0) || 0;
+  return `${offer.id}:${revision}`;
+}
+
 export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
   const { user } = useAuth();
   const { requests } = useTutorAvailableRequests(user?.uid);
   const [now, setNow] = useState(Date.now());
   const [isProcessing, setIsProcessing] = useState(false);
-  const [declinedOfferIds, setDeclinedOfferIds] = useState([]);
+  const [dismissedOfferKeys, setDismissedOfferKeys] = useState([]);
   const [latchedOffer, setLatchedOffer] = useState(null);
   const shimmer = useRef(new Animated.Value(0)).current;
   const acceptInFlight = useRef(false);
@@ -35,11 +41,12 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
 
   const visibleOffers = useMemo(() => {
     return (Array.isArray(requests) ? requests : []).filter((offer) => {
-      if (!offer?.id || declinedOfferIds.includes(offer.id)) return false;
+      const dismissKey = getOfferDismissKey(offer);
+      if (!offer?.id || dismissedOfferKeys.includes(dismissKey)) return false;
       const expiresAt = normalizeOfferExpiresAt(offer.offerExpiresAt);
       return !expiresAt || expiresAt > now;
     });
-  }, [requests, declinedOfferIds, now]);
+  }, [requests, dismissedOfferKeys, now]);
 
   const liveOffer = visibleOffers[0] || null;
 
@@ -109,7 +116,8 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
     const offer = offerToDecline || activeOffer;
     if (!offer?.id || !user?.uid) return;
 
-    setDeclinedOfferIds((prev) => [...prev, offer.id]);
+    const dismissKey = getOfferDismissKey(offer);
+    setDismissedOfferKeys((prev) => (prev.includes(dismissKey) ? prev : [...prev, dismissKey]));
     setLatchedOffer((current) => (current?.id === offer.id ? null : current));
     try {
       setIsProcessing(true);
@@ -130,9 +138,6 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
     acceptInFlight.current = true;
 
     const offerId = targetOffer.id;
-    // Immediately unmount/hide overlay to prevent any lingering or pink UI flash during transition
-    setLatchedOffer(null);
-    setDeclinedOfferIds((prev) => [...prev, offerId]);
     setIsProcessing(true);
 
     try {
@@ -156,6 +161,9 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
       const sessionId = acceptResult?.sessionId
         || await findSessionIdByRequestAndTutor({ requestId: offerId, tutorId: user.uid })
         || offerId;
+      const dismissKey = getOfferDismissKey(targetOffer);
+      setLatchedOffer((current) => (current?.id === offerId ? null : current));
+      setDismissedOfferKeys((prev) => (prev.includes(dismissKey) ? prev : [...prev, dismissKey]));
 
       if (targetOffer.mode === 'in_person' && onNavigate) {
         onNavigate('TutorNavigation', { requestId: offerId, sessionId, request: targetOffer });
@@ -174,10 +182,10 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
 
   // Auto-decline when time expires
   useEffect(() => {
-    if (activeOffer && isExpired && !isProcessing) {
+    if (liveOffer?.id && activeOffer?.id === liveOffer.id && isExpired && !isProcessing) {
       handleDecline(activeOffer);
     }
-  }, [isExpired, activeOffer, isProcessing]);
+  }, [isExpired, liveOffer?.id, activeOffer, isProcessing]);
 
   const activeOfferStatus = String(activeOffer?.status || '').toLowerCase();
   const isOfferActiveOrCompleted = [
@@ -196,7 +204,7 @@ export function TutorOfferOverlay({ bottomSafeInset = 0, onNavigate }) {
     'completed',
   ].includes(activeOfferStatus);
 
-  if (!activeOffer || isExpired || acceptInFlight.current || isOfferActiveOrCompleted) return null;
+  if (!activeOffer || isExpired || isOfferActiveOrCompleted) return null;
 
   const pricing = activeOffer.pricingSnapshot || {};
   const requestedDuration = Number(
